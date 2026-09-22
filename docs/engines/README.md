@@ -1,3 +1,3 @@
 # Engine Contracts
 
-Document each canonical engine's version, inputs, outputs, errors, monetary representation, determinism guarantees, and test vectors here.
+For every engine document its version, input/output schemas, errors, integer-money rules, determinism, preconditions, postconditions, and canonical test vectors.

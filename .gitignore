@@ -1,26 +1,7 @@
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Virtual environments
-env/
-venv/
-.venv/
-
-# Django
-*.log
-db.sqlite3
-media/
-staticfiles/
-
-# Environment and local configuration
 .env
-.env.*
-!.env.example
-
-# Tooling and OS files
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+db.sqlite3
+/staticfiles/
+.pytest_cache/
+.coverage

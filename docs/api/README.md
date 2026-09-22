@@ -1,3 +1,3 @@
 # API Contracts
 
-Versioned API schemas and example payloads belong here. The initial public prefix is `/api/v1/`.
+Versioned public endpoints live under `/api/v1/`. Add request/response examples and error schemas here before UI implementation.
