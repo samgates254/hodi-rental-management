@@ -11,5 +11,3 @@ router.register('', LeaseViewSet, basename='lease')
 
 urlpatterns = router.urls
 app_name = 'leases'
-
-urlpatterns = []

@@ -9,5 +9,3 @@ router.register('', TenantViewSet, basename='tenant')
 
 urlpatterns = router.urls
 app_name = 'tenants'
-
-urlpatterns = []

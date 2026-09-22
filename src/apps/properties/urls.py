@@ -11,5 +11,3 @@ router.register('', PropertyViewSet, basename='property')
 
 urlpatterns = router.urls
 app_name = 'properties'
-
-urlpatterns = []

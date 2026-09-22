@@ -10,5 +10,3 @@ router.register('', OrganizationViewSet, basename='organization')
 
 urlpatterns = router.urls
 app_name = 'organizations'
-
-urlpatterns = []

@@ -6,6 +6,18 @@ from apps.organizations.models import Organization, OrganizationMembership
 
 
 class OrganizationMembershipTests(TestCase):
+    def test_slug_is_generated_from_name(self):
+        organization = Organization.objects.create(name='Rongai Homes')
+
+        self.assertEqual(organization.slug, 'rongai-homes')
+
+    def test_duplicate_generated_slugs_receive_a_suffix(self):
+        first = Organization.objects.create(name='Rongai Homes')
+        second = Organization.objects.create(name='Rongai Homes')
+
+        self.assertEqual(first.slug, 'rongai-homes')
+        self.assertEqual(second.slug, 'rongai-homes-2')
+
     def test_membership_connects_user_to_organization_and_role(self):
         user = get_user_model().objects.create_user(
             username='manager',
