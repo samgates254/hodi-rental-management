@@ -4,20 +4,21 @@ Django modular monolith for a secure, multi-tenant rental-management backend.
 
 ## Layout
 
-- `src/apps/`: Django domain modules owned by backend engineers.
-- `src/application/`: use-case orchestration and transaction boundaries.
-- `src/api/v1/`: versioned API adapters and schemas.
-- `src/common/`: shared authorization, errors, idempotency, and outbox utilities.
-- `src/infrastructure/`: persistence and external-provider adapters.
-- `src/workers/`: retryable background jobs.
-- `engines/`: canonical mathematical engines owned independently of Django.
-- `tests/`: unit, integration, API, security, and end-to-end tests.
+- `backend/src/apps/`: Django domain modules owned by backend engineers.
+- `backend/src/application/`: use-case orchestration and transaction boundaries.
+- `backend/src/api/v1/`: versioned API adapters and schemas.
+- `backend/src/common/`: shared authorization, errors, idempotency, and outbox utilities.
+- `backend/src/infrastructure/`: persistence and external-provider adapters.
+- `backend/src/workers/`: retryable background jobs.
+- `backend/engines/`: canonical mathematical engines owned independently of Django.
+- `backend/tests/`: unit, integration, API, security, and end-to-end tests.
 - `frontend/`: UI team workspace; it consumes `/api/v1/` only.
 - `docs/`: shared contracts and implementation decisions.
 
 ## Run locally
 
 ```bash
+cd backend
 cp .env.example .env
 env/bin/python manage.py migrate
 env/bin/python manage.py runserver

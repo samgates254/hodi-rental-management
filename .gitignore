@@ -1,7 +1,8 @@
 __pycache__/
 *.py[cod]
 .env
-db.sqlite3
+backend/db.sqlite3
+backend/.env
 /staticfiles/
 .pytest_cache/
 .coverage

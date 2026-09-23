@@ -44,7 +44,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'ordering': ('effective_from',),
-                'constraints': [models.CheckConstraint(condition=models.Q(('effective_to__isnull', True), ('effective_to__gt', models.F('effective_from')), _connector='OR'), name='rent_schedule_end_after_start')],
+                'constraints': [models.CheckConstraint(check=models.Q(('effective_to__isnull', True), ('effective_to__gt', models.F('effective_from')), _connector='OR'), name='rent_schedule_end_after_start')],
             },
         ),
     ]

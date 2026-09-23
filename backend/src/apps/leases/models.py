@@ -45,7 +45,7 @@ class Lease(models.Model):
 				name='unique_lease_reference_per_tenant',
 			),
 			models.CheckConstraint(
-				condition=models.Q(end_date__isnull=True)
+				check=models.Q(end_date__isnull=True)
 				| models.Q(end_date__gt=models.F('start_date')),
 				name='lease_end_after_start',
 			),
@@ -109,7 +109,7 @@ class RentSchedule(models.Model):
 	class Meta:
 		constraints = [
 			models.CheckConstraint(
-				condition=models.Q(effective_to__isnull=True)
+				check=models.Q(effective_to__isnull=True)
 				| models.Q(effective_to__gt=models.F('effective_from')),
 				name='rent_schedule_end_after_start',
 			),

@@ -31,6 +31,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='lease',
-            constraint=models.CheckConstraint(condition=models.Q(('end_date__isnull', True), ('end_date__gt', models.F('start_date')), _connector='OR'), name='lease_end_after_start'),
+            constraint=models.CheckConstraint(check=models.Q(('end_date__isnull', True), ('end_date__gt', models.F('start_date')), _connector='OR'), name='lease_end_after_start'),
         ),
     ]
