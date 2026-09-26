@@ -1,0 +1,1 @@
+"""Deposit facade tests."""
