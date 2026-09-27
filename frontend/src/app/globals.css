@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-charcoal: #19202a;
+  --color-teal: #0bacaa;
+  --color-soft-teal: #e8f7f6;
+  --color-bg: #fafaf8;
+  --color-surface: #ffffff;
+  --color-text: #1c2430;
+  --color-text-secondary: #5b6573;
+  --color-border: #e6e8ec;
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --shadow-soft: 0 1px 2px rgb(25 32 42 / 0.04), 0 8px 24px rgb(25 32 42 / 0.06);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-teal) 28%, white);
+    color: var(--color-charcoal);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-teal);
+    outline-offset: 3px;
+  }
+}
+
+@layer utilities {
+  .section-pad {
+    padding-block: 4.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .section-pad {
+      padding-block: 6rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .section-pad {
+      padding-block: 7rem;
+    }
+  }
+
+  /* Sticky header offset for in-page anchors */
+  #product,
+  #how-it-works,
+  #owners,
+  #tenants,
+  #about,
+  #services,
+  #operations,
+  #problem,
+  #final-cta,
+  #main,
+  #glance,
+  #property,
+  #tenancy,
+  #finance,
+  #maintenance,
+  #connected,
+  #roles,
+  #platform-cta {
+    scroll-margin-top: 5.5rem;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+}
