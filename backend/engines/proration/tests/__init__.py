@@ -1,0 +1,1 @@
+"""Proration facade contract tests."""
