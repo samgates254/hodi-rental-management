@@ -823,7 +823,6 @@ export default function ClientDashboard() {
   const [isLoadingInvoices, setIsLoadingInvoices] = useState(true);
   const [isLoadingPayments, setIsLoadingPayments] = useState(true);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
-  const [sessionError, setSessionError] = useState("");
   const [propertyError, setPropertyError] = useState("");
   const [propertyLoadError, setPropertyLoadError] = useState("");
   const [tenancyError, setTenancyError] = useState("");
@@ -863,37 +862,18 @@ export default function ClientDashboard() {
   const headerSearchInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    let active = true;
-    clientApi
-      .get<{ user: { role?: string } | null }>("/api/auth/session", {
-      })
-      .then(response => {
-        if (!active) return;
-        const user = response.data.user;
-        if (!user || user.role?.toLowerCase() !== "client") {
-          window.location.replace("/signin");
-          return;
-        }
-        const identity = user as typeof user & {
-          name?: string;
-          full_name?: string;
-          email?: string;
-          phone?: string;
-        };
-        setClientName(identity.name ?? identity.full_name ?? "Client");
-        setClientEmail(identity.email ?? "");
-        if (identity.phone) setPhoneNumber(identity.phone);
-        setIsCheckingSession(false);
-      })
-      .catch(() => {
-        if (!active) return;
-        setSessionError("We couldn’t verify your Hodi session. Please sign in again.");
-        setIsCheckingSession(false);
-      });
-
-    return () => {
-      active = false;
-    };
+    const token = window.sessionStorage.getItem("hodi_api_token");
+    const accountType = window.sessionStorage.getItem("hodi_account_type");
+    if (!token || accountType !== "TENANT") {
+      window.location.replace("/signin?type=tenant");
+      return;
+    }
+    const firstName = window.sessionStorage.getItem("hodi_first_name") ?? "";
+    const lastName = window.sessionStorage.getItem("hodi_last_name") ?? "";
+    setClientName([firstName, lastName].filter(Boolean).join(" ") || "Client");
+    setClientEmail(window.sessionStorage.getItem("hodi_email") ?? "");
+    setPhoneNumber(window.sessionStorage.getItem("hodi_phone_number") ?? "");
+    setIsCheckingSession(false);
   }, []);
 
   const loadProperties = useCallback(async () => {
@@ -1028,13 +1008,13 @@ export default function ClientDashboard() {
   }, []);
 
   useEffect(() => {
-    if (isCheckingSession || sessionError) return;
+    if (isCheckingSession) return;
     void loadProperties();
     void loadTenancy();
     void loadIssues();
     void loadInvoices();
     void loadPayments();
-  }, [isCheckingSession, loadIssues, loadInvoices, loadPayments, loadProperties, loadTenancy, sessionError]);
+  }, [isCheckingSession, loadIssues, loadInvoices, loadPayments, loadProperties, loadTenancy]);
 
   const locations = useMemo(
     () => [...new Set(properties.map(displayLocation).filter(item => item !== "Location not listed"))].sort(),
@@ -1307,7 +1287,7 @@ export default function ClientDashboard() {
     }, { rootMargin: "-110px 0px -58% 0px", threshold: [0.05, 0.25, 0.5] });
     sections.forEach(section => observer.observe(section));
     return () => observer.disconnect();
-  }, [isCheckingSession, sessionError]);
+  }, [isCheckingSession]);
 
   useEffect(() => {
     if (!paymentRequest?.id || !["pending", "reconciling"].includes(paymentStage)) return;
@@ -1474,11 +1454,17 @@ export default function ClientDashboard() {
   async function signOut() {
     setIsSigningOut(true);
     try {
-      await clientApi.post("/api/auth/signout");
+      await clientApi.post("/api/v1/accounts/logout/");
     } catch {
       setPageNotice("We couldn’t confirm sign out with the server. Redirecting you to sign in.");
     } finally {
-      window.location.assign("/signin");
+      window.sessionStorage.removeItem("hodi_api_token");
+      window.sessionStorage.removeItem("hodi_account_type");
+      window.sessionStorage.removeItem("hodi_first_name");
+      window.sessionStorage.removeItem("hodi_last_name");
+      window.sessionStorage.removeItem("hodi_email");
+      window.sessionStorage.removeItem("hodi_phone_number");
+      window.location.assign("/signin?type=tenant");
     }
   }
 
@@ -1487,17 +1473,6 @@ export default function ClientDashboard() {
       <main className="client-dashboard dashboard-auth-check" aria-live="polite">
         <span className="dashboard-loading-spinner" aria-hidden="true" />
         <p>Checking your Hodi account…</p>
-      </main>
-    );
-  }
-
-  if (sessionError) {
-    return (
-      <main className="client-dashboard dashboard-auth-check">
-        <p className="dashboard-inline-error" role="alert">{sessionError}</p>
-        <Button type="button" onClick={() => window.location.assign("/signin")}>
-          Go to sign in
-        </Button>
       </main>
     );
   }
