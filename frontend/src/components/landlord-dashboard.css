@@ -1,0 +1,845 @@
+.landlord-app {
+  --landlord-ink: #19202a;
+  --landlord-muted: #687381;
+  --landlord-line: #e6e8ec;
+  --landlord-paper: #fff;
+  --landlord-teal: #0bacaa;
+  --landlord-soft-teal: #e8f7f6;
+  min-height: 100vh;
+  display: flex;
+  background: #f7f8f7;
+  color: var(--landlord-ink);
+}
+
+.landlord-app *,
+.landlord-login * {
+  box-sizing: border-box;
+}
+
+.landlord-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 5;
+  width: 248px;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 18px 20px;
+  background: var(--landlord-ink);
+  color: #fff;
+}
+
+.landlord-wordmark {
+  width: fit-content;
+  color: inherit;
+  text-decoration: none;
+  font-size: 30px;
+  font-weight: 750;
+  letter-spacing: -1.8px;
+}
+
+.landlord-wordmark span {
+  color: var(--landlord-teal);
+}
+
+.landlord-sidebar-label,
+.landlord-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.25px;
+}
+
+.landlord-sidebar-label {
+  margin: 52px 12px 12px;
+  color: #9ca7b5;
+}
+
+.landlord-nav {
+  display: grid;
+  gap: 5px;
+}
+
+.landlord-nav a {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 0 12px;
+  border-radius: 9px;
+  color: #cbd2da;
+  text-decoration: none;
+  font-size: 14px;
+  transition: background .18s ease, color .18s ease;
+}
+
+.landlord-nav a:hover,
+.landlord-nav a.is-active {
+  background: #293542;
+  color: #fff;
+}
+
+.landlord-nav a.is-active {
+  box-shadow: inset 3px 0 var(--landlord-teal);
+}
+
+.landlord-sidebar-bottom {
+  margin-top: auto;
+}
+
+.landlord-sidebar-bottom .landlord-sidebar-label {
+  margin: 0 10px 12px;
+  font-size: 9px;
+}
+
+.landlord-back-link {
+  display: block;
+  padding: 10px;
+  color: #cbd2da;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.landlord-main {
+  width: calc(100% - 248px);
+  max-width: 1600px;
+  margin-left: 248px;
+  padding: 0 42px 30px;
+}
+
+.landlord-topbar {
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--landlord-line);
+}
+
+.landlord-topbar .landlord-eyebrow,
+.landlord-welcome .landlord-eyebrow,
+.landlord-section-heading .landlord-eyebrow {
+  color: #778391;
+}
+
+.landlord-topbar h1 {
+  margin: 4px 0 0;
+  font-family: var(--font-display, Georgia), Georgia, serif;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -.5px;
+}
+
+.landlord-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.landlord-preview-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 20px 0 0;
+  padding: 12px 16px;
+  border: 1px solid #b9e8e4;
+  border-radius: 9px;
+  background: var(--landlord-soft-teal);
+  color: #176c69;
+  font-size: 13px;
+}
+
+.landlord-preview-banner a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.landlord-org-select select,
+.landlord-form input {
+  width: 100%;
+  border: 1px solid var(--landlord-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--landlord-ink);
+}
+
+.landlord-org-select select {
+  min-width: 170px;
+  height: 40px;
+  padding: 0 30px 0 12px;
+}
+
+.landlord-button,
+.landlord-icon-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+
+.landlord-button {
+  padding: 0 14px;
+}
+
+.landlord-button:disabled,
+.landlord-icon-button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.landlord-button--primary {
+  background: var(--landlord-ink);
+  color: #fff;
+}
+
+.landlord-button--primary:hover:not(:disabled) {
+  background: #2b3745;
+}
+
+.landlord-button--quiet {
+  border-color: var(--landlord-line);
+  background: #fff;
+  color: var(--landlord-ink);
+}
+
+.landlord-button--quiet:hover:not(:disabled),
+.landlord-icon-button:hover:not(:disabled) {
+  border-color: #c5ccd4;
+  background: #f8fafb;
+}
+
+.landlord-icon-button {
+  width: 40px;
+  border-color: var(--landlord-line);
+  background: #fff;
+  color: var(--landlord-ink);
+}
+
+.landlord-welcome {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  padding: 34px 0 22px;
+}
+
+.landlord-welcome h2,
+.landlord-section-heading h2 {
+  margin: 5px 0 0;
+  font-family: var(--font-display, Georgia), Georgia, serif;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -.55px;
+}
+
+.landlord-welcome p:last-child {
+  margin: 8px 0 0;
+  color: var(--landlord-muted);
+  font-size: 14px;
+}
+
+.landlord-loading-label {
+  color: var(--landlord-muted);
+  font-size: 12px;
+}
+
+.landlord-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.landlord-metric-card {
+  min-height: 137px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  border: 1px solid var(--landlord-line);
+  border-radius: 12px;
+  background: var(--landlord-paper);
+}
+
+.landlord-metric-card > span {
+  color: var(--landlord-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.landlord-metric-card strong {
+  margin-top: 15px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -.7px;
+}
+
+.landlord-metric-card small {
+  margin-top: 3px;
+  color: var(--landlord-muted);
+  font-size: 11px;
+}
+
+.landlord-metric-card--accent {
+  border-color: #d2efec;
+  background: var(--landlord-soft-teal);
+}
+
+.landlord-metric-card--accent strong {
+  font-size: 24px;
+}
+
+.landlord-section {
+  margin-top: 40px;
+  scroll-margin-top: 22px;
+}
+
+.landlord-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.landlord-section-heading h2 {
+  font-size: 22px;
+}
+
+.landlord-section-count {
+  padding: 7px 10px;
+  border-radius: 20px;
+  background: #eef1f3;
+  color: var(--landlord-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.landlord-property-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.landlord-property-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--landlord-line);
+  border-radius: 12px;
+  background: var(--landlord-paper);
+}
+
+.landlord-property-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.landlord-property-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--landlord-soft-teal);
+  color: #087c7b;
+}
+
+.landlord-property-card h3 {
+  margin: 17px 0 5px;
+  font-size: 16px;
+}
+
+.landlord-property-card > p {
+  min-height: 34px;
+  margin: 0;
+  color: var(--landlord-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.landlord-property-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 13px;
+  border-top: 1px solid #eff1f2;
+}
+
+.landlord-property-meta span {
+  color: var(--landlord-muted);
+  font-size: 10px;
+}
+
+.landlord-status {
+  display: inline-flex;
+  padding: 5px 8px;
+  border-radius: 20px;
+  background: #f0f1f2;
+  color: #65717e;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.landlord-status.is-active {
+  background: #e8f7ee;
+  color: #287548;
+}
+
+.landlord-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--landlord-line);
+  border-radius: 12px;
+  background: var(--landlord-paper);
+}
+
+.landlord-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.landlord-table th {
+  padding: 13px 16px;
+  background: #fafbfb;
+  color: #7a8591;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .55px;
+  text-transform: uppercase;
+}
+
+.landlord-table td {
+  padding: 14px 16px;
+  border-top: 1px solid #eff1f2;
+  color: #4e5a68;
+  font-size: 12px;
+}
+
+.landlord-table td strong {
+  color: var(--landlord-ink);
+}
+
+.landlord-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.landlord-person > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.landlord-person small {
+  color: var(--landlord-muted);
+  font-size: 10px;
+}
+
+.landlord-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--landlord-soft-teal);
+  color: #087c7b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.landlord-empty-state,
+.landlord-empty-workspace {
+  padding: 28px;
+  border: 1px dashed #d4d9df;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.landlord-empty-state h3,
+.landlord-empty-workspace h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.landlord-empty-state p,
+.landlord-empty-workspace p {
+  margin: 7px 0 0;
+  color: var(--landlord-muted);
+  font-size: 12px;
+}
+
+.landlord-empty-workspace {
+  max-width: 580px;
+  margin: 60px auto;
+  padding: 40px;
+  text-align: center;
+}
+
+.landlord-empty-icon {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 18px;
+  border-radius: 14px;
+  background: var(--landlord-soft-teal);
+  color: #087c7b;
+}
+
+.landlord-inline-form {
+  margin-bottom: 16px;
+  padding: 20px;
+  border: 1px solid var(--landlord-line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.landlord-inline-form h3 {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+
+.landlord-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.landlord-form label {
+  display: grid;
+  gap: 6px;
+  color: #4d5865;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.landlord-form-grid label {
+  display: grid;
+  gap: 6px;
+  color: #4d5865;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.landlord-form input,
+.landlord-form-grid input {
+  height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--landlord-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--landlord-ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.landlord-form input:focus,
+.landlord-form-grid input:focus {
+  border-color: var(--landlord-teal);
+  outline: 2px solid #0bacaa2e;
+}
+
+.landlord-form-wide {
+  grid-column: 1 / -1;
+}
+
+.landlord-optional {
+  color: #8a949f;
+  font-weight: 400;
+}
+
+.landlord-form-actions {
+  display: flex;
+  justify-content: end;
+  gap: 8px;
+  margin-top: 17px;
+}
+
+.landlord-alert,
+.landlord-notice {
+  margin-top: 18px;
+  padding: 12px 15px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.landlord-alert {
+  border: 1px solid #f2c7c7;
+  background: #fff1f1;
+  color: #8f2525;
+}
+
+.landlord-notice {
+  border: 1px solid #c8e7d1;
+  background: #edf9f1;
+  color: #23613b;
+}
+
+.landlord-footer {
+  margin-top: 48px;
+  padding: 20px 0 4px;
+  border-top: 1px solid var(--landlord-line);
+  color: #89939e;
+  font-size: 11px;
+}
+
+.landlord-footer span {
+  padding-inline: 4px;
+}
+
+.landlord-login {
+  --landlord-ink: #19202a;
+  --landlord-muted: #687381;
+  --landlord-line: #e6e8ec;
+  --landlord-teal: #0bacaa;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: #f7f8f7;
+  color: var(--landlord-ink);
+}
+
+.landlord-login > .landlord-wordmark {
+  position: absolute;
+  top: 28px;
+  left: 34px;
+  color: var(--landlord-ink);
+}
+
+.landlord-login-card {
+  width: min(100%, 440px);
+  padding: 38px;
+  border: 1px solid var(--landlord-line);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgb(25 32 42 / 7%);
+}
+
+.landlord-login-card .landlord-eyebrow {
+  color: #75818d;
+}
+
+.landlord-login-card h1 {
+  margin: 12px 0 7px;
+  font-family: var(--font-display, Georgia), Georgia, serif;
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -.8px;
+}
+
+.landlord-login-card > p {
+  margin: 0;
+  color: var(--landlord-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.landlord-login-card .landlord-form {
+  display: grid;
+  gap: 15px;
+  margin-top: 24px;
+}
+
+.landlord-login-card .landlord-form .landlord-button {
+  min-height: 46px;
+  margin-top: 2px;
+}
+
+.landlord-login-note {
+  margin-top: 17px !important;
+  font-size: 11px !important;
+  text-align: center;
+}
+
+.landlord-error {
+  margin: 0;
+  color: #a52d2d;
+  font-size: 12px;
+}
+
+.landlord-create-organization {
+  margin-top: 20px;
+}
+
+.landlord-create-organization-form {
+  max-width: 380px;
+  margin: 22px auto 0;
+  text-align: left;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@media (max-width: 1100px) {
+  .landlord-main {
+    padding-inline: 26px;
+  }
+
+  .landlord-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landlord-property-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .landlord-sidebar {
+    position: static;
+    width: auto;
+    min-height: auto;
+    flex: 0 0 auto;
+    padding: 13px 15px;
+  }
+
+  .landlord-app {
+    display: block;
+  }
+
+  .landlord-sidebar .landlord-wordmark {
+    font-size: 25px;
+  }
+
+  .landlord-sidebar-label,
+  .landlord-nav,
+  .landlord-sidebar-bottom {
+    display: none;
+  }
+
+  .landlord-main {
+    width: 100%;
+    margin: 0;
+    padding: 0 16px 24px;
+  }
+
+  .landlord-topbar {
+    min-height: 82px;
+  }
+
+  .landlord-topbar h1 {
+    font-size: 20px;
+  }
+
+  .landlord-topbar-actions {
+    gap: 6px;
+  }
+
+  .landlord-topbar-actions .landlord-button--quiet {
+    width: 40px;
+    overflow: hidden;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .landlord-org-select select {
+    min-width: 110px;
+    max-width: 145px;
+    font-size: 11px;
+  }
+
+  .landlord-welcome {
+    align-items: start;
+    flex-direction: column;
+    padding-top: 26px;
+  }
+
+  .landlord-welcome h2 {
+    font-size: 23px;
+  }
+
+  .landlord-metrics {
+    gap: 9px;
+  }
+
+  .landlord-metric-card {
+    min-height: 120px;
+    padding: 14px;
+  }
+
+  .landlord-metric-card strong {
+    font-size: 23px;
+  }
+
+  .landlord-metric-card--accent strong {
+    font-size: 19px;
+  }
+
+  .landlord-property-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landlord-section {
+    margin-top: 32px;
+  }
+
+  .landlord-section-heading {
+    align-items: start;
+  }
+
+  .landlord-section-heading h2 {
+    font-size: 20px;
+  }
+
+  .landlord-section-heading .landlord-button {
+    min-height: 37px;
+    padding: 0 10px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .landlord-inline-form {
+    padding: 15px;
+  }
+
+  .landlord-empty-workspace {
+    margin: 40px auto;
+    padding: 28px 20px;
+  }
+}
+
+@media (max-width: 430px) {
+  .landlord-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landlord-form-wide {
+    grid-column: auto;
+  }
+
+  .landlord-metric-card > span {
+    min-height: 28px;
+    font-size: 10px;
+  }
+
+  .landlord-topbar .landlord-eyebrow {
+    font-size: 8px;
+  }
+
+  .landlord-topbar h1 {
+    max-width: 135px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
