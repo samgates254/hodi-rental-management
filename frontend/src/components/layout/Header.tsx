@@ -5,7 +5,7 @@ import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { cn } from "@/lib/cn";
-import { demoMailto, primaryNav } from "@/lib/site";
+import { primaryNav } from "@/lib/site";
 
 const NAV = primaryNav;
 
@@ -74,10 +74,10 @@ export function Header() {
         </nav>
 
         <div className="hidden items-center gap-2 lg:flex">
-          <Button href="/#final-cta" variant="ghost" size="sm">
+          <Button href="/signin" variant="ghost" size="sm">
             Log in
           </Button>
-          <Button href={demoMailto} external size="sm">
+          <Button href="/signup" size="sm">
             Get Started
           </Button>
         </div>
@@ -131,14 +131,14 @@ export function Header() {
           ))}
           <div className="mt-3 flex flex-col gap-2 border-t border-border pt-4">
             <a
-              href="/#final-cta"
+              href="/signin"
               onClick={close}
               className="inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface text-sm font-medium text-charcoal"
             >
               Log in
             </a>
             <a
-              href={demoMailto}
+              href="/signup"
               onClick={close}
               className="inline-flex h-11 items-center justify-center rounded-md bg-teal text-sm font-medium text-white"
             >

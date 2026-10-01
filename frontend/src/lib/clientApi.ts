@@ -33,12 +33,14 @@ async function request<T>(
   options: ApiRequestOptions = {},
 ): Promise<ApiResponse<T>> {
   const isFormData = body instanceof FormData;
+  const token = window.sessionStorage.getItem("hodi_api_token");
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Token ${token}`);
+  if (body !== undefined && !isFormData) headers.set("Content-Type", "application/json");
   const response = await fetch(requestUrl(path, options.params), {
     method,
     credentials: "same-origin",
-    headers: body !== undefined && !isFormData
-      ? { "Content-Type": "application/json" }
-      : undefined,
+    headers,
     body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
   });
 

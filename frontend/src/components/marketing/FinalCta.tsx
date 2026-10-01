@@ -33,11 +33,17 @@ export function FinalCta() {
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button
-              href="mailto:hello@hodi.app?subject=Get%20started%20with%20Hodi"
-              external
+              href="/signup"
               size="lg"
             >
-              Get Started
+              Create an account
+            </Button>
+            <Button
+              href="/signin"
+              variant="outline-light"
+              size="lg"
+            >
+              Sign in
             </Button>
             <Button
               href="mailto:hello@hodi.app?subject=Talk%20to%20Hodi"
