@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { clientApi, ClientApiError } from "@/lib/clientApi";
+import { Logo } from "@/components/layout/Logo";
 
 type UserKind = "tenant" | "landlord";
 type AuthMode = "signin" | "signup";
@@ -114,65 +115,118 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
   const isSignup = mode === "signup";
 
+  const modePath = isSignup ? "signup" : "signin";
+
   return (
-    <main className="min-h-screen bg-[#f7f8f7] px-5 py-12 text-[#19202a] sm:px-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col">
-        <Link href="/" className="w-fit text-3xl font-extrabold tracking-[-0.08em]">
-          hodi<span className="text-[#0bacaa]">.</span>
-        </Link>
-        <div className="grid flex-1 items-center gap-12 py-12 lg:grid-cols-[1fr_440px]">
-          <section className="hidden max-w-lg lg:block">
+    <main
+      className={`bg-[#f7f8f7] px-5 text-[#19202a] sm:px-8 ${
+        isSignup
+          ? "auth-page-signup flex min-h-dvh flex-col py-5 sm:py-6"
+          : "flex min-h-screen flex-col py-12"
+      }`}
+    >
+      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
+        <Logo size={isSignup ? 36 : 40} className="w-fit shrink-0" />
+
+        <div
+          className={`grid flex-1 gap-10 lg:grid-cols-[1fr_440px] ${
+            isSignup
+              ? "min-h-0 items-start gap-8 pt-8 lg:items-start lg:pt-16"
+              : "items-center gap-12 py-12"
+          }`}
+        >
+          <section
+            className={`hidden max-w-lg lg:block ${
+              isSignup ? "pt-6 lg:pt-10" : ""
+            }`}
+          >
             <p className="text-xs font-bold tracking-[0.18em] text-[#0a9290]">
               PROPERTY OPERATIONS, CONNECTED
             </p>
-            <h1 className="mt-5 font-display text-5xl font-semibold leading-tight tracking-tight">
+            <h1
+              className={`font-display font-semibold leading-tight tracking-tight ${
+                isSignup
+                  ? "mt-3 text-4xl xl:text-5xl"
+                  : "mt-5 text-5xl"
+              }`}
+            >
               {userKind === "landlord"
                 ? "Run your portfolio with clarity."
                 : "Feel at home with Hodi."}
             </h1>
-            <p className="mt-5 text-base leading-7 text-[#687381]">
+            <p
+              className={`text-base text-[#687381] ${
+                isSignup ? "mt-3 leading-6" : "mt-5 leading-7"
+              }`}
+            >
               {userKind === "landlord"
                 ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
                 : "Keep your home, rent, and maintenance updates connected in one dependable place."}
             </p>
-            <div className="mt-8 flex gap-3 text-sm">
-              <Link className="font-semibold text-[#168582] underline-offset-4 hover:underline" href="/signin?type=landlord">
+            <div className={`flex gap-3 text-sm ${isSignup ? "mt-5" : "mt-8"}`}>
+              <Link
+                className="font-semibold text-[#168582] underline-offset-4 hover:underline"
+                href={`/${modePath}?type=landlord`}
+              >
                 Landlord access
               </Link>
               <span className="text-[#9ba4ac]">·</span>
-              <Link className="font-semibold text-[#168582] underline-offset-4 hover:underline" href="/signin?type=tenant">
+              <Link
+                className="font-semibold text-[#168582] underline-offset-4 hover:underline"
+                href={`/${modePath}?type=tenant`}
+              >
                 Client access
               </Link>
             </div>
           </section>
 
-          <section className="w-full rounded-2xl border border-[#e6e8ec] bg-white p-7 shadow-[0_18px_50px_rgba(25,32,42,0.07)] sm:p-10">
-            <p className="text-[10px] font-bold tracking-[0.16em] text-[#778391]">
-              {userKind === "landlord" ? "LANDLORD PORTAL" : "CLIENT PORTAL"}
-            </p>
-            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight">
-              {isSignup ? "Create your account" : "Welcome back"}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-[#687381]">
-              {isSignup
-                ? "Choose how you use Hodi to get started."
-                : "Sign in to continue to your Hodi dashboard."}
-            </p>
+          <section
+            className={`w-full rounded-2xl border border-[#e6e8ec] bg-white shadow-[0_18px_50px_rgba(25,32,42,0.07)] ${
+              isSignup
+                ? "-mt-1 p-5 sm:p-6 lg:-mt-4"
+                : "p-7 sm:p-10"
+            }`}
+          >
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0a9290]">
+                  {isSignup ? "Create account" : "Welcome back"}
+                </p>
+                <h2
+                  className={`text-2xl font-semibold tracking-tight ${
+                    isSignup ? "mt-1.5" : "mt-2"
+                  }`}
+                >
+                  {isSignup ? "Sign up" : "Sign in"}
+                </h2>
+              </div>
+              <p className="hidden text-right text-sm text-[#687381] sm:block">
+                {userKind === "landlord" ? "Landlord" : "Client / tenant"}
+              </p>
+            </div>
 
-            <div className="mt-6 grid grid-cols-2 gap-2 rounded-lg bg-[#f3f5f5] p-1">
+            <div
+              className={`relative grid grid-cols-2 gap-2 rounded-xl bg-[#f3f5f4] p-1 ${
+                isSignup ? "mt-4" : "mt-6"
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.375rem)] rounded-lg bg-[#0bacaa] shadow-sm transition-transform duration-300 ease-out ${
+                  userKind === "tenant" ? "translate-x-[calc(100%+0.5rem)]" : "translate-x-0"
+                }`}
+              />
               {(["landlord", "tenant"] as const).map(kind => (
                 <button
                   key={kind}
                   type="button"
-                  aria-pressed={userKind === kind}
-                  onClick={() => {
-                    setUserKind(kind);
-                    setError("");
-                  }}
-                  className={`min-h-10 rounded-md px-3 text-sm font-semibold transition-colors ${
+                  onClick={() => setUserKind(kind)}
+                  className={`relative z-10 rounded-lg px-3 text-sm transition-colors duration-300 ${
+                    isSignup ? "py-2" : "py-2.5"
+                  } ${
                     userKind === kind
-                      ? "bg-white text-[#19202a] shadow-sm"
-                      : "text-[#687381] hover:text-[#19202a]"
+                      ? "font-semibold text-white"
+                      : "font-medium text-[#687381] hover:text-[#19202a]"
                   }`}
                 >
                   {kind === "landlord" ? "Landlord" : "Client / tenant"}
@@ -180,66 +234,126 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
               ))}
             </div>
 
-            <form className="mt-6 grid gap-4" onSubmit={submit}>
+            <form
+              className={`grid ${isSignup ? "mt-4 gap-2.5" : "mt-6 gap-4"}`}
+              onSubmit={submit}
+            >
               {isSignup && (
                 <>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-medium">
                       First name
-                      <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="first_name" autoComplete="given-name" required maxLength={150} />
+                      <input
+                        name="first_name"
+                        className="auth-input"
+                        autoComplete="given-name"
+                        required
+                      />
                     </label>
-                    <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+                    <label className="grid gap-1 text-sm font-medium">
                       Last name
-                      <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="last_name" autoComplete="family-name" required maxLength={150} />
+                      <input
+                        name="last_name"
+                        className="auth-input"
+                        autoComplete="family-name"
+                        required
+                      />
                     </label>
                   </div>
-                  <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                    Email
-                    <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="email" type="email" autoComplete="email" required />
-                  </label>
-                  <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                    Phone number
-                    <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="phone_number" type="tel" autoComplete="tel" maxLength={30} />
-                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-medium">
+                      Email
+                      <input
+                        name="email"
+                        className="auth-input"
+                        type="email"
+                        autoComplete="email"
+                        required
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      Phone number
+                      <input
+                        name="phone_number"
+                        className="auth-input"
+                        type="tel"
+                        autoComplete="tel"
+                        required
+                      />
+                    </label>
+                  </div>
                   {userKind === "landlord" && (
-                    <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+                    <label className="grid gap-1 text-sm font-medium">
                       Organization name
-                      <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="organization_name" required maxLength={200} placeholder="e.g. Acacia Property Group" />
+                      <input name="organization_name" className="auth-input" required />
                     </label>
                   )}
                 </>
               )}
-              <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+
+              <label className={`grid text-sm font-medium ${isSignup ? "gap-1" : "gap-1.5"}`}>
                 Username
-                <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="username" autoComplete="username" required maxLength={150} />
+                <input name="username" className="auth-input" autoComplete="username" required />
               </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                Password
-                <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="password" type="password" autoComplete={isSignup ? "new-password" : "current-password"} required minLength={8} />
-              </label>
-              {isSignup && (
-                <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                  Confirm password
-                  <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="password_confirm" type="password" autoComplete="new-password" required minLength={8} />
+
+              {isSignup ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1 text-sm font-medium">
+                    Password
+                    <input
+                      name="password"
+                      className="auth-input"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium">
+                    Confirm password
+                    <input
+                      name="password_confirm"
+                      className="auth-input"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                    />
+                  </label>
+                </div>
+              ) : (
+                <label className="grid gap-1.5 text-sm font-medium">
+                  Password
+                  <input
+                    name="password"
+                    className="auth-input"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                  />
                 </label>
               )}
-              {error && <p className="m-0 text-sm text-[#a52d2d]" role="alert">{error}</p>}
+
+              {error ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {error}
+                </p>
+              ) : null}
+
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="mt-1 inline-flex min-h-11 items-center justify-center rounded-md bg-[#0bacaa] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#099996] disabled:cursor-wait disabled:opacity-60"
+                className={`mt-1 inline-flex items-center justify-center rounded-xl bg-[#0bacaa] px-4 text-sm font-semibold text-white transition hover:bg-[#099693] disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isSignup ? "h-10" : "h-11"
+                }`}
               >
-                {isSubmitting
-                  ? isSignup ? "Creating account…" : "Signing in…"
-                  : isSignup ? "Create account" : "Sign in"}
+                {isSubmitting ? "Please wait…" : isSignup ? "Create account" : "Sign in"}
               </button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-[#687381]">
+            <p className={`text-center text-sm text-[#687381] ${isSignup ? "mt-4" : "mt-6"}`}>
               {isSignup ? "Already have an account?" : "New to Hodi?"}{" "}
               <Link
-                href={`${isSignup ? "/signin" : "/signup"}?type=${userKind}`}
-                className="font-semibold text-[#087d7a] hover:underline"
+                href={isSignup ? `/signin?type=${userKind}` : `/signup?type=${userKind}`}
+                className="font-semibold text-[#168582] underline-offset-4 hover:underline"
               >
                 {isSignup ? "Sign in" : "Create an account"}
               </Link>

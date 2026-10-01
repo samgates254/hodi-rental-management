@@ -3,8 +3,10 @@
 import {
   useEffect,
   useId,
+  useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { Button } from "@/components/ui/Button";
@@ -424,20 +426,14 @@ export function ContactForm({
         optional
         error={errors.portfolio}
       >
-        <select
+        <PortfolioSizeSelect
           id={`${formId}-portfolio`}
           name="portfolio"
           value={values.portfolio}
-          onChange={(e) => setField("portfolio", e.target.value)}
+          invalid={Boolean(errors.portfolio)}
+          onChange={(next) => setField("portfolio", next)}
           onBlur={() => onBlur("portfolio")}
-          className={cn(inputClass(false), "bg-surface")}
-        >
-          {portfolioSizes.map((opt) => (
-            <option key={opt.value || "empty"} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        />
       </Field>
 
       <Field
@@ -515,6 +511,238 @@ function inputClass(invalid: boolean) {
     "placeholder:text-text-secondary/70",
     "focus:border-teal focus:ring-1 focus:ring-teal/30",
     invalid ? "border-charcoal/40 ring-1 ring-charcoal/15" : "border-border",
+  );
+}
+
+const portfolioChoices = portfolioSizes.filter((opt) => opt.value !== "");
+
+function PortfolioSizeSelect({
+  id,
+  name,
+  value,
+  invalid,
+  onChange,
+  onBlur,
+}: {
+  id: string;
+  name: string;
+  value: string;
+  invalid?: boolean;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+}) {
+  const listId = `${id}-listbox`;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(() => {
+    const idx = portfolioChoices.findIndex((opt) => opt.value === value);
+    return idx >= 0 ? idx : 0;
+  });
+
+  const selected = portfolioChoices.find((opt) => opt.value === value);
+  const label = selected?.label ?? "Select portfolio size";
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        onBlur?.();
+      }
+    }
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        buttonRef.current?.focus();
+        onBlur?.();
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onBlur]);
+
+  useEffect(() => {
+    if (!open) return;
+    const idx = portfolioChoices.findIndex((opt) => opt.value === value);
+    setActiveIndex(idx >= 0 ? idx : 0);
+  }, [open, value]);
+
+  function choose(next: string) {
+    onChange(next);
+    setOpen(false);
+    buttonRef.current?.focus();
+    onBlur?.();
+  }
+
+  function moveActive(delta: number) {
+    setActiveIndex((i) => {
+      const next = i + delta;
+      if (next < 0) return portfolioChoices.length - 1;
+      if (next >= portfolioChoices.length) return 0;
+      return next;
+    });
+  }
+
+  function onMenuKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!open) setOpen(true);
+      else moveActive(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) setOpen(true);
+      else moveActive(-1);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(0);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(portfolioChoices.length - 1);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!open) {
+        setOpen(true);
+        return;
+      }
+      const opt = portfolioChoices[activeIndex];
+      if (opt) choose(opt.value);
+      return;
+    }
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      setOpen(false);
+      buttonRef.current?.focus();
+      onBlur?.();
+      return;
+    }
+    if (event.key === "Tab" && open) {
+      setOpen(false);
+      onBlur?.();
+    }
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <input type="hidden" name={name} value={value} />
+      <button
+        ref={buttonRef}
+        type="button"
+        id={id}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-invalid={invalid || undefined}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={onMenuKeyDown}
+        onBlur={(event) => {
+          if (!rootRef.current?.contains(event.relatedTarget as Node)) {
+            setOpen(false);
+            onBlur?.();
+          }
+        }}
+        className={cn(
+          "flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm shadow-sm outline-none transition-[border-color,box-shadow,background-color,color]",
+          "focus-visible:border-teal focus-visible:ring-2 focus-visible:ring-teal/25",
+          open
+            ? "border-teal bg-surface ring-2 ring-teal/20"
+            : invalid
+              ? "border-charcoal/40 bg-soft-teal/40 ring-1 ring-charcoal/15"
+              : "border-teal/30 bg-soft-teal/45 hover:border-teal/50 hover:bg-soft-teal/75",
+          selected ? "text-charcoal" : "text-text-secondary",
+        )}
+      >
+        <span className="min-w-0 truncate font-medium">{label}</span>
+        <span
+          aria-hidden
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-teal/10 text-teal transition-transform duration-200",
+            open && "rotate-180 bg-teal text-white",
+          )}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M4 6.25 8 10l4-3.75"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      </button>
+
+      {open ? (
+        <ul
+          id={listId}
+          role="listbox"
+          tabIndex={-1}
+          aria-labelledby={id}
+          aria-activedescendant={`${id}-opt-${activeIndex}`}
+          className="absolute z-30 mt-2 max-h-64 w-full overflow-auto rounded-2xl border border-teal/20 bg-surface p-1.5 shadow-[0_18px_40px_-18px_rgba(25,32,42,0.35)] ring-1 ring-charcoal/5"
+        >
+          {portfolioChoices.map((opt, index) => {
+            const isSelected = opt.value === value;
+            const isActive = index === activeIndex;
+            return (
+              <li
+                key={opt.value}
+                id={`${id}-opt-${index}`}
+                role="option"
+                aria-selected={isSelected}
+                onMouseEnter={() => setActiveIndex(index)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(opt.value)}
+                className={cn(
+                  "flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors",
+                  isSelected
+                    ? "bg-soft-teal font-semibold text-charcoal"
+                    : isActive
+                      ? "bg-bg text-charcoal"
+                      : "text-charcoal/85 hover:bg-soft-teal/70 hover:text-charcoal",
+                )}
+              >
+                <span>{opt.label}</span>
+                {isSelected ? (
+                  <span
+                    aria-hidden
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-teal text-white"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M2.5 6.2 4.8 8.5 9.5 3.5"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

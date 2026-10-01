@@ -7,6 +7,7 @@ export const primaryNav = [
 ] as const;
 
 export const footerProduct = [
+  { label: "Home", href: "/" },
   { label: "Platform", href: "/platform" },
   { label: "Solutions", href: "/solutions" },
   { label: "How it works", href: "/#how-it-works" },
