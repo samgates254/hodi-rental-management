@@ -1,9 +1,17 @@
+from django.conf import settings
 from django.db import models
 
 from apps.organizations.models import Organization
 
 
 class Tenant(models.Model):
+	user = models.OneToOneField(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name='tenant_record',
+	)
 	organization = models.ForeignKey(
 		Organization,
 		on_delete=models.CASCADE,
