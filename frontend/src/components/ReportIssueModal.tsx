@@ -1,7 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "./ui/Button";
+
+const MAX_ATTACHMENTS = 5;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
 export default function ReportIssueModal({
   onClose,
@@ -14,13 +18,52 @@ export default function ReportIssueModal({
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+
+  useEffect(() => {
+    const urls = attachments.map(file => URL.createObjectURL(file));
+    setPreviews(urls);
+    return () => urls.forEach(url => URL.revokeObjectURL(url));
+  }, [attachments]);
+
+  function addAttachments(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const selected = Array.from(fileList);
+    if (attachments.length + selected.length > MAX_ATTACHMENTS) {
+      setError(`Choose no more than ${MAX_ATTACHMENTS} photos and videos combined.`);
+      return;
+    }
+    const oversized = selected.find(file =>
+      file.type.startsWith("image/")
+        ? file.size > MAX_IMAGE_BYTES
+        : file.type.startsWith("video/")
+          ? file.size > MAX_VIDEO_BYTES
+          : true,
+    );
+    if (oversized) {
+      setError(
+        oversized.type.startsWith("video/")
+          ? `${oversized.name} is too large. Videos must be 50 MB or smaller.`
+          : oversized.type.startsWith("image/")
+            ? `${oversized.name} is too large. Photos must be 10 MB or smaller.`
+            : "Only photo and video files can be attached.",
+      );
+      return;
+    }
+    setError("");
+    setAttachments(current => [...current, ...selected]);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (error) return;
     setError("");
     setIsSubmitting(true);
     try {
-      await onSubmit(new FormData(event.currentTarget));
+      const formData = new FormData(event.currentTarget);
+      attachments.forEach(file => formData.append("attachments", file));
+      await onSubmit(formData);
     } catch (submitError) {
       setError(submitError instanceof Error
         ? submitError.message
@@ -81,10 +124,68 @@ export default function ReportIssueModal({
             Describe the issue
             <textarea name="description" required rows={4} maxLength={3000} />
           </label>
-          <label>
-            Add photos <span className="portal-field-optional">(optional, up to 5)</span>
-            <input name="images" type="file" accept="image/*" multiple />
-          </label>
+          <fieldset className="portal-issue-media">
+            <legend>Photos and videos <span className="portal-field-optional">(optional, up to 5)</span></legend>
+            <div className="portal-issue-media-actions">
+              <label className="portal-media-button">
+                Take photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={event => {
+                    addAttachments(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              <label className="portal-media-button">
+                Record video
+                <input
+                  type="file"
+                  accept="video/*"
+                  capture="environment"
+                  onChange={event => {
+                    addAttachments(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              <label className="portal-media-button">
+                Choose files
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  onChange={event => {
+                    addAttachments(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            <small className="portal-field-optional">Photos up to 10 MB each; videos up to 50 MB each.</small>
+            {attachments.length > 0 && (
+              <div className="portal-issue-media-list">
+                {attachments.map((file, index) => (
+                  <div className="portal-issue-media-item" key={`${file.name}-${file.lastModified}-${index}`}>
+                    {file.type.startsWith("video/")
+                      ? <video src={previews[index]} controls preload="metadata" aria-label={`Preview ${file.name}`} />
+                      : <img src={previews[index]} alt={`Preview ${file.name}`} />}
+                    <span title={file.name}>{file.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => {
+                        setError("");
+                        setAttachments(current => current.filter((_, fileIndex) => fileIndex !== index));
+                      }}
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </fieldset>
           {error && <p className="dashboard-form-error" role="alert">{error}</p>}
           <div className="portal-issue-actions">
             <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>Cancel</Button>

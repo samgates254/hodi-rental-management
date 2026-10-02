@@ -14,8 +14,19 @@ Content-Type: application/json
 Response:
 
 ```json
-{"token": "..."}
+{
+  "token": "...",
+  "memberships": [
+    {
+      "organization_id": 1,
+      "organization_name": "Rongai Homes",
+      "role": "CARETAKER"
+    }
+  ]
+}
 ```
+
+`memberships` contains active memberships in active organizations.
 
 ## Authenticated requests
 

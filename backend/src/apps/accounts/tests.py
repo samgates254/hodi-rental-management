@@ -4,6 +4,8 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
+from apps.organizations.models import Organization, OrganizationMembership
+
 
 class HealthCheckTests(TestCase):
     def test_health_endpoint_returns_ok(self):
@@ -30,6 +32,40 @@ class AuthenticationApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['token'])
+        self.assertEqual(response.data['memberships'], [])
+
+    def test_login_returns_active_organization_membership_details(self):
+        organization = Organization.objects.create(name='Rongai Homes')
+        OrganizationMembership.objects.create(
+            organization=organization,
+            user=self.user,
+            role=OrganizationMembership.Role.CARETAKER,
+        )
+        inactive_organization = Organization.objects.create(
+            name='Inactive Homes',
+            is_active=False,
+        )
+        OrganizationMembership.objects.create(
+            organization=inactive_organization,
+            user=self.user,
+            role=OrganizationMembership.Role.OWNER,
+        )
+
+        response = self.client.post(
+            '/api/v1/accounts/login/',
+            {'username': 'manager', 'password': 'password'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data['memberships'],
+            [{
+                'organization_id': organization.pk,
+                'organization_name': 'Rongai Homes',
+                'role': OrganizationMembership.Role.CARETAKER,
+            }],
+        )
 
     def test_logout_revokes_current_token(self):
         token = Token.objects.create(user=self.user)

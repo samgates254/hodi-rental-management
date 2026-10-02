@@ -901,6 +901,7 @@
 }
 
 .status-overdue,
+.is-overdue,
 .status-failed,
 .is-failed {
   background: #ffebea;
@@ -1088,6 +1089,11 @@
   place-items: center;
 }
 
+.portal-receipt-button:disabled {
+  color: #aab2ba;
+  cursor: not-allowed;
+}
+
 .portal-receipts-heading {
   display: flex;
   align-items: center;
@@ -1224,11 +1230,126 @@
 }
 
 .portal-issue-gallery img,
-.portal-event-photos img {
+.portal-event-photos img,
+.portal-issue-video {
   width: 76px;
   height: 64px;
   border-radius: 7px;
   object-fit: cover;
+}
+
+.portal-issue-video {
+  width: min(320px, 100%);
+  height: auto;
+  max-height: 220px;
+  background: #101820;
+}
+
+.portal-issue-media {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 13px;
+  border: 1px solid var(--portal-line);
+  border-radius: 9px;
+}
+
+.portal-issue-media legend {
+  padding: 0 5px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.portal-issue-media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.portal-media-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid var(--portal-line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--portal-ink);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.portal-media-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.portal-media-button:focus-within {
+  outline: 2px solid var(--portal-teal);
+  outline-offset: 2px;
+}
+
+.portal-issue-media-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 9px;
+}
+
+.portal-issue-media-item {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  font-size: 10px;
+}
+
+.portal-issue-media-item > img,
+.portal-issue-media-item > video {
+  width: 100%;
+  height: 84px;
+  border-radius: 7px;
+  background: #edf1f2;
+  object-fit: cover;
+}
+
+.portal-issue-media-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-issue-media-item > button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: #19202acc;
+  color: #fff;
+  cursor: pointer;
+}
+
+.portal-attachment-loading,
+.portal-attachment-error {
+  color: var(--portal-muted);
+  font-size: 10px;
+}
+
+.portal-attachment-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #a52d2d;
 }
 
 .portal-issue-events {

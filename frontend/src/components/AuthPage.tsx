@@ -4,14 +4,19 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { clientApi, ClientApiError } from "@/lib/clientApi";
 
-type UserKind = "tenant" | "landlord";
+type UserKind = "tenant" | "landlord" | "caretaker";
 type AuthMode = "signin" | "signup";
 type AuthResponse = {
   token: string;
-  account_type: string;
+  account_type?: string;
+  memberships?: Array<{
+    organization_id: number | string;
+    organization_name: string;
+    role: string;
+  }>;
 };
 
-const ACCOUNT_TYPE: Record<UserKind, "TENANT" | "OWNER"> = {
+const ACCOUNT_TYPE: Record<Exclude<UserKind, "caretaker">, "TENANT" | "OWNER"> = {
   tenant: "TENANT",
   landlord: "OWNER",
 };
@@ -20,6 +25,11 @@ function userKindFromAccountType(accountType?: string): UserKind | null {
   if (accountType === "TENANT") return "tenant";
   if (accountType === "OWNER") return "landlord";
   return null;
+}
+
+function dashboardFor(kind: UserKind) {
+  if (kind === "caretaker") return "/caretakers";
+  return kind === "landlord" ? "/landlords" : "/clients";
 }
 
 function errorText(error: unknown) {
@@ -38,11 +48,13 @@ function errorText(error: unknown) {
 
 function rememberSession(
   token: string,
-  accountType: string,
+  accountType: string | undefined,
   profile: { first_name?: string; last_name?: string; email?: string; phone_number?: string },
+  memberships: AuthResponse["memberships"] = [],
 ) {
   sessionStorage.setItem("hodi_api_token", token);
-  sessionStorage.setItem("hodi_account_type", accountType);
+  sessionStorage.setItem("hodi_account_type", accountType ?? "");
+  sessionStorage.setItem("hodi_memberships", JSON.stringify(memberships));
   sessionStorage.setItem("hodi_first_name", profile.first_name ?? "");
   sessionStorage.setItem("hodi_last_name", profile.last_name ?? "");
   sessionStorage.setItem("hodi_email", profile.email ?? "");
@@ -58,6 +70,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
     const type = new URLSearchParams(window.location.search).get("type");
     if (type === "tenant" || type === "client") setUserKind("tenant");
     if (type === "landlord" || type === "owner") setUserKind("landlord");
+    if (type === "caretaker") setUserKind("caretaker");
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -70,6 +83,9 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
     try {
       if (mode === "signup") {
+        if (userKind === "caretaker") {
+          throw new Error("Caretaker access is assigned by your property organization.");
+        }
         const profile = {
           first_name: String(form.get("first_name") ?? "").trim(),
           last_name: String(form.get("last_name") ?? "").trim(),
@@ -90,8 +106,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         if (!response.data.token || !actualKind) {
           throw new Error("Your account was created, but the API returned an unsupported account type.");
         }
-        rememberSession(response.data.token, response.data.account_type, profile);
-        window.location.assign(actualKind === "landlord" ? "/landlords" : "/clients");
+        rememberSession(response.data.token, response.data.account_type, profile, response.data.memberships);
+        window.location.assign(dashboardFor(actualKind));
         return;
       }
 
@@ -99,12 +115,22 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         username,
         password,
       });
-      const actualKind = userKindFromAccountType(response.data.account_type);
+      const hasCaretakerMembership = response.data.memberships?.some(
+        membership => membership.role === "CARETAKER",
+      ) ?? false;
+      const actualKind = userKind === "caretaker"
+        ? hasCaretakerMembership ? "caretaker" : null
+        : userKindFromAccountType(response.data.account_type);
       if (!response.data.token || !actualKind) {
-        throw new Error("This account type does not have a Hodi dashboard yet.");
+        throw new Error(userKind === "caretaker"
+          ? "This account does not have an active caretaker membership."
+          : "This account type does not have a Hodi dashboard yet.");
       }
-      rememberSession(response.data.token, response.data.account_type, {});
-      window.location.assign(actualKind === "landlord" ? "/landlords" : "/clients");
+      if (actualKind !== userKind) {
+        throw new Error(`This account is set up for ${actualKind === "tenant" ? "client" : "caretaker"} access.`);
+      }
+      rememberSession(response.data.token, response.data.account_type, {}, response.data.memberships);
+      window.location.assign(dashboardFor(actualKind));
     } catch (submitError) {
       setError(errorText(submitError));
     } finally {
@@ -128,12 +154,16 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             <h1 className="mt-5 font-display text-5xl font-semibold leading-tight tracking-tight">
               {userKind === "landlord"
                 ? "Run your portfolio with clarity."
-                : "Feel at home with Hodi."}
+                : userKind === "caretaker"
+                  ? "Keep property operations moving."
+                  : "Feel at home with Hodi."}
             </h1>
             <p className="mt-5 text-base leading-7 text-[#687381]">
               {userKind === "landlord"
                 ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
-                : "Keep your home, rent, and maintenance updates connected in one dependable place."}
+                : userKind === "caretaker"
+                  ? "Review maintenance requests, track their progress, and check residents’ rent status."
+                  : "Keep your home, rent, and maintenance updates connected in one dependable place."}
             </p>
             <div className="mt-8 flex gap-3 text-sm">
               <Link className="font-semibold text-[#168582] underline-offset-4 hover:underline" href="/signin?type=landlord">
@@ -148,7 +178,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
           <section className="w-full rounded-2xl border border-[#e6e8ec] bg-white p-7 shadow-[0_18px_50px_rgba(25,32,42,0.07)] sm:p-10">
             <p className="text-[10px] font-bold tracking-[0.16em] text-[#778391]">
-              {userKind === "landlord" ? "LANDLORD PORTAL" : "CLIENT PORTAL"}
+              {userKind === "landlord" ? "LANDLORD PORTAL" : userKind === "caretaker" ? "CARETAKER PORTAL" : "CLIENT PORTAL"}
             </p>
             <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight">
               {isSignup ? "Create your account" : "Welcome back"}
@@ -160,7 +190,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             </p>
 
             <div className="mt-6 grid grid-cols-2 gap-2 rounded-lg bg-[#f3f5f5] p-1">
-              {(["landlord", "tenant"] as const).map(kind => (
+              {(isSignup ? ["landlord", "tenant"] as const : ["landlord", "tenant", "caretaker"] as const).map(kind => (
                 <button
                   key={kind}
                   type="button"
@@ -175,7 +205,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                       : "text-[#687381] hover:text-[#19202a]"
                   }`}
                 >
-                  {kind === "landlord" ? "Landlord" : "Client / tenant"}
+                  {kind === "landlord" ? "Landlord" : kind === "caretaker" ? "Caretaker" : "Client / tenant"}
                 </button>
               ))}
             </div>
@@ -238,10 +268,10 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             <p className="mt-6 text-center text-sm text-[#687381]">
               {isSignup ? "Already have an account?" : "New to Hodi?"}{" "}
               <Link
-                href={`${isSignup ? "/signin" : "/signup"}?type=${userKind}`}
+                href={`${isSignup ? "/signin" : userKind === "caretaker" ? "/signin" : "/signup"}?type=${userKind}`}
                 className="font-semibold text-[#087d7a] hover:underline"
               >
-                {isSignup ? "Sign in" : "Create an account"}
+                {isSignup ? "Sign in" : userKind === "caretaker" ? "Caretaker access is assigned by your organization" : "Create an account"}
               </Link>
             </p>
           </section>

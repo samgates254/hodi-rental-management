@@ -1,3 +1,5 @@
+"use client";
+
 import {
   type ChangeEvent,
   type FormEvent,
@@ -14,18 +16,17 @@ import Card from "../components/ui/Card";
 import { Container } from "../components/ui/Container";
 import SectionHead from "../components/ui/SectionHead";
 import { ClientApiError, clientApi } from "../lib/clientApi";
-import { compressImage } from "../lib/compressImage";
 import ReportIssueModal from "./ReportIssueModal";
+import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
 import "./client-portal.css";
 
 const PROPERTY_API = "/api/properties/available/";
 const ACTIVE_TENANCY_API = "/api/tenancies/my-current/";
-const ISSUES_API = "/api/maintenance/issues/my-issues/";
-const CREATE_ISSUE_API = "/api/maintenance/issues/";
+const ISSUES_API = "/api/v1/maintenance/issues/";
+const CREATE_ISSUE_API = "/api/v1/maintenance/issues/";
 const INVOICES_API = "/api/invoices/my-invoices/";
-const PAYMENTS_API = "/api/payments/my-payments/";
+const PAYMENTS_API = "/api/v1/billing/payments/";
 const STATEMENT_API = "/api/ledger/my-statement/";
-const MAX_IMAGES = 5;
 
 type Property = {
   id: number | string;
@@ -105,6 +106,7 @@ type MaintenanceIssue = {
   status?: string;
   image?: string | null;
   images?: Array<string | { image?: string; url?: string }>;
+  attachments?: MaintenanceAttachment[];
   created_at?: string;
   date_reported?: string;
   updated_at?: string;
@@ -126,6 +128,35 @@ type MaintenanceIssue = {
 
 type ApiList<T> = T[] | { results?: T[]; data?: T[] };
 type IssueFilter = "all" | "open" | "in-progress" | "resolved";
+type SharedMaintenanceIssue = {
+  id: number | string;
+  title: string;
+  description: string;
+  category: string;
+  priority: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  attachments?: MaintenanceAttachment[];
+  updates?: Array<{
+    id: number | string;
+    note?: string;
+    status?: string;
+    author_name?: string;
+    created_at: string;
+  }>;
+};
+type SharedRentPayment = {
+  id: number | string;
+  reference?: string;
+  lease_reference?: string;
+  amount_minor: number;
+  due_date: string;
+  status: string;
+  paid_at?: string | null;
+  method?: string;
+  created_at: string;
+};
 type Invoice = {
   id: number | string;
   month?: string;
@@ -148,7 +179,42 @@ type Payment = {
   method?: string;
   status?: string;
   receipt_url?: string;
+  due_date?: string;
 };
+
+function fromSharedIssue(issue: SharedMaintenanceIssue): MaintenanceIssue {
+  return {
+    id: issue.id,
+    title: issue.title,
+    description: issue.description,
+    category: issue.category,
+    priority: issue.priority,
+    status: issue.status,
+    created_at: issue.created_at,
+    updated_at: issue.updated_at,
+    attachments: issue.attachments,
+    timeline: issue.updates?.map(update => ({
+      status: update.status ?? issue.status,
+      timestamp: update.created_at,
+      comment: update.note,
+      actor_name: update.author_name,
+    })),
+  };
+}
+
+function fromSharedPayment(payment: SharedRentPayment): Payment {
+  return {
+    id: payment.id,
+    reference: payment.reference || payment.lease_reference,
+    date: payment.paid_at ?? payment.created_at,
+    created_at: payment.created_at,
+    due_date: payment.due_date,
+    amount: payment.amount_minor / 100,
+    description: payment.lease_reference ? `Rent · ${payment.lease_reference}` : "Rent payment",
+    method: payment.method,
+    status: payment.status,
+  };
+}
 type Statement = {
   tenant_receivable?: number | string;
   balance?: number | string;
@@ -620,19 +686,14 @@ function IssueCard({
   issue,
   onComment,
   onResolve,
-  onRate,
-  onAddPhotos,
 }: {
   issue: MaintenanceIssue;
   onComment: (issueId: number | string, comment: string) => Promise<void>;
   onResolve: (issueId: number | string) => Promise<void>;
-  onRate: (issueId: number | string, rating: number) => Promise<void>;
-  onAddPhotos: (issueId: number | string, files: FileList) => Promise<void>;
 }) {
   const [comment, setComment] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
   const step = issueStep(issue.status);
   const thumbnail =
     issue.image ??
@@ -690,6 +751,7 @@ function IssueCard({
           })}
         </div>
       )}
+      <MaintenanceAttachments attachments={issue.attachments} />
       <IssueTimeline issue={issue} />
 
       <div className="dashboard-issue-meta">
@@ -740,30 +802,6 @@ function IssueCard({
             {isSaving ? "Sending…" : "Comment"}
           </Button>
         </form>
-        <label className="portal-add-photos">
-          <Icon name="camera" size={16} />
-          <span>{isUploading ? "Uploading…" : "Add photos"}</span>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            disabled={isUploading}
-            onChange={async event => {
-              const files = event.currentTarget.files;
-              if (!files?.length) return;
-              setIsUploading(true);
-              setActionError("");
-              try {
-                await onAddPhotos(issue.id, files);
-              } catch {
-                setActionError("Photos could not be uploaded. Please try again.");
-              } finally {
-                setIsUploading(false);
-                event.currentTarget.value = "";
-              }
-            }}
-          />
-        </label>
         {step < 4 && (
           <Button
             type="button"
@@ -778,28 +816,10 @@ function IssueCard({
               }
             }}
           >
-            Mark resolved
+            Ask caretaker to close
           </Button>
         )}
       </div>
-      {step >= 4 && (
-        <div className="portal-rating">
-          <span>Rate the service</span>
-          {[1, 2, 3, 4, 5].map(value => (
-            <button
-              key={value}
-              type="button"
-              aria-label={`Rate ${value} out of 5`}
-              aria-pressed={issue.rating === value}
-              onClick={() => {
-                void onRate(issue.id, value).catch(() => setActionError("Your rating could not be saved."));
-              }}
-            >
-              <Icon name="star" size={18} />
-            </button>
-          ))}
-        </div>
-      )}
     </article>
   );
 }
@@ -958,8 +978,8 @@ export default function ClientDashboard() {
     setIsLoadingIssues(true);
     setIssueError("");
     try {
-      const response = await clientApi.get<ApiList<MaintenanceIssue>>(ISSUES_API);
-      setIssues(listFromResponse(response.data));
+      const response = await clientApi.get<ApiList<SharedMaintenanceIssue>>(ISSUES_API);
+      setIssues(listFromResponse(response.data).map(fromSharedIssue));
     } catch {
       setIssueError("Your reported issues couldn’t be loaded. Please try again.");
     } finally {
@@ -984,11 +1004,11 @@ export default function ClientDashboard() {
     setIsLoadingPayments(true);
     try {
       const [paymentResult, statementResult] = await Promise.allSettled([
-        clientApi.get<ApiList<Payment>>(PAYMENTS_API),
+        clientApi.get<ApiList<SharedRentPayment>>(PAYMENTS_API),
         clientApi.get<Statement>(STATEMENT_API),
       ]);
       if (paymentResult.status === "fulfilled") {
-        setPayments(listFromResponse(paymentResult.value.data));
+        setPayments(listFromResponse(paymentResult.value.data).map(fromSharedPayment));
       }
       if (statementResult.status === "fulfilled") {
         setStatement(statementResult.value.data);
@@ -1059,38 +1079,22 @@ export default function ClientDashboard() {
   );
 
   async function submitIssue(formData: FormData) {
-    if (tenancy?.id !== undefined) formData.set("tenancy", String(tenancy.id));
-    await clientApi.post(CREATE_ISSUE_API, formData);
+    const issueData = new FormData();
+    issueData.set("title", String(formData.get("title") ?? "").trim());
+    issueData.set("category", String(formData.get("category") ?? "general").toUpperCase());
+    issueData.set("priority", String(formData.get("priority") ?? "normal").toUpperCase());
+    issueData.set("description", String(formData.get("description") ?? "").trim());
+    formData.getAll("attachments").forEach(file => issueData.append("attachments", file));
+    await clientApi.post(CREATE_ISSUE_API, issueData);
     setIsReportOpen(false);
     await loadIssues();
     setPageNotice("Your maintenance request has been submitted.");
   }
 
-  async function addIssuePhotos(issueId: number | string, files: FileList) {
-    if (files.length > MAX_IMAGES) throw new Error(`Choose no more than ${MAX_IMAGES} images.`);
-    const formData = new FormData();
-    for (const original of Array.from(files)) {
-      if (!original.type.startsWith("image/")) throw new Error("Only image files can be attached.");
-      formData.append("images", await compressImage(original));
-    }
-    await clientApi.patch(`/api/maintenance/issues/${issueId}/`, formData);
-    await loadIssues();
-    setPageNotice("Photos added to your maintenance request.");
-  }
-
-  async function rateIssue(issueId: number | string, rating: number) {
-    await clientApi.patch(`/api/maintenance/issues/${issueId}/`, { rating });
-    await loadIssues();
-    setPageNotice("Thank you for rating the maintenance service.");
-  }
-
   async function addIssueComment(issueId: number | string, comment: string) {
     setIssueActionError("");
     try {
-      await clientApi.patch(
-        `/api/maintenance/issues/${issueId}/`,
-        { client_comment: comment },
-      );
+      await clientApi.post(`/api/v1/maintenance/issues/${issueId}/updates/`, { note: comment });
       await loadIssues();
     } catch {
       setIssueActionError("Your comment couldn’t be saved. Please try again.");
@@ -1101,13 +1105,13 @@ export default function ClientDashboard() {
   async function markResolved(issueId: number | string) {
     setIssueActionError("");
     try {
-      await clientApi.patch(
-        `/api/maintenance/issues/${issueId}/`,
-        { status: "resolved" },
-      );
+      await clientApi.post(`/api/v1/maintenance/issues/${issueId}/updates/`, {
+        note: "The resident reports that this issue is resolved and requests caretaker confirmation.",
+      });
       await loadIssues();
+      setPageNotice("Your closure request was shared with the caretaker.");
     } catch {
-      setIssueActionError("This issue couldn’t be marked as resolved. Please try again.");
+      setIssueActionError("Your closure request couldn’t be sent. Please try again.");
     }
   }
 
@@ -1187,20 +1191,41 @@ export default function ClientDashboard() {
       ? amount(selectedInvoice.balance)
       : Math.max(0, amount(selectedInvoice.amount) - amount(selectedInvoice.paid_amount))
     : 0;
+  const sharedUnpaidPayments = payments.filter(payment =>
+    ["pending", "overdue"].includes(normalizedStatus(payment.status)),
+  );
+  const sharedOverduePayments = payments.filter(
+    payment => normalizedStatus(payment.status) === "overdue",
+  );
+  const sharedUnpaidTotal = sharedUnpaidPayments.reduce(
+    (total, payment) => total + amount(payment.amount),
+    0,
+  );
   const allRentInvoicesPaid = invoices.length > 0 &&
     invoices.every(invoice => isPaymentSuccessful(invoice.status));
+  const hasSharedRentStatus = payments.length > 0;
   const rentOverviewStatus = outstandingTotal > 0 ||
-    invoices.some(invoice => normalizedStatus(invoice.status) === "overdue")
+    invoices.some(invoice => normalizedStatus(invoice.status) === "overdue") ||
+    sharedOverduePayments.length > 0
     ? "Payment due"
+    : hasSharedRentStatus && sharedUnpaidPayments.length > 0
+      ? "Payment pending"
     : isLoadingInvoices
       ? "Loading…"
-      : allRentInvoicesPaid || /paid|clear/i.test(rentStatus)
+      : allRentInvoicesPaid || hasSharedRentStatus && sharedUnpaidPayments.length === 0 || /paid|clear/i.test(rentStatus)
         ? "Paid"
-        : invoices.length ? "Check status" : "No invoice";
+        : invoices.length || hasSharedRentStatus ? "Check status" : "No invoice";
   const nextInvoice = [...outstandingInvoices]
     .filter(invoice => invoice.due_date)
     .sort((first, second) => new Date(first.due_date!).getTime() - new Date(second.due_date!).getTime())[0];
-  const dueInDays = daysUntil(nextInvoice?.due_date);
+  const nextSharedPayment = sharedUnpaidPayments
+    .filter(payment => payment.due_date)
+    .sort((first, second) => new Date(first.due_date!).getTime() - new Date(second.due_date!).getTime())[0];
+  const dueDate = [nextInvoice?.due_date, nextSharedPayment?.due_date]
+    .filter((value): value is string => Boolean(value))
+    .sort((first, second) => new Date(first).getTime() - new Date(second).getTime())[0];
+  const dueInDays = daysUntil(dueDate);
+  const rentDueTotal = outstandingTotal > 0 ? outstandingTotal : sharedUnpaidTotal;
   const monthlyRent = tenancy?.monthly_rent ?? tenancyProperty?.rent ?? tenancyProperty?.rent_amount;
   const depositBalance = tenancy?.deposit_balance ?? tenancy?.deposit;
   const activeIssuesCount = issues.filter(issue => issueStep(issue.status) < 4).length;
@@ -1460,6 +1485,7 @@ export default function ClientDashboard() {
     } finally {
       window.sessionStorage.removeItem("hodi_api_token");
       window.sessionStorage.removeItem("hodi_account_type");
+      window.sessionStorage.removeItem("hodi_memberships");
       window.sessionStorage.removeItem("hodi_first_name");
       window.sessionStorage.removeItem("hodi_last_name");
       window.sessionStorage.removeItem("hodi_email");
@@ -1649,13 +1675,13 @@ export default function ClientDashboard() {
             <SummaryCard
               label="Rent status"
               value={rentOverviewStatus === "Paid" ? "All clear" : rentOverviewStatus}
-              caption={outstandingTotal > 0 ? `KES ${money(outstandingTotal)} outstanding` : rentOverviewStatus === "Paid" ? "Your account is up to date" : "Check your latest rent balance"}
+              caption={rentDueTotal > 0 ? `KES ${money(rentDueTotal)} outstanding` : rentOverviewStatus === "Paid" ? "Your account is up to date" : "Check your latest rent balance"}
               icon="wallet"
-              tone={outstandingTotal > 0 || rentOverviewStatus === "Payment due" ? "amber" : rentOverviewStatus === "Paid" ? "green" : "slate"}
+              tone={rentDueTotal > 0 || rentOverviewStatus === "Payment due" || rentOverviewStatus === "Payment pending" ? "amber" : rentOverviewStatus === "Paid" ? "green" : "slate"}
             />
             <SummaryCard
               label="Next due date"
-              value={nextInvoice?.due_date ? formatDate(nextInvoice.due_date) : "Not scheduled"}
+              value={dueDate ? formatDate(dueDate) : "Not scheduled"}
               caption={dueInDays !== null ? dueInDays < 0 ? `Overdue by ${Math.abs(dueInDays)} days` : dueInDays === 0 ? "Due today" : `Due in ${dueInDays} days` : "No upcoming payment"}
               icon="calendar"
               tone={dueInDays !== null && dueInDays <= 5 ? "red" : "blue"}
@@ -1675,17 +1701,17 @@ export default function ClientDashboard() {
               tone="green"
             />
           </div>
-          {dueInDays !== null && dueInDays <= 5 && outstandingTotal > 0 && (
+          {dueInDays !== null && dueInDays <= 5 && rentDueTotal > 0 && (
             <div className="portal-due-alert">
               <span className="portal-due-icon"><Icon name="clock" size={20} /></span>
-              <div><strong>Your rent of KES {money(outstandingTotal)} is {dueLabel}.</strong><small>Pay securely with M-Pesa and keep your tenancy in good standing.</small></div>
+              <div><strong>Your rent of KES {money(rentDueTotal)} is {dueLabel}.</strong><small>Pay securely with M-Pesa and keep your tenancy in good standing.</small></div>
               <Button type="button" onClick={() => scrollToSection("pay-rent")}>Pay now <Icon name="arrow" size={16} /></Button>
             </div>
           )}
           <div className="portal-quick-actions">
             <span>Quick actions</span>
             <button type="button" onClick={() => scrollToSection("pay-rent")}><Icon name="wallet" size={17} />Pay rent</button>
-            <button type="button" onClick={() => tenancy && setIsReportOpen(true)} disabled={!tenancy}><Icon name="wrench" size={17} />Report an issue</button>
+            <button type="button" onClick={() => setIsReportOpen(true)}><Icon name="wrench" size={17} />Report an issue</button>
             <button type="button" onClick={contactCurrentAgent}><Icon name="message" size={17} />Contact agent</button>
             <button type="button" onClick={() => scrollToSection("my-flat")}><Icon name="receipt" size={17} />View lease</button>
           </div>
@@ -2033,8 +2059,6 @@ export default function ClientDashboard() {
                     issue={issue}
                     onComment={addIssueComment}
                     onResolve={markResolved}
-                    onRate={rateIssue}
-                    onAddPhotos={addIssuePhotos}
                   />
                 ))}
               </div>
@@ -2074,8 +2098,8 @@ export default function ClientDashboard() {
                       <td>{invoice?.month ?? invoice?.description ?? payment.description ?? "Rent payment"}</td>
                       <td>{humanizeStatus(payment.method ?? "M-Pesa")}</td>
                       <td><strong>KES {money(payment.amount)}</strong></td>
-                      <td><span className={`portal-payment-status ${isPaymentSuccessful(payment.status) ? "is-success" : isPaymentFailed(payment.status) ? "is-failed" : "is-pending"}`}>{humanizeStatus(payment.status ?? "pending")}</span></td>
-                      <td><button className="portal-receipt-button" type="button" onClick={() => void downloadReceipt(payment)} aria-label={`Download receipt ${payment.reference ?? payment.id}`}><Icon name="download" size={16} /></button></td>
+                      <td><span className={`portal-payment-status ${isPaymentSuccessful(payment.status) ? "is-success" : isPaymentFailed(payment.status) ? "is-failed" : normalizedStatus(payment.status) === "overdue" ? "is-overdue" : "is-pending"}`}>{humanizeStatus(payment.status ?? "pending")}</span></td>
+                      <td><button className="portal-receipt-button" type="button" onClick={() => void downloadReceipt(payment)} disabled={!payment.receipt_url} aria-label={`Download receipt ${payment.reference ?? payment.id}`} title={payment.receipt_url ? "Download receipt" : "Receipt not available"}><Icon name="download" size={16} /></button></td>
                     </tr>;
                   }) : <tr><td colSpan={7}><div className="portal-table-empty"><Icon name="receipt" size={22} /><strong>No payments yet</strong><span>Your completed rent receipts will appear here.</span></div></td></tr>}
               </tbody>
