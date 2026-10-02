@@ -2,6 +2,8 @@
 
 Versioned public endpoints live under `/api/v1/`. Add request/response examples and error schemas here before UI implementation.
 
+See [authorization.md](authorization.md) for the organization role and resource access matrix.
+
 ## Landlord dashboard
 
 The landlord dashboard uses the authenticated organization-scoped endpoints below. Send the DRF token as `Authorization: Token <token>` on every request; see [authentication](./authentication.md).

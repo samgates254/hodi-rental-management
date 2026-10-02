@@ -79,7 +79,9 @@
   #maintenance,
   #connected,
   #roles,
-  #platform-cta {
+  #platform-cta,
+  #contact-form,
+  #contact-faq {
     scroll-margin-top: 5.5rem;
   }
 
@@ -89,5 +91,28 @@
 
   .text-pretty {
     text-wrap: pretty;
+  }
+
+  .auth-input {
+    width: 100%;
+    border-radius: 0.75rem;
+    border: 1px solid #e6e8ec;
+    background: #fff;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: #19202a;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .auth-input:focus {
+    border-color: #0bacaa;
+    box-shadow: 0 0 0 3px rgba(11, 172, 170, 0.15);
+  }
+
+  /* Tighter fields on signup so the form fits one viewport */
+  .auth-page-signup .auth-input {
+    padding: 0.5rem 0.75rem;
   }
 }

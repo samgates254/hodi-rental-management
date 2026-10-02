@@ -1,23 +1,40 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from rest_framework import permissions, viewsets
+from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from common.api import organization_ids_for_user
+from common.permissions import (
+	OrganizationRolePermission,
+	organization_ids_for_resource,
+	user_can_access_organization_resource,
+)
 
 from .models import Lease, LeaseAmendment, RentSchedule
 from .serializers import LeaseAmendmentSerializer, LeaseSerializer, RentScheduleSerializer
 
 
 class LeaseScopedViewSet(viewsets.ModelViewSet):
-	permission_classes = (permissions.IsAuthenticated,)
+	permission_classes = (OrganizationRolePermission,)
+	organization_resource = 'leases'
+
+	def access_action(self):
+		return 'read' if self.request.method in ('GET', 'HEAD', 'OPTIONS') else 'write'
 
 	def allowed_organization_ids(self):
-		return organization_ids_for_user(self.request.user)
+		return organization_ids_for_resource(
+			self.request.user,
+			self.organization_resource,
+			self.access_action(),
+		)
 
 	def ensure_allowed(self, organization_id):
-		if not self.allowed_organization_ids().filter(pk=organization_id).exists():
-			raise PermissionDenied('You do not belong to this organization.')
+		if not user_can_access_organization_resource(
+			self.request.user,
+			organization_id,
+			self.organization_resource,
+			self.access_action(),
+		):
+			raise PermissionDenied('You do not have permission for this organization.')
 
 
 class LeaseViewSet(LeaseScopedViewSet):
@@ -34,6 +51,8 @@ class LeaseViewSet(LeaseScopedViewSet):
 		self.save_and_validate(serializer)
 
 	def perform_update(self, serializer):
+		tenant = serializer.validated_data.get('tenant', serializer.instance.tenant)
+		self.ensure_allowed(tenant.organization_id)
 		self.save_and_validate(serializer)
 
 	@transaction.atomic
@@ -59,6 +78,8 @@ class RentScheduleViewSet(LeaseScopedViewSet):
 		self.save_and_validate(serializer)
 
 	def perform_update(self, serializer):
+		lease = serializer.validated_data.get('lease', serializer.instance.lease)
+		self.ensure_allowed(lease.organization_id)
 		self.save_and_validate(serializer)
 
 	@transaction.atomic
@@ -82,3 +103,8 @@ class LeaseAmendmentViewSet(LeaseScopedViewSet):
 		lease = serializer.validated_data['lease']
 		self.ensure_allowed(lease.organization_id)
 		serializer.save(created_by=self.request.user)
+
+	def perform_update(self, serializer):
+		lease = serializer.validated_data.get('lease', serializer.instance.lease)
+		self.ensure_allowed(lease.organization_id)
+		serializer.save()

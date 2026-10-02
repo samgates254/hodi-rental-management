@@ -11,6 +11,11 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
 
 class OrganizationMembershipSerializer(serializers.ModelSerializer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance is not None:
+            self.fields['organization'].read_only = True
+
     class Meta:
         model = OrganizationMembership
         fields = ('id', 'organization', 'user', 'role', 'is_active', 'created_at')

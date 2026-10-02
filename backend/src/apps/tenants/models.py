@@ -10,7 +10,7 @@ class Tenant(models.Model):
 		on_delete=models.SET_NULL,
 		null=True,
 		blank=True,
-		related_name='tenant_profile',
+		related_name='tenant_record',
 	)
 	organization = models.ForeignKey(
 		Organization,

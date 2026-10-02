@@ -6,25 +6,27 @@ const columns = [
   {
     title: "Product",
     links: [
+      { label: "Home", href: "/" },
       { label: "Platform", href: "/platform" },
+      { label: "Solutions", href: "/solutions" },
       { label: "How it works", href: "/#how-it-works" },
-      { label: "Services", href: "/#services" },
     ],
   },
   {
-    title: "People",
+    title: "Company",
     links: [
-      { label: "For owners", href: "/#owners" },
-      { label: "For tenants", href: "/#tenants" },
-      { label: "About", href: "/#about" },
+      { label: "About", href: "/about" },
+      { label: "Contact", href: "/contact" },
+      { label: "For owners", href: "/solutions#owners-solution" },
+      { label: "For tenants", href: "/solutions#tenants-solution" },
     ],
   },
   {
     title: "Get started",
     links: [
-      { label: "Log in", href: "/#final-cta" },
       { label: "Request a demo", href: demoMailto },
       { label: "Talk to Hodi", href: contactMailto },
+      { label: "Explore platform", href: "/platform" },
     ],
   },
 ] as const;
@@ -76,7 +78,7 @@ export function Footer() {
             <span className="cursor-default opacity-70" title="Coming soon">
               Terms
             </span>
-            <a href={contactMailto} className="hover:text-charcoal">
+            <a href="/contact" className="hover:text-charcoal">
               Contact
             </a>
           </div>

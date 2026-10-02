@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import AuthPage from "@/components/AuthPage";
+import { Footer } from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -7,5 +8,10 @@ export const metadata: Metadata = {
 };
 
 export default function SignInPage() {
-  return <AuthPage mode="signin" />;
+  return (
+    <div className="bg-[#f7f8f7]">
+      <AuthPage mode="signin" />
+      <Footer />
+    </div>
+  );
 }

@@ -1,14 +1,46 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-local-only')
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in {'1', 'true', 'yes'}
-ALLOWED_HOSTS = [host.strip() for host in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if host.strip()]
+DJANGO_ENV = os.environ.get('DJANGO_ENV', 'development').strip().lower()
+if DJANGO_ENV not in {'development', 'production'}:
+    raise ImproperlyConfigured('DJANGO_ENV must be development or production.')
+
+debug_value = os.environ.get('DJANGO_DEBUG')
+if DJANGO_ENV == 'production' and debug_value is None:
+    raise ImproperlyConfigured('DJANGO_DEBUG must be explicitly set in production.')
+debug_value = (debug_value or 'True').strip().lower()
+if debug_value not in {'1', '0', 'true', 'false', 'yes', 'no'}:
+    raise ImproperlyConfigured('DJANGO_DEBUG must be a boolean value.')
+DEBUG = debug_value in {'1', 'true', 'yes'}
+if DJANGO_ENV == 'production' and DEBUG:
+    raise ImproperlyConfigured('DJANGO_DEBUG must be false in production.')
+
+secret_key = os.environ.get('DJANGO_SECRET_KEY')
+if not secret_key and DJANGO_ENV == 'production':
+    raise ImproperlyConfigured('DJANGO_SECRET_KEY is required in production.')
+SECRET_KEY = secret_key or 'django-insecure-local-only'
+if DJANGO_ENV == 'production' and (
+    len(SECRET_KEY) < 50
+    or any(marker in SECRET_KEY.lower() for marker in ('django-insecure', 'replace-with', 'change-me'))
+):
+    raise ImproperlyConfigured('Production DJANGO_SECRET_KEY must be a strong generated secret.')
+
+allowed_hosts_value = os.environ.get('DJANGO_ALLOWED_HOSTS')
+if DJANGO_ENV == 'production' and not allowed_hosts_value:
+    raise ImproperlyConfigured('DJANGO_ALLOWED_HOSTS is required in production.')
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in (allowed_hosts_value or 'localhost,127.0.0.1').split(',')
+    if host.strip()
+]
+if DJANGO_ENV == 'production' and ('*' in ALLOWED_HOSTS or not ALLOWED_HOSTS):
+    raise ImproperlyConfigured('Production DJANGO_ALLOWED_HOSTS must contain explicit hosts.')
 
 INSTALLED_APPS = [
     'django.contrib.admin', 'django.contrib.auth', 'django.contrib.contenttypes',
@@ -48,6 +80,83 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+EMAIL_VERIFICATION_TOKEN_MAX_AGE = int(
+    os.environ.get('EMAIL_VERIFICATION_TOKEN_MAX_AGE', '86400'),
+)
+if EMAIL_VERIFICATION_TOKEN_MAX_AGE <= 0:
+    raise ImproperlyConfigured('EMAIL_VERIFICATION_TOKEN_MAX_AGE must be positive.')
+PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', '3600'))
+if PASSWORD_RESET_TIMEOUT <= 0:
+    raise ImproperlyConfigured('PASSWORD_RESET_TIMEOUT must be positive.')
+ACCOUNT_EMAIL_VERIFICATION_PATH = '/api/v1/accounts/verify-email/'
+ACCOUNT_PASSWORD_RESET_CONFIRM_PATH = '/api/v1/accounts/password-reset/confirm/'
+ACCOUNT_PASSWORD_RESET_CONFIRM_PATH = '/api/v1/accounts/password-reset/confirm/'
+
+if DJANGO_ENV == 'production':
+    email_host = os.environ.get('DJANGO_EMAIL_HOST')
+    default_from_email = os.environ.get('DJANGO_DEFAULT_FROM_EMAIL')
+    if not email_host or not default_from_email:
+        raise ImproperlyConfigured(
+            'DJANGO_EMAIL_HOST and DJANGO_DEFAULT_FROM_EMAIL are required in production.',
+        )
+    cache_backend = os.environ.get('DJANGO_CACHE_BACKEND')
+    cache_location = os.environ.get('DJANGO_CACHE_LOCATION')
+    if not cache_backend or not cache_location:
+        raise ImproperlyConfigured(
+            'DJANGO_CACHE_BACKEND and DJANGO_CACHE_LOCATION are required in production.',
+        )
+    shared_cache_backends = (
+        'redis',
+        'memcached',
+        'django.core.cache.backends.db.DatabaseCache',
+    )
+    if not any(backend in cache_backend for backend in shared_cache_backends):
+        raise ImproperlyConfigured('Production throttling requires a shared cache backend.')
+    CACHES = {
+        'default': {
+            'BACKEND': cache_backend,
+            'LOCATION': cache_location,
+        },
+    }
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = email_host
+    EMAIL_PORT = int(os.environ.get('DJANGO_EMAIL_PORT', '587'))
+    EMAIL_HOST_USER = os.environ.get('DJANGO_EMAIL_USER', '')
+    EMAIL_HOST_PASSWORD = os.environ.get('DJANGO_EMAIL_PASSWORD', '')
+    EMAIL_USE_TLS = os.environ.get('DJANGO_EMAIL_USE_TLS', 'True').lower() in {'1', 'true', 'yes'}
+    EMAIL_USE_SSL = os.environ.get('DJANGO_EMAIL_USE_SSL', 'False').lower() in {'1', 'true', 'yes'}
+    DEFAULT_FROM_EMAIL = default_from_email
+    if EMAIL_USE_TLS and EMAIL_USE_SSL:
+        raise ImproperlyConfigured('Use either DJANGO_EMAIL_USE_TLS or DJANGO_EMAIL_USE_SSL, not both.')
+    if not EMAIL_USE_TLS and not EMAIL_USE_SSL:
+        raise ImproperlyConfigured('Production email transport must use TLS or SSL.')
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        },
+    }
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    DEFAULT_FROM_EMAIL = os.environ.get('DJANGO_DEFAULT_FROM_EMAIL', 'accounts@localhost')
+
+EMAIL_TIMEOUT = int(os.environ.get('DJANGO_EMAIL_TIMEOUT', '10'))
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+proxy_ssl_header = os.environ.get('DJANGO_TRUSTED_PROXY_SSL_HEADER')
+if proxy_ssl_header:
+    try:
+        proxy_header, proxy_value = proxy_ssl_header.split(',', maxsplit=1)
+    except ValueError as error:
+        raise ImproperlyConfigured(
+            'DJANGO_TRUSTED_PROXY_SSL_HEADER must contain header,value.',
+        ) from error
+    SECURE_PROXY_SSL_HEADER = (proxy_header.strip(), proxy_value.strip())
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
@@ -60,6 +169,13 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
     ],
+    'DEFAULT_THROTTLE_RATES': {
+        'auth_signup': '5/hour',
+        'auth_login': '10/minute',
+        'auth_password_reset_request': '3/hour',
+        'auth_password_reset_confirm': '5/hour',
+        'auth_organization_options': '60/minute',
+    },
 }
 
 CORS_ALLOWED_ORIGINS = [
@@ -68,5 +184,16 @@ CORS_ALLOWED_ORIGINS = [
         'CORS_ALLOWED_ORIGINS',
         'http://localhost:5173,http://127.0.0.1:5173',
     ).split(',')
+    if origin.strip()
+]
+if DJANGO_ENV == 'production':
+    if not os.environ.get('CORS_ALLOWED_ORIGINS'):
+        raise ImproperlyConfigured('CORS_ALLOWED_ORIGINS is required in production.')
+    if any(not origin.startswith('https://') for origin in CORS_ALLOWED_ORIGINS):
+        raise ImproperlyConfigured('Production CORS origins must use HTTPS.')
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',')
     if origin.strip()
 ]

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import AuthPage from "@/components/AuthPage";
+import { Footer } from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
   title: "Create an account",
@@ -7,5 +8,10 @@ export const metadata: Metadata = {
 };
 
 export default function SignUpPage() {
-  return <AuthPage mode="signup" />;
+  return (
+    <div className="bg-[#f7f8f7]">
+      <AuthPage mode="signup" />
+      <Footer />
+    </div>
+  );
 }
