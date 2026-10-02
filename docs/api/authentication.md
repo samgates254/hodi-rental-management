@@ -48,4 +48,36 @@ Content-Type: application/json
 
 Send the returned token on protected requests as `Authorization: Token <token>`. `POST /api/v1/accounts/logout/` revokes the current token and returns `204`.
 
+```json
+{
+  "token": "...",
+  "memberships": [
+    {
+      "organization_id": 1,
+      "organization_name": "Rongai Homes",
+      "role": "CARETAKER"
+    }
+  ]
+}
+```
+
+`memberships` contains active memberships in active organizations.
+
+## Authenticated requests
+
+Send the token on every protected request:
+
+```http
+Authorization: Token <token>
+```
+
+## Logout
+
+```http
+POST /api/v1/accounts/logout/
+Authorization: Token <token>
+```
+
+A successful logout returns `204` and revokes the token. Use HTTPS outside local development and never commit real credentials or tokens.
+
 Signup is limited to 5 requests per hour, login to 10 per minute, organization lookup to 60 per minute, password-reset requests to 3 per hour, and reset confirmations to 5 per hour. Production throttling requires a shared cache. Production startup also requires explicit secret and host settings, TLS-protected SMTP, and HTTPS CORS origins. See [backend/.env.example](../../backend/.env.example) for configuration names. Use HTTPS outside local development.

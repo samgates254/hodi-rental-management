@@ -13,6 +13,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from apps.accounts.models import AccountProfile
 from apps.tenants.models import Tenant
 
+from apps.organizations.models import Organization, OrganizationMembership
+
 
 class HealthCheckTests(TestCase):
     def test_health_endpoint_returns_ok(self):
@@ -32,6 +34,10 @@ class AuthenticationApiTests(TestCase):
         )
 
     def test_login_returns_token_for_valid_credentials(self):
+        self.user.first_name = 'Teresa'
+        self.user.last_name = 'Njoroge'
+        self.user.email = 'teresa@example.com'
+        self.user.save(update_fields=('first_name', 'last_name', 'email'))
         response = self.client.post(
             '/api/v1/accounts/login/',
             {'username': 'manager', 'password': 'password'},
@@ -40,6 +46,43 @@ class AuthenticationApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['token'])
+        self.assertEqual(response.data['first_name'], 'Teresa')
+        self.assertEqual(response.data['last_name'], 'Njoroge')
+        self.assertEqual(response.data['email'], 'teresa@example.com')
+        self.assertEqual(response.data['memberships'], [])
+
+    def test_login_returns_active_organization_membership_details(self):
+        organization = Organization.objects.create(name='Rongai Homes')
+        OrganizationMembership.objects.create(
+            organization=organization,
+            user=self.user,
+            role=OrganizationMembership.Role.CARETAKER,
+        )
+        inactive_organization = Organization.objects.create(
+            name='Inactive Homes',
+            is_active=False,
+        )
+        OrganizationMembership.objects.create(
+            organization=inactive_organization,
+            user=self.user,
+            role=OrganizationMembership.Role.OWNER,
+        )
+
+        response = self.client.post(
+            '/api/v1/accounts/login/',
+            {'username': 'manager', 'password': 'password'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data['memberships'],
+            [{
+                'organization_id': organization.pk,
+                'organization_name': 'Rongai Homes',
+                'role': OrganizationMembership.Role.CARETAKER,
+            }],
+        )
 
     def test_logout_revokes_current_token(self):
         token = Token.objects.create(user=self.user)

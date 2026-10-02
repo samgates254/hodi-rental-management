@@ -132,7 +132,7 @@ class SignupSerializer(serializers.Serializer):
 				phone_number=phone_number,
 				email=user.email,
 			)
-		Token.objects.create(user=user)
+		Token.objects.get_or_create(user=user)
 		return user
 
 

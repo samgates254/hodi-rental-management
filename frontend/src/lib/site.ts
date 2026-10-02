@@ -1,14 +1,24 @@
 /** Shared site navigation — works from any route. */
 export const primaryNav = [
   { label: "Platform", href: "/platform" },
-  { label: "How It Works", href: "/#how-it-works" },
-  { label: "For Owners", href: "/#owners" },
-  { label: "For Tenants", href: "/#tenants" },
-  { label: "About", href: "/#about" },
+  { label: "Solutions", href: "/solutions" },
+  { label: "About", href: "/about" },
+  { label: "Contact", href: "/contact" },
 ] as const;
 
-export const demoMailto =
-  "mailto:hello@hodi.app?subject=Request%20a%20demo%20—%20Hodi";
+export const footerProduct = [
+  { label: "Home", href: "/" },
+  { label: "Platform", href: "/platform" },
+  { label: "Solutions", href: "/solutions" },
+  { label: "How it works", href: "/#how-it-works" },
+] as const;
 
-export const contactMailto =
-  "mailto:hello@hodi.app?subject=Talk%20to%20Hodi";
+export const footerCompany = [
+  { label: "About", href: "/about" },
+  { label: "Contact", href: "/contact" },
+] as const;
+
+/** Real contact surface used across the site. */
+export const contactEmail = "hello@hodi.app";
+export const contactMailto = `mailto:${contactEmail}`;
+export const demoMailto = "mailto:hello@hodi.app?subject=Talk%20to%20Hodi";

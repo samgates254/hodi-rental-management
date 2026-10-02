@@ -6,3 +6,11 @@ backend/.env
 /staticfiles/
 .pytest_cache/
 .coverage
+
+backend/media/
+
+backend/env/
+
+frontend/node_modules/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo

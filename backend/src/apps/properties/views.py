@@ -1,6 +1,7 @@
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 
+from application.services.audit import record_audit
 from common.permissions import (
 	OrganizationRolePermission,
 	user_can_access_organization_resource,
@@ -44,7 +45,16 @@ class PropertyViewSet(OrganizationScopedViewSet):
 	def perform_create(self, serializer):
 		organization = serializer.validated_data['organization']
 		self.ensure_allowed(organization.pk)
-		serializer.save()
+		property_record = serializer.save()
+		record_audit(
+			action='property.create',
+			object_type='Property',
+			object_id=property_record.pk,
+			actor=self.request.user,
+			organization=organization,
+			metadata={'name': property_record.name},
+			request=self.request,
+		)
 
 	def perform_update(self, serializer):
 		organization = serializer.validated_data.get(
@@ -52,7 +62,16 @@ class PropertyViewSet(OrganizationScopedViewSet):
 			serializer.instance.organization,
 		)
 		self.ensure_allowed(organization.pk)
-		serializer.save()
+		property_record = serializer.save()
+		record_audit(
+			action='property.update',
+			object_type='Property',
+			object_id=property_record.pk,
+			actor=self.request.user,
+			organization=property_record.organization,
+			metadata={'name': property_record.name},
+			request=self.request,
+		)
 
 
 class BuildingViewSet(OrganizationScopedViewSet):
@@ -84,7 +103,16 @@ class UnitViewSet(OrganizationScopedViewSet):
 	def perform_create(self, serializer):
 		building = serializer.validated_data['building']
 		self.ensure_allowed(building.property.organization_id)
-		serializer.save()
+		unit = serializer.save()
+		record_audit(
+			action='unit.create',
+			object_type='Unit',
+			object_id=unit.pk,
+			actor=self.request.user,
+			organization=building.property.organization,
+			metadata={'name': unit.name},
+			request=self.request,
+		)
 
 	def perform_update(self, serializer):
 		building = serializer.validated_data.get(
@@ -92,4 +120,13 @@ class UnitViewSet(OrganizationScopedViewSet):
 			serializer.instance.building,
 		)
 		self.ensure_allowed(building.property.organization_id)
-		serializer.save()
+		unit = serializer.save()
+		record_audit(
+			action='unit.update',
+			object_type='Unit',
+			object_id=unit.pk,
+			actor=self.request.user,
+			organization=unit.building.property.organization,
+			metadata={'name': unit.name, 'status': unit.status},
+			request=self.request,
+		)

@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -11,6 +12,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.organizations.models import Organization
+from apps.organizations.models import OrganizationMembership
 from apps.tenants.models import Tenant
 
 from .models import AccountProfile
@@ -29,7 +31,8 @@ logger = logging.getLogger(__name__)
 class SignupView(APIView):
 	permission_classes = (permissions.AllowAny,)
 	authentication_classes = ()
-	throttle_classes = (ScopedRateThrottle,)
+	# ScopedRateThrottle uses process-local LocMem; disable in DEBUG for local DX.
+	throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
 	throttle_scope = 'auth_signup'
 
 	def post(self, request):
@@ -37,7 +40,7 @@ class SignupView(APIView):
 		serializer.is_valid(raise_exception=True)
 		user = serializer.save()
 		profile = user.account_profile
-		token = Token.objects.get(user=user)
+		token, _created = Token.objects.get_or_create(user=user)
 		return Response(
 			{
 				'detail': 'Account created successfully.',
@@ -152,7 +155,7 @@ class PasswordResetConfirmView(APIView):
 class LoginView(APIView):
 	permission_classes = (permissions.AllowAny,)
 	authentication_classes = ()
-	throttle_classes = (ScopedRateThrottle,)
+	throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
 	throttle_scope = 'auth_login'
 
 	def post(self, request):
@@ -161,14 +164,67 @@ class LoginView(APIView):
 		user = serializer.validated_data['user']
 		token, _created = Token.objects.get_or_create(user=user)
 		profile = getattr(user, 'account_profile', None)
-		response_data = {'token': token.key}
+		response_data = {
+			'token': token.key,
+			'first_name': user.first_name,
+			'last_name': user.last_name,
+			'email': user.email,
+		}
 		if profile is not None:
 			response_data.update({
 				'account_type': profile.account_type,
 				'organization_id': profile.organization_id,
 				'professional_trade': profile.professional_trade,
+				'phone_number': profile.phone_number,
 			})
+		memberships = OrganizationMembership.objects.filter(
+			user=user,
+			is_active=True,
+			organization__is_active=True,
+		).select_related('organization').order_by('organization__name')
+		response_data['memberships'] = [
+			{
+				'organization_id': membership.organization_id,
+				'organization_name': membership.organization.name,
+				'role': membership.role,
+			}
+			for membership in memberships
+		]
 		return Response(response_data, status=status.HTTP_200_OK)
+
+
+class MeView(APIView):
+	permission_classes = (permissions.IsAuthenticated,)
+
+	def get(self, request):
+		user = request.user
+		profile = getattr(user, 'account_profile', None)
+		memberships = OrganizationMembership.objects.filter(
+			user=user,
+		).select_related('organization').order_by('organization__name', 'id')
+		return Response(
+			{
+				'id': user.pk,
+				'username': user.get_username(),
+				'email': user.email,
+				'first_name': user.first_name,
+				'last_name': user.last_name,
+				'account_type': profile.account_type if profile is not None else '',
+				'organization_id': profile.organization_id if profile is not None else None,
+				'professional_trade': profile.professional_trade if profile is not None else '',
+				'phone_number': profile.phone_number if profile is not None else '',
+				'memberships': [
+					{
+						'organization': membership.organization_id,
+						'organization_name': membership.organization.name,
+						'role': membership.role,
+						'is_active': membership.is_active,
+					}
+					for membership in memberships
+				],
+			},
+			status=status.HTTP_200_OK,
+		)
 
 
 class LogoutView(APIView):
