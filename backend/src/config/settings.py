@@ -39,6 +39,9 @@ ALLOWED_HOSTS = [
     for host in (allowed_hosts_value or 'localhost,127.0.0.1').split(',')
     if host.strip()
 ]
+# Django's test client / APIClient uses Host: testserver by default.
+if DJANGO_ENV != 'production' and 'testserver' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('testserver')
 if DJANGO_ENV == 'production' and ('*' in ALLOWED_HOSTS or not ALLOWED_HOSTS):
     raise ImproperlyConfigured('Production DJANGO_ALLOWED_HOSTS must contain explicit hosts.')
 
@@ -170,6 +173,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_THROTTLE_RATES': {
+        # Tight defaults for non-DEBUG; relaxed below when DEBUG is on.
         'auth_signup': '5/hour',
         'auth_login': '10/minute',
         'auth_password_reset_request': '3/hour',
@@ -177,11 +181,22 @@ REST_FRAMEWORK = {
         'auth_organization_options': '60/minute',
     },
 }
+if DEBUG:
+    # LocMem throttle state survives across requests in runserver; keep local DX usable.
+    REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+        'auth_signup': '1000/hour',
+        'auth_login': '1000/minute',
+        'auth_password_reset_request': '1000/hour',
+        'auth_password_reset_confirm': '1000/hour',
+        'auth_organization_options': '1000/minute',
+    }
 
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         'CORS_ALLOWED_ORIGINS',
+        # Next.js (3000) + legacy Vite (5173) local frontends
+        'http://localhost:3000,http://127.0.0.1:3000,'
         'http://localhost:5173,http://127.0.0.1:5173',
     ).split(',')
     if origin.strip()

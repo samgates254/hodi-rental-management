@@ -443,6 +443,11 @@ export default function LandlordDashboard() {
   async function signOut() {
     const activeToken = token;
     sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem("hodi_account_type");
+    sessionStorage.removeItem("hodi_first_name");
+    sessionStorage.removeItem("hodi_last_name");
+    sessionStorage.removeItem("hodi_email");
+    sessionStorage.removeItem("hodi_phone_number");
     setToken("");
     setData(EMPTY_DATA);
     setSelectedOrganizationId("");

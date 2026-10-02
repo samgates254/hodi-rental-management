@@ -2,18 +2,21 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { clientApi, ClientApiError } from "@/lib/clientApi";
+import {
+  AUTH_TOKEN_KEY,
+  ClientApiError,
+  dashboardPathForAccountType,
+  login as apiLogin,
+  register as apiRegister,
+  type AuthResponse,
+} from "@/lib/clientApi";
 
 type UserKind = "tenant" | "landlord" | "caretaker";
 type AuthMode = "signin" | "signup";
-type AuthResponse = {
-  token: string;
-  account_type?: string;
-  memberships?: Array<{
-    organization_id: number | string;
-    organization_name: string;
-    role: string;
-  }>;
+type OrganizationMembership = {
+  organization_id: number | string;
+  organization_name: string;
+  role: string;
 };
 
 const ACCOUNT_TYPE: Record<Exclude<UserKind, "caretaker">, "TENANT" | "OWNER"> = {
@@ -22,43 +25,62 @@ const ACCOUNT_TYPE: Record<Exclude<UserKind, "caretaker">, "TENANT" | "OWNER"> =
 };
 
 function userKindFromAccountType(accountType?: string): UserKind | null {
-  if (accountType === "TENANT") return "tenant";
-  if (accountType === "OWNER") return "landlord";
+  const type = (accountType || "").toUpperCase();
+  if (type === "TENANT") return "tenant";
+  // OWNER + service pros use the landlord app area today.
+  if (type === "OWNER" || type === "SERVICE_PROFESSIONAL") {
+    return "landlord";
+  }
   return null;
 }
 
-function dashboardFor(kind: UserKind) {
+function dashboardFor(kind: UserKind, accountType?: string) {
   if (kind === "caretaker") return "/caretakers";
-  return kind === "landlord" ? "/landlords" : "/clients";
+  return dashboardPathForAccountType(accountType);
 }
 
 function errorText(error: unknown) {
   if (error instanceof ClientApiError) {
-    const payload = error.data;
-    if (payload && typeof payload === "object") {
-      const messages = Object.values(payload as Record<string, unknown>)
-        .flatMap(value => Array.isArray(value) ? value : [value])
-        .filter((value): value is string => typeof value === "string");
-      if (messages.length) return messages.join(" ");
-    }
+    const fields = error.fieldErrors();
+    const fieldMessages = Object.values(fields).filter(Boolean);
+    if (fieldMessages.length) return fieldMessages.join(" ");
     return error.message;
   }
   return error instanceof Error ? error.message : "Something went wrong. Please try again.";
 }
 
+/** Persist token + role from flat Django auth response; profile fields from the form when present. */
 function rememberSession(
-  token: string,
-  accountType: string | undefined,
-  profile: { first_name?: string; last_name?: string; email?: string; phone_number?: string },
-  memberships: AuthResponse["memberships"] = [],
+  auth: AuthResponse,
+  profile: {
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+    phone_number?: string;
+  } = {},
+  memberships: OrganizationMembership[] = [],
 ) {
-  sessionStorage.setItem("hodi_api_token", token);
-  sessionStorage.setItem("hodi_account_type", accountType ?? "");
+  sessionStorage.setItem(AUTH_TOKEN_KEY, auth.token);
+  sessionStorage.setItem("hodi_account_type", auth.account_type ?? "");
   sessionStorage.setItem("hodi_memberships", JSON.stringify(memberships));
   sessionStorage.setItem("hodi_first_name", profile.first_name ?? "");
   sessionStorage.setItem("hodi_last_name", profile.last_name ?? "");
   sessionStorage.setItem("hodi_email", profile.email ?? "");
   sessionStorage.setItem("hodi_phone_number", profile.phone_number ?? "");
+}
+
+function membershipsFromAuth(auth: AuthResponse): OrganizationMembership[] {
+  const memberships = (auth as AuthResponse & { memberships?: unknown }).memberships;
+  if (!Array.isArray(memberships)) return [];
+  return memberships.filter((membership): membership is OrganizationMembership => {
+    if (!membership || typeof membership !== "object") return false;
+    const item = membership as Record<string, unknown>;
+    return (
+      (typeof item.organization_id === "number" || typeof item.organization_id === "string") &&
+      typeof item.organization_name === "string" &&
+      typeof item.role === "string"
+    );
+  });
 }
 
 export default function AuthPage({ mode }: { mode: AuthMode }) {
@@ -92,45 +114,65 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
           email: String(form.get("email") ?? "").trim(),
           phone_number: String(form.get("phone_number") ?? "").trim(),
         };
-        const response = await clientApi.post<AuthResponse>("/api/v1/accounts/signup/", {
+        const password_confirm = String(form.get("password_confirm") ?? "");
+        if (password !== password_confirm) {
+          setError("Passwords do not match.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        const organization_name = String(form.get("organization_name") ?? "").trim();
+        if (userKind === "landlord" && !organization_name) {
+          setError("Organization / company name is required for landlord accounts.");
+          setIsSubmitting(false);
+          return;
+        }
+        if (!username) {
+          setError("Username is required.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        const auth = await apiRegister({
           account_type: ACCOUNT_TYPE[userKind],
           username,
           ...profile,
-          ...(userKind === "landlord"
-            ? { organization_name: String(form.get("organization_name") ?? "").trim() }
-            : {}),
           password,
-          password_confirm: String(form.get("password_confirm") ?? ""),
+          password_confirm,
+          ...(userKind === "landlord" ? { organization_name } : {}),
         });
-        const actualKind = userKindFromAccountType(response.data.account_type);
-        if (!response.data.token || !actualKind) {
-          throw new Error("Your account was created, but the API returned an unsupported account type.");
+
+        const accountType = auth.account_type;
+        const actualKind = userKindFromAccountType(accountType);
+        if (!auth.token || !actualKind || actualKind !== userKind) {
+          throw new Error(
+            "Your account was created, but the API returned an unsupported account type.",
+          );
         }
-        rememberSession(response.data.token, response.data.account_type, profile, response.data.memberships);
-        window.location.assign(dashboardFor(actualKind));
+        rememberSession(auth, profile);
+        window.location.assign(dashboardFor(actualKind, accountType));
         return;
       }
 
-      const response = await clientApi.post<AuthResponse>("/api/v1/accounts/login/", {
-        username,
-        password,
-      });
-      const hasCaretakerMembership = response.data.memberships?.some(
+      const auth = await apiLogin({ username, password });
+      const memberships = membershipsFromAuth(auth);
+      const hasCaretakerMembership = memberships.some(
         membership => membership.role === "CARETAKER",
-      ) ?? false;
+      );
       const actualKind = userKind === "caretaker"
         ? hasCaretakerMembership ? "caretaker" : null
-        : userKindFromAccountType(response.data.account_type);
-      if (!response.data.token || !actualKind) {
+        : userKindFromAccountType(auth.account_type);
+      if (!auth.token || !actualKind) {
         throw new Error(userKind === "caretaker"
           ? "This account does not have an active caretaker membership."
           : "This account type does not have a Hodi dashboard yet.");
       }
       if (actualKind !== userKind) {
-        throw new Error(`This account is set up for ${actualKind === "tenant" ? "client" : "caretaker"} access.`);
+        const accessType = actualKind === "tenant" ? "client" : "landlord";
+        throw new Error(`This account is set up for ${accessType} access.`);
       }
-      rememberSession(response.data.token, response.data.account_type, {}, response.data.memberships);
-      window.location.assign(dashboardFor(actualKind));
+      rememberSession(auth, {}, memberships);
+      window.location.assign(dashboardFor(actualKind, auth.account_type));
     } catch (submitError) {
       setError(errorText(submitError));
     } finally {

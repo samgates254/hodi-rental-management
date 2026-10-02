@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -30,7 +31,8 @@ logger = logging.getLogger(__name__)
 class SignupView(APIView):
 	permission_classes = (permissions.AllowAny,)
 	authentication_classes = ()
-	throttle_classes = (ScopedRateThrottle,)
+	# ScopedRateThrottle uses process-local LocMem; disable in DEBUG for local DX.
+	throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
 	throttle_scope = 'auth_signup'
 
 	def post(self, request):
@@ -38,7 +40,7 @@ class SignupView(APIView):
 		serializer.is_valid(raise_exception=True)
 		user = serializer.save()
 		profile = user.account_profile
-		token = Token.objects.get(user=user)
+		token, _created = Token.objects.get_or_create(user=user)
 		return Response(
 			{
 				'detail': 'Account created successfully.',
@@ -153,7 +155,7 @@ class PasswordResetConfirmView(APIView):
 class LoginView(APIView):
 	permission_classes = (permissions.AllowAny,)
 	authentication_classes = ()
-	throttle_classes = (ScopedRateThrottle,)
+	throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
 	throttle_scope = 'auth_login'
 
 	def post(self, request):
