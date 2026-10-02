@@ -301,6 +301,7 @@ export default function CaretakerDashboard() {
           <a href="#issues">Maintenance issues</a>
           <a href="#maintenance-requests">Work orders</a>
           <a href="#payments">Rent status</a>
+          <a href="/marketplace">Browse marketplace</a>
         </nav>
         <div className="caretaker-sidebar-bottom">
           <span>{organizationName}</span>

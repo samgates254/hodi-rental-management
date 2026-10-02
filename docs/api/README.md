@@ -17,6 +17,23 @@ In Next.js development, `/api/v1/` is proxied to `http://127.0.0.1:8000` by defa
 - `GET /tenants/` and `POST /tenants/` — tenant records. Creation accepts `organization`, `first_name`, `last_name`, and `phone_number`; `email` is optional.
 - `GET /leases/` — leases. `monthly_rent_minor` is stored in minor currency units.
 
+## Marketplace
+
+Public discovery (no authentication):
+
+- `GET /marketplace/listings/` — published available units with no active lease. Filters: `location`, `min_rent`, `max_rent`, `bedrooms`, `bathrooms`, `furnished`, `amenity`, `ordering`.
+- `GET /marketplace/listings/{id}/` and `GET /marketplace/listings/{id}/photos/{photo_id}/` — public listing and photo bytes.
+- `POST /marketplace/inquiries/` — send an inquiry. This does not reserve the unit.
+
+Owner / property manager only:
+
+- `GET/POST /marketplace/manage/listings/`
+- `GET/PATCH/DELETE /marketplace/manage/listings/{id}/`
+- `POST /marketplace/manage/listings/{id}/publish/` and `.../unpublish/`
+- photo and inquiry endpoints under the managed listing
+
+Public payloads include title, rent, rooms, amenities, area, city, property name, unit label, and photos. They do not include organization id, unit id, tenant, lease, landlord private contact, national ID, or internal financial rows.
+
 ## Caretaker dashboard
 
 - `GET /maintenance/issues/` — list issues in active organizations where the user has an `OWNER`, `PROPERTY_MANAGER`, `CARETAKER`, or `TECHNICIAN` membership; a linked tenant may also read only their own issues. Staff with multiple memberships may select one using `?organization={id}`.

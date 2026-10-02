@@ -62,6 +62,16 @@ RESOURCE_ROLE_ACCESS = {
             OrganizationMembership.Role.PROPERTY_MANAGER,
         ),
     },
+    'marketplace': {
+        'read': (
+            OrganizationMembership.Role.OWNER,
+            OrganizationMembership.Role.PROPERTY_MANAGER,
+        ),
+        'write': (
+            OrganizationMembership.Role.OWNER,
+            OrganizationMembership.Role.PROPERTY_MANAGER,
+        ),
+    },
 }
 
 

@@ -12,6 +12,7 @@ import { Logo } from "@/components/layout/Logo";
 import AuditLogPanel from "@/components/ops/AuditLogPanel";
 import BillingWorkspace from "@/components/ops/BillingWorkspace";
 import MaintenanceRequestsPanel from "@/components/ops/MaintenanceRequestsPanel";
+import MarketplaceManager from "@/components/marketplace/MarketplaceManager";
 import NotificationBell from "@/components/ops/NotificationBell";
 import "./landlord-dashboard.css";
 import "@/components/ops/ops.css";
@@ -849,6 +850,8 @@ export default function LandlordDashboard() {
           {showPortfolio && <a href="#units"><Icon name="building" />Units</a>}
           {showPortfolio && <a href="#tenants"><Icon name="people" />Tenants</a>}
           {showPortfolio && <a href="#leases"><Icon name="lease" />Leases</a>}
+          {canWritePortfolio && <a href="#marketplace"><Icon name="building" />Listings</a>}
+          <Link href="/marketplace">Marketplace</Link>
           {canReadBilling && <a href="#billing"><Icon name="lease" />Billing</a>}
           {canMaintenance && <a href="#maintenance-requests"><Icon name="building" />Maintenance</a>}
           {canManageTeam && <a href="#team"><Icon name="people" />Team</a>}
@@ -1408,6 +1411,14 @@ export default function LandlordDashboard() {
               )}
             </section>
             </>}
+
+            {canWritePortfolio && !previewMode && (
+              <MarketplaceManager
+                units={organizationData.units}
+                buildings={organizationData.buildings}
+                properties={organizationData.properties}
+              />
+            )}
 
             {canReadBilling && !previewMode && (
               <BillingWorkspace

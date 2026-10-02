@@ -1783,6 +1783,15 @@
   margin: 5px 0 0;
 }
 
+.dashboard-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: #138885;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .portal-empty-inline,
 .portal-table-empty {
   flex-direction: column;

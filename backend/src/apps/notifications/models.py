@@ -11,6 +11,7 @@ class Notification(models.Model):
 		LEASE_TERMINATED = 'LEASE_TERMINATED', 'Lease terminated'
 		INVOICE_POSTED = 'INVOICE_POSTED', 'Invoice posted'
 		MEMBERSHIP_CHANGED = 'MEMBERSHIP_CHANGED', 'Membership changed'
+		MARKETPLACE_INQUIRY = 'MARKETPLACE_INQUIRY', 'Marketplace inquiry'
 
 	user = models.ForeignKey(
 		settings.AUTH_USER_MODEL,

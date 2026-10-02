@@ -1657,7 +1657,7 @@ export default function ClientDashboard() {
                     if (term && (paymentMatch || invoiceMatch)) {
                       scrollToSection(paymentMatch ? "receipts" : "pay-rent");
                     } else {
-                      setPageNotice("Room browsing isn’t available yet. Hodi has no marketplace catalog.");
+                      setPageNotice("Published homes are listed on the public marketplace.");
                       scrollToSection("browse-rooms");
                     }
                     setMobileSearchOpen(false);
@@ -1868,16 +1868,15 @@ export default function ClientDashboard() {
             eyebrow="Find your next place"
             title="Available rooms"
             titleId="available-rooms-title"
-            description={MARKETPLACE_AVAILABLE
-              ? `${propertyCount || filteredProperties.length} ${propertyCount === 1 ? "room" : "rooms"} to explore across Kenya`
-              : "A public room marketplace is not part of Hodi yet."}
+            description="Published homes are listed on the public marketplace. Opening it does not reserve a home."
           />
           {!MARKETPLACE_AVAILABLE && (
             <div className="dashboard-empty-rooms">
               <span className="dashboard-empty-room-icon"><Icon name="home" size={26} /></span>
               <div>
-                <h3>Room browsing isn’t available</h3>
-                <p>There is no listings catalog on the server, so this screen does not call a missing API or show sample rooms. Your current home stays under My home.</p>
+                <h3>Browse published homes</h3>
+                <p>Available listings live on the public marketplace. This portal does not book a viewing or mark a home as rented.</p>
+                <Link href="/marketplace" className="dashboard-link">Open marketplace</Link>
               </div>
             </div>
           )}
