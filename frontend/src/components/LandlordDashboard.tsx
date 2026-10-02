@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { Logo } from "@/components/layout/Logo";
 import "./landlord-dashboard.css";
 
 const API_ROOT = "/api/v1";
@@ -68,6 +69,26 @@ type Lease = {
   monthly_rent_minor: number;
   security_deposit_minor: number;
   status: "DRAFT" | "ACTIVE" | "TERMINATED" | "EXPIRED" | string;
+};
+
+type OrganizationMembership = {
+  organization_id: Identifier;
+  organization_name: string;
+  role: string;
+};
+
+type TeamMember = {
+  id: Identifier;
+  organization: Identifier;
+  user: Identifier;
+  username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string;
+  role: "PROPERTY_MANAGER" | "CARETAKER" | string;
+  is_active: boolean;
+  created_at: string;
 };
 
 type DashboardData = {
@@ -295,7 +316,7 @@ function LoginForm({
 
   return (
     <main className="landlord-login">
-      <a className="landlord-wordmark" href="/">hodi<span>.</span></a>
+      <Logo size={40} className="landlord-login-logo" wordmarkClassName="text-charcoal" />
       <section className="landlord-login-card">
         <span className="landlord-eyebrow">PROPERTY OPERATIONS</span>
         <h1>Welcome back</h1>
@@ -334,6 +355,7 @@ function LoginForm({
 export default function LandlordDashboard() {
   const [token, setToken] = useState("");
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
+  const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -341,7 +363,14 @@ export default function LandlordDashboard() {
   const [notice, setNotice] = useState("");
   const [organizationFormOpen, setOrganizationFormOpen] = useState(false);
   const [propertyFormOpen, setPropertyFormOpen] = useState(false);
+  const [buildingFormOpen, setBuildingFormOpen] = useState(false);
+  const [unitFormOpen, setUnitFormOpen] = useState(false);
   const [tenantFormOpen, setTenantFormOpen] = useState(false);
+  const [leaseFormOpen, setLeaseFormOpen] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [isLoadingTeam, setIsLoadingTeam] = useState(false);
+  const [teamError, setTeamError] = useState("");
+  const [teamFormOpen, setTeamFormOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
 
@@ -387,15 +416,72 @@ export default function LandlordDashboard() {
     if (new URLSearchParams(window.location.search).get("preview") === "1") {
       setPreviewMode(true);
       setData(PREVIEW_DATA);
+      setMemberships([{ organization_id: 1, organization_name: "Hodi Demo Properties", role: "OWNER" }]);
       setSelectedOrganizationId(String(PREVIEW_DATA.organizations[0].id));
       setToken("preview");
       return;
     }
     const savedToken = sessionStorage.getItem(TOKEN_KEY);
     if (!savedToken) return;
+    try {
+      const savedMemberships: unknown = JSON.parse(sessionStorage.getItem("hodi_memberships") ?? "[]");
+      setMemberships(Array.isArray(savedMemberships) ? savedMemberships as OrganizationMembership[] : []);
+    } catch {
+      setMemberships([]);
+    }
     setToken(savedToken);
     void loadDashboard(savedToken);
   }, [loadDashboard]);
+
+  const canManageTeam = previewMode || memberships.some(
+    membership => String(membership.organization_id) === selectedOrganizationId && membership.role === "OWNER",
+  );
+
+  useEffect(() => {
+    if (previewMode) {
+      setTeamMembers([{
+        id: "preview-manager",
+        organization: 1,
+        user: 3,
+        username: "sam.manager",
+        first_name: "Sam",
+        last_name: "Kamau",
+        email: "sam.manager@example.com",
+        phone_number: "+254 712 345 678",
+        role: "PROPERTY_MANAGER",
+        is_active: true,
+        created_at: "2026-01-15T00:00:00Z",
+      }]);
+      setIsLoadingTeam(false);
+      return;
+    }
+    if (!token || !selectedOrganizationId || !canManageTeam) {
+      setTeamMembers([]);
+      setTeamError("");
+      setIsLoadingTeam(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingTeam(true);
+    setTeamError("");
+    void apiRequest<ApiList<TeamMember>>(
+      `/organizations/staff/?organization=${encodeURIComponent(selectedOrganizationId)}`,
+      token,
+    ).then(response => {
+      if (!cancelled) setTeamMembers(listFromResponse(response));
+    }).catch(error => {
+      if (!cancelled) {
+        setTeamError(error instanceof Error ? error.message : "Team members couldn’t be loaded.");
+      }
+    }).finally(() => {
+      if (!cancelled) setIsLoadingTeam(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageTeam, previewMode, selectedOrganizationId, token]);
 
   const organization = data.organizations.find(org => String(org.id) === selectedOrganizationId);
   const organizationData = useMemo(() => {
@@ -425,12 +511,19 @@ export default function LandlordDashboard() {
     setIsSigningIn(true);
     setPageError("");
     try {
-      const response = await apiRequest<{ token: string }>("/accounts/login/", undefined, {
+      const response = await apiRequest<{
+        token: string;
+        account_type?: string;
+        memberships?: OrganizationMembership[];
+      }>("/accounts/login/", undefined, {
         method: "POST",
         body: JSON.stringify({ username, password }),
       });
       if (!response.token) throw new Error("The API didn’t return an authentication token.");
       sessionStorage.setItem(TOKEN_KEY, response.token);
+      sessionStorage.setItem("hodi_account_type", response.account_type ?? "");
+      sessionStorage.setItem("hodi_memberships", JSON.stringify(response.memberships ?? []));
+      setMemberships(response.memberships ?? []);
       setToken(response.token);
       await loadDashboard(response.token);
     } catch (error) {
@@ -448,9 +541,11 @@ export default function LandlordDashboard() {
     sessionStorage.removeItem("hodi_last_name");
     sessionStorage.removeItem("hodi_email");
     sessionStorage.removeItem("hodi_phone_number");
+    sessionStorage.removeItem("hodi_memberships");
     setToken("");
     setData(EMPTY_DATA);
     setSelectedOrganizationId("");
+    setMemberships([]);
     setPageError("");
     try {
       await apiRequest<void>("/accounts/logout/", activeToken, { method: "POST" });
@@ -484,6 +579,54 @@ export default function LandlordDashboard() {
       await loadDashboard(token);
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "The property couldn’t be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function createBuilding(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setIsSaving(true);
+    setPageError("");
+    try {
+      await apiRequest<Building>("/properties/buildings/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          property: Number(form.get("property")),
+          name: String(form.get("name") ?? "").trim(),
+        }),
+      });
+      setBuildingFormOpen(false);
+      setNotice("Building added.");
+      await loadDashboard(token);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "The building couldn’t be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function createUnit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setIsSaving(true);
+    setPageError("");
+    try {
+      await apiRequest<Unit>("/properties/units/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          building: Number(form.get("building")),
+          name: String(form.get("name") ?? "").trim(),
+          bedrooms: Number(form.get("bedrooms") ?? 0),
+          status: String(form.get("status") ?? "AVAILABLE"),
+        }),
+      });
+      setUnitFormOpen(false);
+      setNotice("Unit added.");
+      await loadDashboard(token);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "The unit couldn’t be added.");
     } finally {
       setIsSaving(false);
     }
@@ -537,6 +680,76 @@ export default function LandlordDashboard() {
     }
   }
 
+  async function createLease(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setIsSaving(true);
+    setPageError("");
+    try {
+      await apiRequest<Lease>("/leases/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          tenant: Number(form.get("tenant")),
+          unit: Number(form.get("unit")),
+          reference: String(form.get("reference") ?? "").trim(),
+          start_date: String(form.get("start_date") ?? ""),
+          end_date: String(form.get("end_date") ?? "") || null,
+          monthly_rent_minor: Math.round(Number(form.get("monthly_rent")) * 100),
+          security_deposit_minor: Math.round(Number(form.get("security_deposit") || 0) * 100),
+          status: String(form.get("status") ?? "DRAFT"),
+        }),
+      });
+      setLeaseFormOpen(false);
+      setNotice("Lease added.");
+      await loadDashboard(token);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "The lease couldn’t be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function createTeamMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!organization) return;
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get("password") ?? "");
+    const passwordConfirm = String(form.get("password_confirm") ?? "");
+    if (password !== passwordConfirm) {
+      setTeamError("The passwords do not match.");
+      return;
+    }
+
+    const role = String(form.get("role") ?? "CARETAKER");
+    setIsSaving(true);
+    setTeamError("");
+    try {
+      const staffMember = await apiRequest<TeamMember>("/organizations/staff/", token, {
+        method: "POST",
+        body: JSON.stringify({
+          organization: organization.id,
+          username: String(form.get("username") ?? "").trim(),
+          email: String(form.get("email") ?? "").trim(),
+          first_name: String(form.get("first_name") ?? "").trim(),
+          last_name: String(form.get("last_name") ?? "").trim(),
+          phone_number: String(form.get("phone_number") ?? "").trim(),
+          role,
+          password,
+          password_confirm: passwordConfirm,
+        }),
+      });
+      setTeamMembers(current => [staffMember, ...current]);
+      setTeamFormOpen(false);
+      setNotice(
+        `${role === "CARETAKER" ? "Caretaker" : "Manager"} account created. Share the initial password securely; they should sign in using ${role === "CARETAKER" ? "Caretaker" : "Landlord"} access.`,
+      );
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "The team account couldn’t be created.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   useEffect(() => {
     if (!notice) return;
     const timeout = window.setTimeout(() => setNotice(""), 4000);
@@ -556,13 +769,15 @@ export default function LandlordDashboard() {
   return (
     <div className="landlord-app">
       <aside className="landlord-sidebar">
-        <a className="landlord-wordmark" href="/">hodi<span>.</span></a>
+        <Logo size={36} className="landlord-sidebar-logo" wordmarkClassName="text-white" />
         <span className="landlord-sidebar-label">WORKSPACE</span>
         <nav className="landlord-nav" aria-label="Landlord dashboard">
           <a className="is-active" href="#overview"><Icon name="overview" />Overview</a>
           <a href="#properties"><Icon name="building" />Properties</a>
+          {canManageTeam && <a href="#team"><Icon name="people" />Team</a>}
           <a href="#tenants"><Icon name="people" />Tenants</a>
           <a href="#leases"><Icon name="lease" />Leases</a>
+          <a href="#units"><Icon name="building" />Units</a>
         </nav>
         <div className="landlord-sidebar-bottom">
           <span className="landlord-sidebar-label">HODI PROPERTY OPERATIONS</span>
@@ -686,13 +901,24 @@ export default function LandlordDashboard() {
                   <h2>Properties &amp; units</h2>
                 </div>
                 {!previewMode && (
-                  <button
-                    type="button"
-                    className="landlord-button landlord-button--primary"
-                    onClick={() => setPropertyFormOpen(open => !open)}
-                  >
-                    <Icon name="plus" />Add property
-                  </button>
+                  <div className="landlord-section-actions">
+                    <button
+                      type="button"
+                      className="landlord-button landlord-button--quiet"
+                      disabled={!organizationData.properties.length}
+                      title={!organizationData.properties.length ? "Add a property first" : undefined}
+                      onClick={() => setBuildingFormOpen(open => !open)}
+                    >
+                      <Icon name="plus" />Add building
+                    </button>
+                    <button
+                      type="button"
+                      className="landlord-button landlord-button--primary"
+                      onClick={() => setPropertyFormOpen(open => !open)}
+                    >
+                      <Icon name="plus" />Add property
+                    </button>
+                  </div>
                 )}
               </div>
               {propertyFormOpen && (
@@ -707,6 +933,24 @@ export default function LandlordDashboard() {
                   <div className="landlord-form-actions">
                     <button type="button" className="landlord-button landlord-button--quiet" onClick={() => setPropertyFormOpen(false)}>Cancel</button>
                     <button className="landlord-button landlord-button--primary" disabled={isSaving}>{isSaving ? "Saving…" : "Save property"}</button>
+                  </div>
+                </form>
+              )}
+              {buildingFormOpen && (
+                <form className="landlord-inline-form" onSubmit={createBuilding}>
+                  <h3>Add a building</h3>
+                  <div className="landlord-form-grid">
+                    <label>Property
+                      <select name="property" required defaultValue="">
+                        <option value="" disabled>Select a property</option>
+                        {organizationData.properties.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
+                      </select>
+                    </label>
+                    <label>Building name<input name="name" required maxLength={200} placeholder="e.g. Block A" /></label>
+                  </div>
+                  <div className="landlord-form-actions">
+                    <button type="button" className="landlord-button landlord-button--quiet" onClick={() => setBuildingFormOpen(false)}>Cancel</button>
+                    <button className="landlord-button landlord-button--primary" disabled={isSaving}>{isSaving ? "Saving…" : "Save building"}</button>
                   </div>
                 </form>
               )}
@@ -746,6 +990,81 @@ export default function LandlordDashboard() {
                 </div>
               )}
             </section>
+
+            {canManageTeam && <section id="team" className="landlord-section">
+              <div className="landlord-section-heading">
+                <div>
+                  <span className="landlord-eyebrow">ORGANIZATION ACCESS</span>
+                  <h2>Team</h2>
+                </div>
+                {!previewMode && (
+                  <button
+                    type="button"
+                    className="landlord-button landlord-button--primary"
+                    onClick={() => setTeamFormOpen(open => !open)}
+                  >
+                    <Icon name="plus" />Add team member
+                  </button>
+                )}
+              </div>
+              {teamError && <div className="landlord-alert" role="alert">{teamError}</div>}
+              {teamFormOpen && !previewMode && (
+                <form className="landlord-inline-form" onSubmit={createTeamMember}>
+                  <h3>Add a manager or caretaker</h3>
+                  <p className="landlord-form-note">
+                    This creates a login for {organization?.name ?? "this organization"}. Share the initial password securely.
+                  </p>
+                  <div className="landlord-form-grid">
+                    <label>First name<input name="first_name" required maxLength={150} autoComplete="given-name" /></label>
+                    <label>Last name<input name="last_name" required maxLength={150} autoComplete="family-name" /></label>
+                    <label>Username<input name="username" required maxLength={150} autoComplete="username" /></label>
+                    <label>Email<input name="email" required type="email" autoComplete="email" /></label>
+                    <label>Phone number <span className="landlord-optional">(optional)</span><input name="phone_number" type="tel" maxLength={30} autoComplete="tel" /></label>
+                    <label>Role
+                      <select name="role" defaultValue="CARETAKER">
+                        <option value="PROPERTY_MANAGER">Property manager</option>
+                        <option value="CARETAKER">Caretaker</option>
+                      </select>
+                    </label>
+                    <label>Initial password<input name="password" type="password" required minLength={8} autoComplete="new-password" /></label>
+                    <label>Confirm password<input name="password_confirm" type="password" required minLength={8} autoComplete="new-password" /></label>
+                  </div>
+                  <div className="landlord-form-actions">
+                    <button type="button" className="landlord-button landlord-button--quiet" onClick={() => { setTeamFormOpen(false); setTeamError(""); }}>Cancel</button>
+                    <button className="landlord-button landlord-button--primary" disabled={isSaving}>{isSaving ? "Creating account…" : "Create login"}</button>
+                  </div>
+                </form>
+              )}
+              {isLoadingTeam ? (
+                <div className="landlord-empty-state">Loading team members…</div>
+              ) : teamMembers.length ? (
+                <div className="landlord-table-wrap">
+                  <table className="landlord-table">
+                    <thead><tr><th>Team member</th><th>Login</th><th>Role</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {teamMembers.map(member => (
+                        <tr key={member.id}>
+                          <td>
+                            <div className="landlord-person">
+                              <span className="landlord-avatar">{member.first_name.slice(0, 1).toUpperCase()}</span>
+                              <span><strong>{`${member.first_name} ${member.last_name}`.trim() || member.username}</strong><small>{member.phone_number || "No phone number"}</small></span>
+                            </div>
+                          </td>
+                          <td><strong>{member.username}</strong><br /><small>{member.email}</small></td>
+                          <td>{displayStatus(member.role)}</td>
+                          <td><span className={`landlord-status ${member.is_active ? "is-active" : ""}`}>{member.is_active ? "Active" : "Inactive"}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="landlord-empty-state">
+                  <h3>No team members yet</h3>
+                  <p>Add property managers for operations or caretakers for maintenance and resident support.</p>
+                </div>
+              )}
+            </section>}
 
             <section id="tenants" className="landlord-section">
               <div className="landlord-section-heading">
@@ -819,8 +1138,60 @@ export default function LandlordDashboard() {
                   <span className="landlord-eyebrow">TENANCY</span>
                   <h2>Leases &amp; occupancy</h2>
                 </div>
-                <span className="landlord-section-count">{organizationData.leases.length} records</span>
+                <div className="landlord-section-actions">
+                  <span className="landlord-section-count">{organizationData.leases.length} records</span>
+                  {!previewMode && (
+                    <button
+                      type="button"
+                      className="landlord-button landlord-button--primary"
+                      disabled={!organizationData.tenants.some(tenant => tenant.is_active) || !organizationData.units.some(unit => unit.status === "AVAILABLE")}
+                      title={!organizationData.tenants.some(tenant => tenant.is_active) ? "Add an active tenant first" : !organizationData.units.some(unit => unit.status === "AVAILABLE") ? "Add an available unit first" : undefined}
+                      onClick={() => setLeaseFormOpen(open => !open)}
+                    >
+                      <Icon name="plus" />Add lease
+                    </button>
+                  )}
+                </div>
               </div>
+              {leaseFormOpen && !previewMode && (
+                <form className="landlord-inline-form" onSubmit={createLease}>
+                  <h3>Create a lease</h3>
+                  <p className="landlord-form-note">Only active tenants and available units in {organization?.name ?? "this organization"} are listed.</p>
+                  <div className="landlord-form-grid">
+                    <label>Tenant
+                      <select name="tenant" required defaultValue="">
+                        <option value="" disabled>Select a tenant</option>
+                        {organizationData.tenants.filter(tenant => tenant.is_active).map(tenant => <option key={tenant.id} value={tenant.id}>{tenant.full_name || `${tenant.first_name} ${tenant.last_name}`}</option>)}
+                      </select>
+                    </label>
+                    <label>Available unit
+                      <select name="unit" required defaultValue="">
+                        <option value="" disabled>Select a unit</option>
+                        {organizationData.units.filter(unit => unit.status === "AVAILABLE").map(unit => {
+                          const building = organizationData.buildings.find(item => String(item.id) === String(unit.building));
+                          const property = organizationData.properties.find(item => String(item.id) === String(building?.property));
+                          return <option key={unit.id} value={unit.id}>{property?.name ?? "Property"} · {building?.name ?? "Building"} · {unit.name}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <label>Lease reference<input name="reference" required maxLength={100} /></label>
+                    <label>Status
+                      <select name="status" defaultValue="ACTIVE">
+                        <option value="DRAFT">Draft</option>
+                        <option value="ACTIVE">Active</option>
+                      </select>
+                    </label>
+                    <label>Start date<input name="start_date" type="date" required /></label>
+                    <label>End date <span className="landlord-optional">(optional)</span><input name="end_date" type="date" /></label>
+                    <label>Monthly rent (KES)<input name="monthly_rent" type="number" min="0.01" step="0.01" required /></label>
+                    <label>Security deposit (KES)<input name="security_deposit" type="number" min="0" step="0.01" defaultValue="0" required /></label>
+                  </div>
+                  <div className="landlord-form-actions">
+                    <button type="button" className="landlord-button landlord-button--quiet" onClick={() => setLeaseFormOpen(false)}>Cancel</button>
+                    <button className="landlord-button landlord-button--primary" disabled={isSaving}>{isSaving ? "Saving…" : "Create lease"}</button>
+                  </div>
+                </form>
+              )}
               {organizationData.leases.length ? (
                 <div className="landlord-table-wrap">
                   <table className="landlord-table">
@@ -848,22 +1219,63 @@ export default function LandlordDashboard() {
               ) : (
                 <div className="landlord-empty-state">
                   <h3>No leases recorded</h3>
-                  <p>Lease records added to this organization will appear here.</p>
+                  <p>Create a lease when an active tenant and available unit are ready.</p>
                 </div>
               )}
             </section>
 
-            <section className="landlord-section landlord-units-section">
+            <section id="units" className="landlord-section landlord-units-section">
               <div className="landlord-section-heading">
                 <div>
                   <span className="landlord-eyebrow">UNIT REGISTER</span>
                   <h2>Unit status</h2>
                 </div>
+                {!previewMode && (
+                  <button
+                    type="button"
+                    className="landlord-button landlord-button--primary"
+                    disabled={!organizationData.buildings.length}
+                    title={!organizationData.buildings.length ? "Add a building first" : undefined}
+                    onClick={() => setUnitFormOpen(open => !open)}
+                  >
+                    <Icon name="plus" />Add unit
+                  </button>
+                )}
               </div>
+              {unitFormOpen && !previewMode && (
+                <form className="landlord-inline-form" onSubmit={createUnit}>
+                  <h3>Add a unit</h3>
+                  <div className="landlord-form-grid">
+                    <label>Building
+                      <select name="building" required defaultValue="">
+                        <option value="" disabled>Select a building</option>
+                        {organizationData.buildings.map(building => {
+                          const property = organizationData.properties.find(item => String(item.id) === String(building.property));
+                          return <option key={building.id} value={building.id}>{property?.name ?? "Property"} · {building.name}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <label>Unit name<input name="name" required maxLength={100} placeholder="e.g. A-204" /></label>
+                    <label>Bedrooms<input name="bedrooms" type="number" min="0" max="255" step="1" defaultValue="1" required /></label>
+                    <label>Status
+                      <select name="status" defaultValue="AVAILABLE">
+                        <option value="AVAILABLE">Available</option>
+                        <option value="OCCUPIED">Occupied</option>
+                        <option value="MAINTENANCE">Maintenance</option>
+                        <option value="INACTIVE">Inactive</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="landlord-form-actions">
+                    <button type="button" className="landlord-button landlord-button--quiet" onClick={() => setUnitFormOpen(false)}>Cancel</button>
+                    <button className="landlord-button landlord-button--primary" disabled={isSaving}>{isSaving ? "Saving…" : "Save unit"}</button>
+                  </div>
+                </form>
+              )}
               {organizationData.units.length ? (
                 <div className="landlord-table-wrap">
                   <table className="landlord-table">
-                    <thead><tr><th>Unit</th><th>Property</th><th>Bedrooms</th><th>Rent status</th><th>Availability</th></tr></thead>
+                    <thead><tr><th>Unit</th><th>Property / building</th><th>Bedrooms</th><th>Rent status</th><th>Availability</th></tr></thead>
                     <tbody>
                       {organizationData.units.map(unit => {
                         const building = organizationData.buildings.find(item => String(item.id) === String(unit.building));
@@ -872,7 +1284,7 @@ export default function LandlordDashboard() {
                         return (
                           <tr key={unit.id}>
                             <td><strong>{unit.name}</strong></td>
-                            <td>{property?.name ?? building?.name ?? "Property unavailable"}</td>
+                            <td>{property?.name ?? "Property unavailable"} · {building?.name ?? "Building unavailable"}</td>
                             <td>{unit.bedrooms}</td>
                             <td>{lease ? formatMoney(lease.monthly_rent_minor) : "—"}</td>
                             <td><span className={`landlord-status ${unit.status === "AVAILABLE" ? "is-active" : ""}`}>{displayStatus(unit.status)}</span></td>
@@ -885,7 +1297,7 @@ export default function LandlordDashboard() {
               ) : (
                 <div className="landlord-empty-state">
                   <h3>No units to show</h3>
-                  <p>Units are grouped under buildings. Add them to your property structure through Hodi.</p>
+                  <p>Add a building first, then add units to track occupancy and assign leases.</p>
                 </div>
               )}
             </section>

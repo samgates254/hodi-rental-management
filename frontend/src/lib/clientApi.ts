@@ -27,6 +27,10 @@ export type AccountType =
  */
 export type AuthResponse = {
   token: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone_number?: string;
   account_type?: AccountType;
   organization_id?: number | null;
   professional_trade?: string;

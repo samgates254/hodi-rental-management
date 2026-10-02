@@ -34,6 +34,10 @@ class AuthenticationApiTests(TestCase):
         )
 
     def test_login_returns_token_for_valid_credentials(self):
+        self.user.first_name = 'Teresa'
+        self.user.last_name = 'Njoroge'
+        self.user.email = 'teresa@example.com'
+        self.user.save(update_fields=('first_name', 'last_name', 'email'))
         response = self.client.post(
             '/api/v1/accounts/login/',
             {'username': 'manager', 'password': 'password'},
@@ -42,6 +46,9 @@ class AuthenticationApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['token'])
+        self.assertEqual(response.data['first_name'], 'Teresa')
+        self.assertEqual(response.data['last_name'], 'Njoroge')
+        self.assertEqual(response.data['email'], 'teresa@example.com')
         self.assertEqual(response.data['memberships'], [])
 
     def test_login_returns_active_organization_membership_details(self):

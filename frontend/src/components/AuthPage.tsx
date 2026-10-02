@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { Logo } from "@/components/layout/Logo";
 import {
   AUTH_TOKEN_KEY,
   ClientApiError,
@@ -159,9 +160,12 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
       const hasCaretakerMembership = memberships.some(
         membership => membership.role === "CARETAKER",
       );
+      const hasManagerMembership = memberships.some(
+        membership => membership.role === "PROPERTY_MANAGER",
+      );
       const actualKind = userKind === "caretaker"
         ? hasCaretakerMembership ? "caretaker" : null
-        : userKindFromAccountType(auth.account_type);
+        : userKindFromAccountType(auth.account_type) ?? (hasManagerMembership ? "landlord" : null);
       if (!auth.token || !actualKind) {
         throw new Error(userKind === "caretaker"
           ? "This account does not have an active caretaker membership."
@@ -171,7 +175,12 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         const accessType = actualKind === "tenant" ? "client" : "landlord";
         throw new Error(`This account is set up for ${accessType} access.`);
       }
-      rememberSession(auth, {}, memberships);
+      rememberSession(auth, {
+        first_name: auth.first_name?.trim() || username,
+        last_name: auth.last_name,
+        email: auth.email || username,
+        phone_number: auth.phone_number,
+      }, memberships);
       window.location.assign(dashboardFor(actualKind, auth.account_type));
     } catch (submitError) {
       setError(errorText(submitError));
@@ -181,33 +190,40 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   }
 
   const isSignup = mode === "signup";
+  const authInputClass = isSignup ? "h-10 w-full min-w-0" : "h-11 w-full min-w-0";
 
   return (
-    <main className="min-h-screen bg-[#f7f8f7] px-5 py-12 text-[#19202a] sm:px-8">
+    <main
+      className={`${isSignup
+        ? "min-h-screen bg-[#f7f8f7] px-5 pt-5 pb-6 text-[#19202a] sm:px-8 sm:pt-6"
+        : "min-h-screen bg-[#f7f8f7] px-5 py-12 text-[#19202a] sm:px-8"
+      }`}
+    >
       <div className="mx-auto flex w-full max-w-5xl flex-col">
-        <Link href="/" className="w-fit text-3xl font-extrabold tracking-[-0.08em]">
-          hodi<span className="text-[#0bacaa]">.</span>
-        </Link>
-        <div className="grid flex-1 items-center gap-12 py-12 lg:grid-cols-[1fr_440px]">
-          <section className="hidden max-w-lg lg:block">
+        <Logo size={40} className="w-fit" />
+        <div className={`grid flex-1 items-center ${isSignup
+          ? "gap-5 py-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-12 lg:py-5"
+          : "gap-12 py-12 lg:grid-cols-[1fr_440px]"
+        }`}>
+          <section key={userKind} className="hidden max-w-lg self-start pt-16 lg:block auth-role-enter">
             <p className="text-xs font-bold tracking-[0.18em] text-[#0a9290]">
               PROPERTY OPERATIONS, CONNECTED
             </p>
-            <h1 className="mt-5 font-display text-5xl font-semibold leading-tight tracking-tight">
+            <h1 className={`${isSignup ? "mt-3 text-4xl" : "mt-5 text-5xl"} font-display font-semibold leading-tight tracking-tight`}>
               {userKind === "landlord"
                 ? "Run your portfolio with clarity."
                 : userKind === "caretaker"
                   ? "Keep property operations moving."
                   : "Feel at home with Hodi."}
             </h1>
-            <p className="mt-5 text-base leading-7 text-[#687381]">
+            <p className={`${isSignup ? "mt-3" : "mt-5"} text-base leading-7 text-[#687381]`}>
               {userKind === "landlord"
                 ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
                 : userKind === "caretaker"
                   ? "Review maintenance requests, track their progress, and check residents’ rent status."
                   : "Keep your home, rent, and maintenance updates connected in one dependable place."}
             </p>
-            <div className="mt-8 flex gap-3 text-sm">
+            <div className={`${isSignup ? "mt-5" : "mt-8"} flex gap-3 text-sm`}>
               <Link className="font-semibold text-[#168582] underline-offset-4 hover:underline" href="/signin?type=landlord">
                 Landlord access
               </Link>
@@ -218,20 +234,20 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             </div>
           </section>
 
-          <section className="w-full rounded-2xl border border-[#e6e8ec] bg-white p-7 shadow-[0_18px_50px_rgba(25,32,42,0.07)] sm:p-10">
-            <p className="text-[10px] font-bold tracking-[0.16em] text-[#778391]">
+          <section className={`w-full rounded-2xl border border-[#e6e8ec] bg-white shadow-[0_18px_50px_rgba(25,32,42,0.07)] ${isSignup ? "p-4 sm:p-5" : "p-7 sm:p-10"}`}>
+            <p key={userKind} className="text-[10px] font-bold tracking-[0.16em] text-[#778391] auth-role-enter">
               {userKind === "landlord" ? "LANDLORD PORTAL" : userKind === "caretaker" ? "CARETAKER PORTAL" : "CLIENT PORTAL"}
             </p>
-            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight">
+            <h2 className={`${isSignup ? "mt-2 text-2xl" : "mt-3 text-3xl"} font-display font-semibold tracking-tight`}>
               {isSignup ? "Create your account" : "Welcome back"}
             </h2>
-            <p className="mt-2 text-sm leading-6 text-[#687381]">
+            <p className={`${isSignup ? "mt-1.5 text-xs leading-5 sm:text-sm" : "mt-2 text-sm leading-6"} text-[#687381]`}>
               {isSignup
                 ? "Choose how you use Hodi to get started."
                 : "Sign in to continue to your Hodi dashboard."}
             </p>
 
-            <div className="mt-6 grid grid-cols-2 gap-2 rounded-lg bg-[#f3f5f5] p-1">
+            <div className={`${isSignup ? "mt-4 grid-cols-2" : "mt-6 grid-cols-3"} grid gap-2 rounded-lg bg-[#f3f5f5] p-1`}>
               {(isSignup ? ["landlord", "tenant"] as const : ["landlord", "tenant", "caretaker"] as const).map(kind => (
                 <button
                   key={kind}
@@ -241,65 +257,81 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                     setUserKind(kind);
                     setError("");
                   }}
-                  className={`min-h-10 rounded-md px-3 text-sm font-semibold transition-colors ${
+                  className={`${isSignup ? "min-h-9 px-3 text-sm" : "min-h-10 min-w-0 whitespace-nowrap px-1 text-xs sm:px-2 sm:text-sm"} rounded-md font-semibold transition-colors duration-300 ease-in-out ${
                     userKind === kind
-                      ? "bg-white text-[#19202a] shadow-sm"
+                      ? "bg-[#0bacaa] text-white shadow-sm"
                       : "text-[#687381] hover:text-[#19202a]"
                   }`}
                 >
-                  {kind === "landlord" ? "Landlord" : kind === "caretaker" ? "Caretaker" : "Client / tenant"}
+                  {kind === "landlord" ? "Landlord" : kind === "caretaker" ? "Caretaker" : isSignup ? "Client / tenant" : "Tenant"}
                 </button>
               ))}
             </div>
 
-            <form className="mt-6 grid gap-4" onSubmit={submit}>
+            {!isSignup && userKind === "caretaker" && (
+              <p key="caretaker-access-hint" className="mt-2 text-xs leading-5 text-[#687381] auth-role-enter">
+                Caretaker access is assigned by your property organization.
+              </p>
+            )}
+
+            <form className={`grid ${isSignup ? "mt-3 gap-2.5" : "mt-6 gap-4"}`} onSubmit={submit}>
               {isSignup && (
                 <>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid grid-cols-2 gap-3">
                     <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
                       First name
-                      <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="first_name" autoComplete="given-name" required maxLength={150} />
+                      <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="first_name" autoComplete="given-name" required maxLength={150} />
                     </label>
                     <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
                       Last name
-                      <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="last_name" autoComplete="family-name" required maxLength={150} />
+                      <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="last_name" autoComplete="family-name" required maxLength={150} />
                     </label>
                   </div>
-                  <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                    Email
-                    <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="email" type="email" autoComplete="email" required />
-                  </label>
-                  <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                    Phone number
-                    <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="phone_number" type="tel" autoComplete="tel" maxLength={30} />
-                  </label>
-                  {userKind === "landlord" && (
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+                      Email
+                      <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="email" type="email" autoComplete="email" required />
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+                      Phone number
+                      <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="phone_number" type="tel" autoComplete="tel" maxLength={30} />
+                    </label>
+                  </div>
+                  {userKind === "landlord" && (
+                    <label key={userKind} className="grid gap-1.5 text-xs font-semibold text-[#46515d] auth-role-enter">
                       Organization name
-                      <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="organization_name" required maxLength={200} placeholder="e.g. Acacia Property Group" />
+                      <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="organization_name" required maxLength={200} placeholder="e.g. Acacia Property Group" />
                     </label>
                   )}
                 </>
               )}
               <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
                 Username
-                <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="username" autoComplete="username" required maxLength={150} />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                Password
-                <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="password" type="password" autoComplete={isSignup ? "new-password" : "current-password"} required minLength={8} />
+                <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="username" autoComplete="username" required maxLength={150} />
               </label>
               {isSignup && (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+                    Password
+                    <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="password" type="password" autoComplete="new-password" required minLength={8} />
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
+                    Confirm password
+                    <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="password_confirm" type="password" autoComplete="new-password" required minLength={8} />
+                  </label>
+                </div>
+              )}
+              {!isSignup && (
                 <label className="grid gap-1.5 text-xs font-semibold text-[#46515d]">
-                  Confirm password
-                  <input className="h-11 rounded-md border border-[#dce1e5] px-3 text-sm" name="password_confirm" type="password" autoComplete="new-password" required minLength={8} />
+                  Password
+                  <input className={`${authInputClass} rounded-md border border-[#dce1e5] px-3 text-sm`} name="password" type="password" autoComplete="current-password" required minLength={8} />
                 </label>
               )}
               {error && <p className="m-0 text-sm text-[#a52d2d]" role="alert">{error}</p>}
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="mt-1 inline-flex min-h-11 items-center justify-center rounded-md bg-[#0bacaa] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#099996] disabled:cursor-wait disabled:opacity-60"
+                className={`mt-1 inline-flex ${isSignup ? "min-h-10" : "min-h-11"} items-center justify-center rounded-md bg-[#0bacaa] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#099996] disabled:cursor-wait disabled:opacity-60`}
               >
                 {isSubmitting
                   ? isSignup ? "Creating account…" : "Signing in…"
@@ -307,15 +339,21 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
               </button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-[#687381]">
-              {isSignup ? "Already have an account?" : "New to Hodi?"}{" "}
-              <Link
-                href={`${isSignup ? "/signin" : userKind === "caretaker" ? "/signin" : "/signup"}?type=${userKind}`}
-                className="font-semibold text-[#087d7a] hover:underline"
-              >
-                {isSignup ? "Sign in" : userKind === "caretaker" ? "Caretaker access is assigned by your organization" : "Create an account"}
-              </Link>
-            </p>
+            {!isSignup && userKind === "caretaker" ? (
+              <p className="mt-6 text-center text-sm text-[#687381] auth-role-enter">
+                Need access? Contact your property organization.
+              </p>
+            ) : (
+              <p className={`${isSignup ? "mt-4" : "mt-6"} text-center text-sm text-[#687381]`}>
+                {isSignup ? "Already have an account?" : "New to Hodi?"}{" "}
+                <Link
+                  href={`${isSignup ? "/signin" : "/signup"}?type=${userKind}`}
+                  className="font-semibold text-[#087d7a] hover:underline"
+                >
+                  {isSignup ? "Sign in" : "Create an account"}
+                </Link>
+              </p>
+            )}
           </section>
         </div>
       </div>

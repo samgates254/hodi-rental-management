@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { Logo } from "@/components/layout/Logo";
 import { clientApi } from "@/lib/clientApi";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
 import "./caretaker-dashboard.css";
@@ -53,7 +54,8 @@ type RentPayment = {
 
 type ListResponse<T> = T[] | { results?: T[]; data?: T[] };
 
-function listFromResponse<T>(response: ListResponse<T>) {
+function listFromResponse<T>(response: ListResponse<T> | null | undefined) {
+  if (!response) return [];
   return Array.isArray(response) ? response : response.results ?? response.data ?? [];
 }
 
@@ -77,7 +79,10 @@ function formatDate(value: string | null | undefined) {
       }).format(date);
 }
 
-function humanize(value: string) {
+function humanize(value: string | null | undefined) {
+  if (!value) {
+    return "-";
+  }
   return value.toLowerCase().replace(/[_-]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
 }
 
@@ -159,14 +164,33 @@ export default function CaretakerDashboard() {
     setPageError("");
     try {
       const query = { organization: organizationId };
-      const [issueResponse, paymentResponse] = await Promise.all([
+      // Load independently so one failing endpoint cannot blank the whole page.
+      const [issueResult, paymentResult] = await Promise.allSettled([
         clientApi.get<ListResponse<MaintenanceIssue>>("/api/v1/maintenance/issues/", { params: query }),
         clientApi.get<ListResponse<RentPayment>>("/api/v1/billing/payments/", { params: query }),
       ]);
-      setIssues(listFromResponse(issueResponse.data));
-      setPayments(listFromResponse(paymentResponse.data));
+
+      const errors: string[] = [];
+
+      if (issueResult.status === "fulfilled") {
+        setIssues(listFromResponse(issueResult.value.data));
+      } else {
+        setIssues([]);
+        errors.push(requestError(issueResult.reason, "Unable to load maintenance issues."));
+      }
+
+      if (paymentResult.status === "fulfilled") {
+        setPayments(listFromResponse(paymentResult.value.data));
+      } else {
+        setPayments([]);
+        errors.push(requestError(paymentResult.reason, "Unable to load rent payments."));
+      }
+
+      if (errors.length > 0) {
+        setPageError(errors.join(" "));
+      }
     } catch (error) {
-      setPageError(requestError(error, "The caretaker workspace couldn’t be loaded."));
+      setPageError(requestError(error, "The caretaker workspace could not be loaded."));
     } finally {
       setIsLoading(false);
     }
@@ -268,7 +292,7 @@ export default function CaretakerDashboard() {
   return (
     <div className="caretaker-app">
       <aside className="caretaker-sidebar">
-        <Link href="/" className="caretaker-brand">hodi<span>.</span></Link>
+        <Logo size={36} className="caretaker-sidebar-logo" wordmarkClassName="text-white" />
         <p className="caretaker-sidebar-label">CARETAKER WORKSPACE</p>
         <nav aria-label="Caretaker dashboard">
           <a href="#overview">Overview</a>

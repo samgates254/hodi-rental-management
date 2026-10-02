@@ -164,12 +164,18 @@ class LoginView(APIView):
 		user = serializer.validated_data['user']
 		token, _created = Token.objects.get_or_create(user=user)
 		profile = getattr(user, 'account_profile', None)
-		response_data = {'token': token.key}
+		response_data = {
+			'token': token.key,
+			'first_name': user.first_name,
+			'last_name': user.last_name,
+			'email': user.email,
+		}
 		if profile is not None:
 			response_data.update({
 				'account_type': profile.account_type,
 				'organization_id': profile.organization_id,
 				'professional_trade': profile.professional_trade,
+				'phone_number': profile.phone_number,
 			})
 		memberships = OrganizationMembership.objects.filter(
 			user=user,

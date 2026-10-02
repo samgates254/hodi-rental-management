@@ -114,6 +114,71 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
+    def test_owner_can_create_manager_and_caretaker_accounts(self):
+        self.client.force_authenticate(self.owner)
+        password = 'Manager-strong-password-243!'
+        created = []
+        for role, username in (
+            (OrganizationMembership.Role.PROPERTY_MANAGER, 'new-manager'),
+            (OrganizationMembership.Role.CARETAKER, 'new-caretaker'),
+        ):
+            response = self.client.post(
+                reverse('organizations:staff'),
+                {
+                    'organization': self.organization.pk,
+                    'username': username,
+                    'email': f'{username}@example.com',
+                    'first_name': 'Casey',
+                    'last_name': 'Staff',
+                    'phone_number': '+254712345678',
+                    'role': role,
+                    'password': password,
+                    'password_confirm': password,
+                },
+                format='json',
+            )
+
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+            self.assertEqual(response.data['role'], role)
+            self.assertEqual(response.data['username'], username)
+            created.append((username, role))
+
+        for username, role in created:
+            user = get_user_model().objects.get(username=username)
+            self.assertTrue(user.check_password(password))
+            self.assertEqual(user.account_profile.account_type, 'UNSPECIFIED')
+            self.assertEqual(user.organization_memberships.get().role, role)
+
+            login_response = self.client.post(
+                '/api/v1/accounts/login/',
+                {'username': username, 'password': password},
+                format='json',
+            )
+            self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+            self.assertEqual(login_response.data['memberships'][0]['role'], role)
+
+    def test_non_owner_cannot_create_staff_accounts(self):
+        self.client.force_authenticate(self.member)
+        response = self.client.post(
+            reverse('organizations:staff'),
+            {
+                'organization': self.organization.pk,
+                'username': 'unauthorized-staff',
+                'email': 'unauthorized-staff@example.com',
+                'first_name': 'Unauth',
+                'last_name': 'Staff',
+                'role': OrganizationMembership.Role.CARETAKER,
+                'password': 'Manager-strong-password-243!',
+                'password_confirm': 'Manager-strong-password-243!',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(
+            get_user_model().objects.filter(username='unauthorized-staff').exists(),
+        )
+
     def test_membership_cannot_be_moved_to_another_organization(self):
         self.client.force_authenticate(self.owner)
         other_organization = Organization.objects.create(name='Other Homes')

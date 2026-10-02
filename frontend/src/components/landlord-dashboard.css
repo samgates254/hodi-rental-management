@@ -28,17 +28,9 @@
   color: #fff;
 }
 
-.landlord-wordmark {
+.landlord-sidebar-logo {
   width: fit-content;
-  color: inherit;
-  text-decoration: none;
-  font-size: 30px;
-  font-weight: 750;
-  letter-spacing: -1.8px;
-}
-
-.landlord-wordmark span {
-  color: var(--landlord-teal);
+  margin-left: 8px;
 }
 
 .landlord-sidebar-label,
@@ -193,17 +185,17 @@
 
 .landlord-button:disabled,
 .landlord-icon-button:disabled {
-  cursor: wait;
-  opacity: .65;
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .landlord-button--primary {
-  background: var(--landlord-ink);
+  background: var(--landlord-teal);
   color: #fff;
 }
 
 .landlord-button--primary:hover:not(:disabled) {
-  background: #2b3745;
+  background: #087f7c;
 }
 
 .landlord-button--quiet {
@@ -308,6 +300,18 @@
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.landlord-section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.landlord-section-actions .landlord-section-count {
+  white-space: nowrap;
 }
 
 .landlord-section-heading h2 {
@@ -511,6 +515,13 @@
   font-size: 15px;
 }
 
+.landlord-form-note {
+  margin: -7px 0 16px;
+  color: var(--landlord-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .landlord-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -534,7 +545,9 @@
 }
 
 .landlord-form input,
-.landlord-form-grid input {
+.landlord-form select,
+.landlord-form-grid input,
+.landlord-form-grid select {
   height: 40px;
   padding: 0 11px;
   border: 1px solid var(--landlord-line);
@@ -546,7 +559,9 @@
 }
 
 .landlord-form input:focus,
-.landlord-form-grid input:focus {
+.landlord-form select:focus,
+.landlord-form-grid input:focus,
+.landlord-form-grid select:focus {
   border-color: var(--landlord-teal);
   outline: 2px solid #0bacaa2e;
 }
@@ -612,11 +627,10 @@
   color: var(--landlord-ink);
 }
 
-.landlord-login > .landlord-wordmark {
+.landlord-login > .landlord-login-logo {
   position: absolute;
   top: 28px;
   left: 34px;
-  color: var(--landlord-ink);
 }
 
 .landlord-login-card {
@@ -715,10 +729,6 @@
 
   .landlord-app {
     display: block;
-  }
-
-  .landlord-sidebar .landlord-wordmark {
-    font-size: 25px;
   }
 
   .landlord-sidebar-label,

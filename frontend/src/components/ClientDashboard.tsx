@@ -27,6 +27,7 @@ const CREATE_ISSUE_API = "/api/v1/maintenance/issues/";
 const INVOICES_API = "/api/invoices/my-invoices/";
 const PAYMENTS_API = "/api/v1/billing/payments/";
 const STATEMENT_API = "/api/ledger/my-statement/";
+const PAYMENT_FLOW_AVAILABLE = false;
 
 type Property = {
   id: number | string;
@@ -84,7 +85,7 @@ type Tenancy = {
   rent_status?: string;
   rent_paid?: boolean;
   status?: string;
-  assigned_agent?: { name?: string; full_name?: string; phone?: string };
+  assigned_agent?: { name?: string; full_name?: string; phone?: string; email?: string };
   fundi?: { name?: string; full_name?: string; phone?: string };
   timeline?: Array<{
     status?: string;
@@ -240,7 +241,7 @@ const ISSUE_STEPS = [
   { key: "assigned", label: "Assigned to fundi" },
   { key: "in-progress", label: "In progress" },
   { key: "resolved", label: "Resolved" },
-  { key: "confirmed", label: "Client confirmation" },
+  { key: "confirmed", label: "Tenant confirmation" },
 ] as const;
 
 function listFromResponse<T>(data: ApiList<T> | null | undefined): T[] {
@@ -519,7 +520,7 @@ function EmptyIssues() {
       </div>
       <h3>No issues reported yet</h3>
       <p>
-        Everything looking good? If something needs attention in your flat, you
+        Everything looking good? If something needs attention in your home, you
         can report it here and follow progress in one place.
       </p>
     </div>
@@ -825,7 +826,7 @@ function IssueCard({
 }
 
 export default function ClientDashboard() {
-  const [clientName, setClientName] = useState("Client");
+  const [clientName, setClientName] = useState("Tenant");
   const [clientEmail, setClientEmail] = useState("");
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenancy, setTenancy] = useState<Tenancy | null>(null);
@@ -890,7 +891,7 @@ export default function ClientDashboard() {
     }
     const firstName = window.sessionStorage.getItem("hodi_first_name") ?? "";
     const lastName = window.sessionStorage.getItem("hodi_last_name") ?? "";
-    setClientName([firstName, lastName].filter(Boolean).join(" ") || "Client");
+    setClientName([firstName, lastName].filter(Boolean).join(" ") || "Tenant");
     setClientEmail(window.sessionStorage.getItem("hodi_email") ?? "");
     setPhoneNumber(window.sessionStorage.getItem("hodi_phone_number") ?? "");
     setIsCheckingSession(false);
@@ -1262,6 +1263,14 @@ export default function ClientDashboard() {
     : dueInDays === 0
       ? "today"
       : `in ${dueInDays} day${dueInDays === 1 ? "" : "s"}`;
+  const latestIssue = [...issues].sort((first, second) =>
+    (Date.parse(second.updated_at ?? second.last_update ?? second.created_at ?? "") || 0) -
+    (Date.parse(first.updated_at ?? first.last_update ?? first.created_at ?? "") || 0),
+  )[0];
+  const latestPayment = [...payments].sort((first, second) =>
+    (Date.parse(second.date ?? second.created_at ?? "") || 0) -
+    (Date.parse(first.date ?? first.created_at ?? "") || 0),
+  )[0];
   const issueCounts = {
     all: issues.length,
     open: issues.filter(issue => statusMatchesFilter(issue, "open")).length,
@@ -1269,20 +1278,20 @@ export default function ClientDashboard() {
     resolved: issues.filter(issue => statusMatchesFilter(issue, "resolved")).length,
   };
 
-  function contactCurrentAgent() {
-    const phone = tenancy?.landlord_phone ??
-      tenancy?.landlord?.phone ??
-      tenancy?.phone ??
-      tenancyProperty?.agent?.phone_number ??
-      tenancyProperty?.agent?.phone;
-    const email = tenancy?.landlord?.email ?? tenancyProperty?.agent?.email;
+  function contactMaintenanceManager() {
+    const manager = tenancy?.assigned_agent;
+    const phone = manager?.phone;
+    const email = manager?.email;
     if (phone) {
       const whatsappNumber = phone.replace(/\D/g, "").replace(/^0/, "254");
       window.open(`https://wa.me/${whatsappNumber}`, "_blank", "noopener,noreferrer");
     } else if (email) {
       window.location.assign(`mailto:${email}`);
     } else {
-      setPageNotice("Your agent’s contact details are not available yet.");
+      const managerName = manager?.full_name ?? manager?.name;
+      setPageNotice(managerName
+        ? `Contact details for ${managerName} are not available yet.`
+        : "Your caretaker or property manager’s contact details are not available yet.");
     }
   }
 
@@ -1505,7 +1514,7 @@ export default function ClientDashboard() {
 
   return (
     <div className={`client-dashboard portal-layout ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileMenuOpen ? "mobile-menu-open" : ""} ${mobileSearchOpen ? "mobile-search-open" : ""}`}>
-      <aside className="portal-sidebar" aria-label="Client navigation">
+      <aside className="portal-sidebar" aria-label="Tenant navigation">
         <Link className="dashboard-brand" href="/" aria-label="Hodi home">
           <img src="/apple-touch-icon.png" alt="" />
           {!sidebarCollapsed && <span>hodi</span>}
@@ -1521,12 +1530,9 @@ export default function ClientDashboard() {
         <nav className="portal-nav">
           {([
             ["overview", "Dashboard", "grid"],
-            ["my-flat", "My Flat", "home"],
-            ["pay-rent", "Pay Rent", "wallet"],
+            ["my-flat", "My home", "home"],
+            ["pay-rent", "Rent", "wallet"],
             ["maintenance", "Maintenance", "wrench"],
-            ["browse-rooms", "Browse Rooms", "building"],
-            ["receipts", "Receipts", "receipt"],
-            ["profile", "Profile", "user"],
           ] as const).map(([id, label, icon]) => (
             <button
               type="button"
@@ -1542,14 +1548,46 @@ export default function ClientDashboard() {
               {!sidebarCollapsed && <span>{label}</span>}
             </button>
           ))}
+          <details className="portal-nav-more">
+            <summary
+              className={`portal-nav-item ${["browse-rooms", "receipts", "profile"].includes(activeSection) ? "is-active" : ""}`}
+              title={sidebarCollapsed ? "More sections" : undefined}
+            >
+              <Icon name="chevron" size={19} />
+              {!sidebarCollapsed && <span>More</span>}
+            </summary>
+            <div className="portal-nav-more-items">
+              {([
+                ["browse-rooms", "Browse rooms", "building"],
+                ["receipts", "Receipts", "receipt"],
+                ["profile", "Profile & support", "user"],
+              ] as const).map(([id, label, icon]) => (
+                <button
+                  type="button"
+                  className={`portal-nav-item ${activeSection === id ? "is-active" : ""}`}
+                  key={id}
+                  title={sidebarCollapsed ? label : undefined}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    scrollToSection(id);
+                  }}
+                >
+                  <Icon name={icon} size={19} />
+                  {!sidebarCollapsed && <span>{label}</span>}
+                </button>
+              ))}
+            </div>
+          </details>
         </nav>
         <div className="portal-sidebar-bottom">
           {!sidebarCollapsed && (
             <div className="portal-sidebar-help">
-              <span><Icon name="shield" size={18} /></span>
-              <strong>Talk to your agent</strong>
-              <small>Get help with your current home.</small>
-              <button type="button" onClick={contactCurrentAgent}>Contact agent <Icon name="arrow" size={14} /></button>
+              <span><Icon name="message" size={18} /></span>
+              <div>
+                <strong>Need help at home?</strong>
+                <small>Your caretaker or property manager can help.</small>
+              </div>
+              <button type="button" onClick={contactMaintenanceManager}>Message manager <Icon name="arrow" size={14} /></button>
             </div>
           )}
           <button className="portal-nav-item portal-signout" type="button" onClick={() => void signOut()}>
@@ -1574,7 +1612,7 @@ export default function ClientDashboard() {
               onClick={() => setMobileMenuOpen(true)}
             ><Icon name="menu" /></button>
             <div>
-              <p>CLIENT PORTAL</p>
+              <p>TENANT PORTAL</p>
               <strong>Good to see you, {clientName.split(" ")[0]}.</strong>
             </div>
           </div>
@@ -1672,20 +1710,23 @@ export default function ClientDashboard() {
             <span className="portal-overview-date"><Icon name="calendar" size={16} />{new Intl.DateTimeFormat("en-KE", { weekday: "long", day: "numeric", month: "long" }).format(new Date())}</span>
           </div>
           <div className="portal-kpi-grid">
-            <SummaryCard
-              label="Rent status"
-              value={rentOverviewStatus === "Paid" ? "All clear" : rentOverviewStatus}
-              caption={rentDueTotal > 0 ? `KES ${money(rentDueTotal)} outstanding` : rentOverviewStatus === "Paid" ? "Your account is up to date" : "Check your latest rent balance"}
-              icon="wallet"
-              tone={rentDueTotal > 0 || rentOverviewStatus === "Payment due" || rentOverviewStatus === "Payment pending" ? "amber" : rentOverviewStatus === "Paid" ? "green" : "slate"}
-            />
-            <SummaryCard
-              label="Next due date"
-              value={dueDate ? formatDate(dueDate) : "Not scheduled"}
-              caption={dueInDays !== null ? dueInDays < 0 ? `Overdue by ${Math.abs(dueInDays)} days` : dueInDays === 0 ? "Due today" : `Due in ${dueInDays} days` : "No upcoming payment"}
-              icon="calendar"
-              tone={dueInDays !== null && dueInDays <= 5 ? "red" : "blue"}
-            />
+            <article className={`portal-rent-summary ${rentDueTotal > 0 ? dueInDays !== null && dueInDays < 0 ? "is-overdue" : "is-due" : rentOverviewStatus === "Paid" ? "is-clear" : ""}`}>
+              <div className="portal-rent-summary-heading">
+                <div><small>RENT AT A GLANCE</small><span>{rentOverviewStatus}</span></div>
+                <span className="portal-kpi-icon"><Icon name="wallet" size={19} /></span>
+              </div>
+              <strong className="portal-rent-summary-value">
+                {rentDueTotal > 0 ? `KES ${money(rentDueTotal)}` : rentOverviewStatus === "Paid" ? "All clear" : rentOverviewStatus}
+              </strong>
+              <small className="portal-rent-summary-caption">
+                {rentDueTotal > 0
+                  ? dueDate ? `Outstanding · due ${formatDate(dueDate)} (${dueLabel})` : "Outstanding balance · due date not available"
+                  : dueDate ? `Next due ${formatDate(dueDate)}${dueInDays !== null ? ` · ${dueLabel}` : ""}` : rentOverviewStatus === "Paid" ? "Your account is up to date" : "Check your latest rent details"}
+              </small>
+              <Button type="button" onClick={() => scrollToSection("pay-rent")}>
+                {rentDueTotal > 0 ? "Pay rent" : "View rent"}<Icon name="arrow" size={15} />
+              </Button>
+            </article>
             <SummaryCard
               label="Active issues"
               value={String(activeIssuesCount)}
@@ -1701,26 +1742,40 @@ export default function ClientDashboard() {
               tone="green"
             />
           </div>
-          {dueInDays !== null && dueInDays <= 5 && rentDueTotal > 0 && (
-            <div className="portal-due-alert">
-              <span className="portal-due-icon"><Icon name="clock" size={20} /></span>
-              <div><strong>Your rent of KES {money(rentDueTotal)} is {dueLabel}.</strong><small>Pay securely with M-Pesa and keep your tenancy in good standing.</small></div>
-              <Button type="button" onClick={() => scrollToSection("pay-rent")}>Pay now <Icon name="arrow" size={16} /></Button>
-            </div>
-          )}
           <div className="portal-quick-actions">
             <span>Quick actions</span>
-            <button type="button" onClick={() => scrollToSection("pay-rent")}><Icon name="wallet" size={17} />Pay rent</button>
             <button type="button" onClick={() => setIsReportOpen(true)}><Icon name="wrench" size={17} />Report an issue</button>
-            <button type="button" onClick={contactCurrentAgent}><Icon name="message" size={17} />Contact agent</button>
-            <button type="button" onClick={() => scrollToSection("my-flat")}><Icon name="receipt" size={17} />View lease</button>
+            <button type="button" onClick={contactMaintenanceManager}><Icon name="message" size={17} />Contact manager</button>
+            <button type="button" onClick={() => scrollToSection("my-flat")}><Icon name="home" size={17} />View home details</button>
+          </div>
+          <div className="portal-recent-activity" aria-label="Recent account activity">
+            <article className="portal-activity-item">
+              <span className="portal-activity-icon"><Icon name="wrench" size={18} /></span>
+              <div>
+                <small>Latest maintenance</small>
+                <strong>{isLoadingIssues ? "Loading updates…" : issueError ? "Updates unavailable" : latestIssue?.title ?? "No requests yet"}</strong>
+                <span>{issueError ? "Open maintenance to retry." : latestIssue ? `${humanizeStatus(latestIssue.status)} · updated ${formatDate(latestIssue.updated_at ?? latestIssue.last_update ?? latestIssue.created_at)}` : "Your reported issues will appear here."}</span>
+              </div>
+              <button type="button" onClick={() => latestIssue ? scrollToSection("maintenance") : setIsReportOpen(true)}>
+                {latestIssue ? "View" : "Report"}
+              </button>
+            </article>
+            <article className="portal-activity-item">
+              <span className="portal-activity-icon"><Icon name="receipt" size={18} /></span>
+              <div>
+                <small>Latest payment</small>
+                <strong>{isLoadingPayments ? "Loading payments…" : receiptError ? "Activity unavailable" : latestPayment ? `KES ${money(latestPayment.amount)}` : "No payment recorded"}</strong>
+                <span>{receiptError ? "Open receipts to retry." : latestPayment ? `${humanizeStatus(latestPayment.status)} · ${formatDate(latestPayment.date ?? latestPayment.created_at)}` : "Your recent rent payments will appear here."}</span>
+              </div>
+              <button type="button" onClick={() => scrollToSection("receipts")}>View</button>
+            </article>
           </div>
         </section>
 
         <section className="dashboard-section portal-section" id="my-flat" aria-labelledby="my-flat-title">
           <SectionHead
             eyebrow="Your tenancy"
-            title="My Flat"
+            title="My home"
             titleId="my-flat-title"
             description="Your home details and lease at a glance."
           />
@@ -1763,19 +1818,20 @@ export default function ClientDashboard() {
 
         <section className="dashboard-section portal-section" id="pay-rent" aria-labelledby="pay-rent-title">
           <div className="portal-section-heading">
-            <SectionHead eyebrow="Secure rent payments" title="Pay Rent" titleId="pay-rent-title" description="Make a payment in a few taps. M-Pesa STK Push is the fastest way." />
-            <span className="portal-mpesa-tag"><Icon name="shield" size={14} /> SECURE CHECKOUT</span>
+            <SectionHead eyebrow="Rent account" title="Pay Rent" titleId="pay-rent-title" description="Review your rent invoices and current balance." />
           </div>
           {billingError && <div className="dashboard-alert" role="alert">{billingError}<Button type="button" variant="ghost" onClick={() => void loadInvoices()}>Try again</Button></div>}
           <div className="portal-rent-layout">
             <div className="portal-invoice-panel">
               <div className="portal-panel-heading"><div><small>YOUR RENT LEDGER</small><h3>Outstanding balance</h3></div><span className={outstandingTotal > 0 ? "portal-amount-due" : "portal-amount-clear"}>KES {money(outstandingTotal)}</span></div>
-              {isLoadingInvoices ? <div className="portal-inline-loading"><span className="dashboard-loading-spinner" />Loading your invoices…</div> : invoices.length ? (
+              {isLoadingInvoices ? <div className="portal-inline-loading"><span className="dashboard-loading-spinner" />Loading your invoices…</div> : billingError ? (
+                <div className="portal-empty-inline"><Icon name="clock" size={20} /><strong>Invoices are unavailable</strong><span>Retry above, or contact your agent to confirm your current balance.</span></div>
+              ) : invoices.length ? (
                 <div className="portal-invoice-list">{invoices.map(invoice => {
                   const balance = invoice.balance !== undefined ? amount(invoice.balance) : Math.max(0, amount(invoice.amount) - amount(invoice.paid_amount));
                   const active = String(invoice.id) === (selectedInvoice?.id === undefined ? "" : String(selectedInvoice.id));
-                  return <button type="button" key={invoice.id} className={`portal-invoice-row ${active ? "is-selected" : ""}`} onClick={() => selectInvoice(invoice)}>
-                    <span className="portal-invoice-select">{active && <span />}</span>
+                  return <button type="button" key={invoice.id} className={`portal-invoice-row ${PAYMENT_FLOW_AVAILABLE && active ? "is-selected" : ""}`} onClick={() => selectInvoice(invoice)} disabled={!PAYMENT_FLOW_AVAILABLE}>
+                    <span className="portal-invoice-select">{PAYMENT_FLOW_AVAILABLE && active && <span />}</span>
                     <span className="portal-invoice-name"><strong>{invoice.month ?? invoice.description ?? "Rent invoice"}</strong><small>Due {formatDate(invoice.due_date)}</small></span>
                     <span className={`portal-invoice-status status-${normalizedStatus(invoice.status) || "pending"}`}>{humanizeStatus(invoice.status ?? "pending")}</span>
                     <span className="portal-invoice-balance"><strong>KES {money(balance)}</strong><small>of {money(invoice.amount)}</small></span>
@@ -1784,7 +1840,7 @@ export default function ClientDashboard() {
               ) : <div className="portal-empty-inline"><Icon name="check" size={20} /><strong>{tenancy ? "No rent invoices yet" : "Add a tenancy to view rent"}</strong><span>When your next invoice is issued, it will show here.</span></div>}
               {outstandingInvoices.length > 0 && <p className="portal-ledger-note"><Icon name="shield" size={14} />Your rent balance is kept against your tenant ledger.</p>}
             </div>
-            <form className="portal-payment-card" onSubmit={initiatePayment}>
+            {PAYMENT_FLOW_AVAILABLE ? <form className="portal-payment-card" onSubmit={initiatePayment}>
               <div className="portal-payment-card-heading"><span className="portal-payment-icon"><Icon name="wallet" size={19} /></span><div><small>MAKE A PAYMENT</small><strong>{selectedInvoice?.month ?? selectedInvoice?.description ?? "Select an invoice"}</strong></div></div>
               <label className="portal-payment-amount">Amount to pay (KES)<span className="portal-currency-input"><span>KES</span><input inputMode="numeric" type="number" min="1" step="1" max="99999999" value={paymentAmount} onChange={event => setPaymentAmount(event.target.value)} disabled={!selectedInvoice} required /></span></label>
               <div className="portal-amount-chips">
@@ -1802,7 +1858,18 @@ export default function ClientDashboard() {
               {paymentError && <p className="dashboard-form-error" role="alert">{paymentError}</p>}
               <Button type="submit" disabled={!selectedInvoice || !Number(paymentAmount) || isInitiatingPayment} className="portal-pay-button">{isInitiatingPayment ? "Starting secure payment…" : `Pay KES ${money(paymentAmount)}`}<Icon name="arrow" size={17} /></Button>
               <p className="portal-secure-note"><Icon name="shield" size={13} />Encrypted payment · Your details stay protected</p>
-            </form>
+            </form> : (
+              <div className="portal-payment-unavailable" role="status">
+                <span className="portal-payment-unavailable-icon"><Icon name="wallet" size={20} /></span>
+                <div>
+                  <strong>Online payments aren’t available yet</strong>
+                  <p>Contact your property agent to confirm your balance and current payment instructions.</p>
+                </div>
+                <Button type="button" variant="secondary" onClick={contactMaintenanceManager}>
+                  <Icon name="message" size={16} />Contact manager
+                </Button>
+              </div>
+            )}
           </div>
         </section>
 
@@ -1955,7 +2022,7 @@ export default function ClientDashboard() {
         <section className="dashboard-section dashboard-maintenance portal-section" id="maintenance" aria-labelledby="maintenance-title">
           <SectionHead
             eyebrow="Your home, cared for"
-            title="My Current Flat - Maintenance & Issues"
+            title="Maintenance & issues"
             titleId="maintenance-title"
             description="Report a problem and follow it through to resolution."
             action={
@@ -1997,7 +2064,7 @@ export default function ClientDashboard() {
             <div className="dashboard-no-tenancy">
               <div className="dashboard-empty-room-icon"><Icon name="home" size={25} /></div>
               <div>
-                <h3>No active flat linked to your account</h3>
+                <h3>No active tenancy linked to your account</h3>
                 <p>Once a tenancy is linked, you’ll be able to report and track maintenance requests here.</p>
               </div>
               {tenancyError && <span className="dashboard-inline-error">{tenancyError}</span>}
@@ -2005,9 +2072,9 @@ export default function ClientDashboard() {
           )}
 
           {tenancyError && tenancy && <p className="dashboard-inline-error">{tenancyError}</p>}
-          {issueActionError && <p className="dashboard-inline-error" role="alert">{issueActionError}</p>}
+          {tenancy && issueActionError && <p className="dashboard-inline-error" role="alert">{issueActionError}</p>}
 
-          <div className="dashboard-issue-section">
+          {!isLoadingTenancy && tenancy && <div className="dashboard-issue-section">
             <div className="dashboard-issue-toolbar">
               <div>
                 <h3>Your reported issues</h3>
@@ -2034,13 +2101,6 @@ export default function ClientDashboard() {
               </div>
             </div>
 
-            {issueError && (
-              <div className="dashboard-alert" role="alert">
-                {issueError}
-                <Button type="button" variant="ghost" onClick={() => void loadIssues()}>Try again</Button>
-              </div>
-            )}
-
             {isLoadingIssues ? (
               <div className="dashboard-issue-list" aria-label="Loading reported issues">
                 {[1, 2].map(item => (
@@ -2050,6 +2110,11 @@ export default function ClientDashboard() {
                     <div className="dashboard-skeleton dashboard-skeleton-line" />
                   </div>
                 ))}
+              </div>
+            ) : issueError ? (
+              <div className="dashboard-alert" role="alert">
+                {issueError}
+                <Button type="button" variant="ghost" onClick={() => void loadIssues()}>Try again</Button>
               </div>
             ) : filteredIssues.length ? (
               <div className="dashboard-issue-list">
@@ -2069,7 +2134,7 @@ export default function ClientDashboard() {
             ) : (
               <EmptyIssues />
             )}
-          </div>
+          </div>}
         </section>
 
         <section className="dashboard-section portal-section" id="receipts" aria-labelledby="receipts-title">
@@ -2111,21 +2176,20 @@ export default function ClientDashboard() {
           <SectionHead eyebrow="Your account" title="Profile & support" titleId="profile-title" description="Manage your contact details and find help when you need it." />
           <div className="portal-profile-card">
             <span className="portal-profile-large">{clientName.slice(0, 1).toUpperCase()}</span>
-            <div><small>CLIENT ACCOUNT</small><strong>{clientName}</strong><span>{clientEmail || "Email not available"}</span></div>
-            <button type="button" className="portal-contact-button" onClick={contactCurrentAgent}><Icon name="message" size={17} />Contact agent</button>
+            <div><small>TENANT ACCOUNT</small><strong>{clientName}</strong><span>{clientEmail || "Email not available"}</span></div>
+            <button type="button" className="portal-contact-button" onClick={contactMaintenanceManager}><Icon name="message" size={17} />Contact manager</button>
             <Button type="button" variant="ghost" onClick={() => void signOut()}><Icon name="logout" size={16} />Log out</Button>
           </div>
         </section>
       </Container>
       </div>
 
-      <nav className="portal-bottom-nav" aria-label="Mobile navigation">
+      <nav className="portal-bottom-nav" aria-label="Tenant navigation">
         {([
           ["overview", "Home", "grid"],
-          ["pay-rent", "Pay", "wallet"],
+          ["my-flat", "My home", "home"],
+          ["pay-rent", "Rent", "wallet"],
           ["maintenance", "Issues", "wrench"],
-          ["browse-rooms", "Rooms", "building"],
-          ["receipts", "Receipts", "receipt"],
         ] as const).map(([id, label, icon]) => (
           <button type="button" className={activeSection === id ? "is-active" : ""} key={id} onClick={() => scrollToSection(id)}><Icon name={icon} size={19} /><span>{label}</span></button>
         ))}

@@ -144,6 +144,30 @@
   gap: 5px;
 }
 
+.portal-nav-more {
+  display: grid;
+  gap: 5px;
+}
+
+.portal-nav-more summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.portal-nav-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.portal-nav-more[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.portal-nav-more-items {
+  display: grid;
+  gap: 5px;
+  padding-left: 12px;
+}
+
 .portal-nav-item {
   display: flex;
   min-height: 44px;
@@ -178,26 +202,60 @@
 
 .portal-sidebar-help {
   display: grid;
-  grid-template-columns: 30px 1fr;
-  gap: 4px 10px;
+  gap: 9px;
   padding: 14px;
   border: 1px solid #35414c;
   border-radius: 10px;
+  background: #202d38;
 }
 
 .portal-sidebar-help > span {
-  grid-row: span 2;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  background: #293c45;
   color: #59d5ce;
+}
+
+.portal-sidebar-help > div {
+  display: grid;
+  gap: 4px;
 }
 
 .portal-sidebar-help strong {
   font-size: 12px;
+  line-height: 1.35;
 }
 
 .portal-sidebar-help small {
   color: #aab4c0;
   font-size: 11px;
   line-height: 1.45;
+}
+
+.portal-sidebar-help > button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #405360;
+  border-radius: 7px;
+  background: #293c45;
+  color: #b5f0ec;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+
+.portal-sidebar-help > button:hover {
+  border-color: #59d5ce;
+  background: #314955;
 }
 
 .portal-sidebar-bottom > button {
@@ -476,8 +534,67 @@
 
 .portal-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.35fr) repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.portal-rent-summary {
+  display: grid;
+  min-width: 0;
+  min-height: 132px;
+  align-content: start;
+  gap: 9px;
+  padding: 18px;
+  border: 1px solid var(--portal-line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.portal-rent-summary.is-due {
+  border-color: #f0d49e;
+  background: #fffaf0;
+}
+
+.portal-rent-summary.is-overdue {
+  border-color: #e9b9b5;
+  background: #fff5f4;
+}
+
+.portal-rent-summary.is-clear {
+  border-color: #c8e5d1;
+}
+
+.portal-rent-summary-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.portal-rent-summary-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.portal-rent-summary-heading small,
+.portal-rent-summary-caption {
+  color: var(--portal-muted);
+  font-size: 11px;
+}
+
+.portal-rent-summary-heading > div > span {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.portal-rent-summary-value {
+  font-size: 25px;
+  line-height: 1.15;
+}
+
+.portal-rent-summary > button {
+  justify-self: start;
+  margin-top: 3px;
 }
 
 .portal-kpi {
@@ -604,6 +721,75 @@
   font: inherit;
   font-size: 12px;
   font-weight: 650;
+}
+
+.portal-recent-activity {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: -18px 0 38px;
+  border-top: 1px solid var(--portal-line);
+  border-bottom: 1px solid var(--portal-line);
+  background: #fff;
+}
+
+.portal-activity-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 12px;
+}
+
+.portal-activity-item + .portal-activity-item {
+  border-left: 1px solid var(--portal-line);
+}
+
+.portal-activity-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--portal-soft);
+  color: #138885;
+}
+
+.portal-activity-item > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.portal-activity-item small,
+.portal-activity-item span:not(.portal-activity-icon) {
+  color: var(--portal-muted);
+  font-size: 10px;
+}
+
+.portal-activity-item strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-activity-item > button {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #087d7a;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.portal-activity-item > button:hover {
+  background: var(--portal-soft);
 }
 
 .portal-section {
@@ -922,6 +1108,45 @@
   align-content: start;
   gap: 16px;
   background: #fbfcfc;
+}
+
+.portal-payment-unavailable {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  align-content: center;
+  justify-items: start;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--portal-line);
+  border-radius: 11px;
+  background: #f8fbfb;
+}
+
+.portal-payment-unavailable-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--portal-soft);
+  color: #087d7a;
+}
+
+.portal-payment-unavailable > div {
+  display: grid;
+  gap: 6px;
+}
+
+.portal-payment-unavailable > div strong {
+  font-size: 14px;
+}
+
+.portal-payment-unavailable > div p {
+  margin: 0;
+  color: var(--portal-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .portal-payment-card-heading {
@@ -2021,6 +2246,16 @@
     gap: 9px;
   }
 
+  .portal-rent-summary {
+    grid-column: 1 / -1;
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .portal-rent-summary-value {
+    font-size: 22px;
+  }
+
   .portal-kpi {
     min-height: 118px;
     gap: 9px;
@@ -2061,6 +2296,19 @@
     font-size: 10px;
   }
 
+  .portal-recent-activity {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-activity-item + .portal-activity-item {
+    border-top: 1px solid var(--portal-line);
+    border-left: 0;
+  }
+
+  .portal-activity-item {
+    padding-inline: 4px;
+  }
+
   .portal-section {
     margin-top: 16px;
     padding: 17px 13px;
@@ -2079,6 +2327,15 @@
 
   .portal-rent-layout {
     flex-direction: column;
+  }
+
+  .portal-payment-unavailable {
+    padding: 16px;
+  }
+
+  .portal-payment-unavailable > button {
+    width: 100%;
+    justify-content: center;
   }
 
   .portal-tenancy-summary {
