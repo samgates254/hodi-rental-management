@@ -22,6 +22,7 @@ import NotificationBell from "./ops/NotificationBell";
 import TenantLinkGate from "./ops/TenantLinkGate";
 import TenantProfileEditor from "./ops/TenantProfileEditor";
 import TenantWorkStatus from "./ops/TenantWorkStatus";
+import StatementPanel from "./tenant/StatementPanel";
 import "./client-portal.css";
 
 const MARKETPLACE_AVAILABLE = false;
@@ -1345,7 +1346,7 @@ export default function ClientDashboard() {
   }, [pageNotice]);
 
   useEffect(() => {
-    const sections = ["overview", "my-flat", "pay-rent", "maintenance", "browse-rooms", "receipts", "profile"]
+    const sections = ["overview", "my-flat", "pay-rent", "statement", "maintenance", "browse-rooms", "receipts", "profile"]
       .map(id => document.getElementById(id))
       .filter((section): section is HTMLElement => section !== null);
     if (!sections.length) return;
@@ -1554,6 +1555,7 @@ export default function ClientDashboard() {
             ["overview", "Dashboard", "grid"],
             ["my-flat", "My home", "home"],
             ["pay-rent", "Rent", "wallet"],
+            ["statement", "Statement", "receipt"],
             ["maintenance", "Maintenance", "wrench"],
           ] as const).map(([id, label, icon]) => (
             <button
@@ -1863,6 +1865,8 @@ export default function ClientDashboard() {
           </div>
         </section>
 
+        <StatementPanel />
+
         <section className="dashboard-section dashboard-rooms portal-section" id="browse-rooms" aria-labelledby="available-rooms-title">
           <SectionHead
             eyebrow="Find your next place"
@@ -2143,15 +2147,15 @@ export default function ClientDashboard() {
 
         <section className="dashboard-section portal-section" id="receipts" aria-labelledby="receipts-title">
           <div className="portal-receipts-heading">
-            <SectionHead eyebrow="Your payment history" title="Receipts" titleId="receipts-title" description="Rent payments recorded for your lease. Statement PDFs are not available yet." />
-            <Button type="button" variant="secondary" disabled>
-              <Icon name="download" size={16} />Statement PDF unavailable
+            <SectionHead eyebrow="Your payment history" title="Receipts" titleId="receipts-title" description="Rent payments recorded for your lease. The statement section builds a PDF from posted charges and payments." />
+            <Button type="button" variant="secondary" onClick={() => scrollToSection("statement")}>
+              <Icon name="download" size={16} />Open statement
             </Button>
           </div>
           <div className="portal-balance-banner">
             <span><Icon name="shield" size={20} /></span>
             <div><small>RENT RECORD</small><strong>{isLoadingPayments ? "Checking payments…" : payments.length ? `${payments.length} rent payment${payments.length === 1 ? "" : "s"} on file` : "No rent payments on file"}</strong></div>
-            <b>PDF statements aren’t available</b>
+            <b>Use Statement for the PDF</b>
           </div>
           {receiptError && <p className="dashboard-inline-error" role="alert">{receiptError}<button type="button" className="portal-text-button" onClick={() => void loadPayments()}>Retry</button></p>}
           <div className="portal-table-wrap">

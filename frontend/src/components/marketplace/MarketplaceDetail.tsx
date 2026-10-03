@@ -7,11 +7,11 @@ import { Header } from "@/components/layout/Header";
 import { Container } from "@/components/ui/Container";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage } from "@/lib/opsApi";
+import { Gallery } from "./Gallery";
 import { locationLabel, rentLabel, type PublicListing } from "./shared";
 
 export function MarketplaceDetail({ listingId }: { listingId: string }) {
   const [listing, setListing] = useState<PublicListing | null>(null);
-  const [activePhoto, setActivePhoto] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [inquiryError, setInquiryError] = useState("");
@@ -66,8 +66,6 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
     }
   }
 
-  const photo = listing?.photos[activePhoto] ?? listing?.photos[0];
-
   return (
     <>
       <Header />
@@ -84,24 +82,7 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
           {!loading && listing && (
             <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
               <div>
-                <div className="overflow-hidden rounded-2xl border border-border bg-soft-teal">
-                  {photo ? (
-                    <img src={photo.url} alt={photo.caption || listing.title} className="aspect-[4/3] w-full object-cover" />
-                  ) : (
-                    <div className="flex aspect-[4/3] items-center justify-center text-sm text-text-secondary">No photo yet</div>
-                  )}
-                </div>
-                {listing.photos.length > 1 && (
-                  <ul className="mt-3 flex gap-2 overflow-x-auto">
-                    {listing.photos.map((item, index) => (
-                      <li key={item.id}>
-                        <button type="button" className={`h-16 w-20 overflow-hidden rounded-lg border ${index === activePhoto ? "border-teal" : "border-border"}`} onClick={() => setActivePhoto(index)}>
-                          <img src={item.url} alt={item.caption || `Photo ${index + 1}`} className="h-full w-full object-cover" />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <Gallery photos={listing.photos} title={listing.title} />
                 <p className="mt-6 text-xs font-semibold uppercase tracking-[0.14em] text-teal">{listing.available ? "Available" : "Unavailable"}</p>
                 <h1 className="mt-2 text-3xl text-charcoal md:text-4xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>{listing.title}</h1>
                 <p className="mt-2 text-text-secondary">{locationLabel(listing)} · {listing.property_name} · {listing.unit_label}</p>

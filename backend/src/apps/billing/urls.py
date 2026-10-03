@@ -1,6 +1,7 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
+from .statement_views import MyStatementPdfView, MyStatementView
 from .views import RentPaymentViewSet
 from .views_ledger import ChargeViewSet, DelinquencyView, InvoiceViewSet, PaymentViewSet
 
@@ -13,6 +14,8 @@ router.register('charges', ChargeViewSet, basename='charge')
 router.register('ledger-payments', PaymentViewSet, basename='ledger-payment')
 
 urlpatterns = [
+	path('statements/me/', MyStatementView.as_view(), name='statement-me'),
+	path('statements/me/pdf/', MyStatementPdfView.as_view(), name='statement-me-pdf'),
 	path('delinquency/', DelinquencyView.as_view(), name='delinquency'),
 	*router.urls,
 ]

@@ -4,6 +4,8 @@ Versioned public endpoints live under `/api/v1/`. Add request/response examples 
 
 See [authorization.md](authorization.md) for the organization role and resource access matrix.
 
+See [statements.md](statements.md) for the authenticated tenant financial statement and PDF.
+
 ## Landlord dashboard
 
 The landlord dashboard uses the authenticated organization-scoped endpoints below. Send the DRF token as `Authorization: Token <token>` on every request; see [authentication](./authentication.md).

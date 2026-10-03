@@ -20,6 +20,49 @@ type Filters = {
   ordering: string;
 };
 
+function BrowseListingCard({ listing }: { listing: PublicListing }) {
+  const photo = primaryPhoto(listing.photos);
+  const [failed, setFailed] = useState(false);
+  return (
+    <li>
+      <Link
+        href={`/marketplace/${listing.id}`}
+        className="group block overflow-hidden rounded-2xl border border-border bg-surface shadow-soft transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
+      >
+        <div className="relative aspect-[16/10] overflow-hidden bg-soft-teal">
+          {photo && !failed ? (
+            <img
+              src={photo.url}
+              alt={photo.caption || listing.title}
+              loading="lazy"
+              decoding="async"
+              onError={() => setFailed(true)}
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-text-secondary">No photo yet</div>
+          )}
+        </div>
+        <div className="space-y-2 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-lg leading-snug text-charcoal">{listing.title}</h2>
+            <span className="shrink-0 rounded-full bg-soft-teal px-2 py-1 text-xs font-semibold text-charcoal">Available</span>
+          </div>
+          <p className="text-sm text-text-secondary">{locationLabel(listing)}</p>
+          <p className="text-base font-semibold text-charcoal">{rentLabel(listing.monthly_rent_minor)} <span className="font-normal text-text-secondary">/ month</span></p>
+          <p className="text-sm text-text-secondary">
+            {listing.bedrooms} bed · {listing.bathrooms} bath · {listing.furnished ? "Furnished" : "Unfurnished"}
+          </p>
+          {listing.amenities.length > 0 && (
+            <p className="text-sm text-text-secondary">{listing.amenities.slice(0, 4).join(" · ")}</p>
+          )}
+          <p className="text-sm font-semibold text-teal">View home</p>
+        </div>
+      </Link>
+    </li>
+  );
+}
+
 const EMPTY_FILTERS: Filters = {
   location: "",
   minRent: "",
@@ -173,37 +216,9 @@ export function MarketplaceBrowse() {
             )}
             {!loading && !error && listings.length > 0 && (
               <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {listings.map(listing => {
-                  const photo = primaryPhoto(listing.photos);
-                  return (
-                    <li key={listing.id}>
-                      <Link href={`/marketplace/${listing.id}`} className="block overflow-hidden rounded-2xl border border-border bg-surface shadow-soft transition hover:-translate-y-0.5">
-                        <div className="aspect-[4/3] bg-soft-teal">
-                          {photo ? (
-                            <img src={photo.url} alt={photo.caption || listing.title} className="h-full w-full object-cover" />
-                          ) : (
-                            <div className="flex h-full items-center justify-center text-sm text-text-secondary">No photo yet</div>
-                          )}
-                        </div>
-                        <div className="space-y-2 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <h2 className="text-lg leading-snug text-charcoal">{listing.title}</h2>
-                            <span className="shrink-0 rounded-full bg-soft-teal px-2 py-1 text-xs font-semibold text-charcoal">Available</span>
-                          </div>
-                          <p className="text-sm text-text-secondary">{locationLabel(listing)}</p>
-                          <p className="text-base font-semibold text-charcoal">{rentLabel(listing.monthly_rent_minor)} <span className="font-normal text-text-secondary">/ month</span></p>
-                          <p className="text-sm text-text-secondary">
-                            {listing.bedrooms} bed · {listing.bathrooms} bath · {listing.furnished ? "Furnished" : "Unfurnished"}
-                          </p>
-                          {listing.amenities.length > 0 && (
-                            <p className="text-sm text-text-secondary">{listing.amenities.slice(0, 4).join(" · ")}</p>
-                          )}
-                          <p className="text-sm font-semibold text-teal">View home</p>
-                        </div>
-                      </Link>
-                    </li>
-                  );
-                })}
+                {listings.map(listing => (
+                  <BrowseListingCard key={listing.id} listing={listing} />
+                ))}
               </ul>
             )}
           </div>
