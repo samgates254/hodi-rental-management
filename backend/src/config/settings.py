@@ -230,6 +230,7 @@ MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', '').strip()
 MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', '').strip()
 if MPESA_CALLBACK_URL and not MPESA_CALLBACK_URL.lower().startswith('https://'):
     raise ImproperlyConfigured('MPESA_CALLBACK_URL must use HTTPS.')
+MPESA_CALLBACK_AUTH_TOKEN = os.environ.get('MPESA_CALLBACK_AUTH_TOKEN', '').strip()
 try:
     MPESA_TIMEOUT_SECONDS = int(os.environ.get('MPESA_TIMEOUT_SECONDS', '30'))
 except ValueError as error:

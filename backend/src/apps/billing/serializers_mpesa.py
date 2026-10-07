@@ -39,7 +39,7 @@ class MpesaAttemptSerializer(serializers.ModelSerializer):
         return obj.status == MpesaAttempt.Status.STK_SENT
 
     def get_payment_settled(self, obj):
-        return False
+        return obj.status == MpesaAttempt.Status.SUCCESS
 
     def get_detail(self, obj):
         if obj.status == MpesaAttempt.Status.STK_SENT:
@@ -47,6 +47,10 @@ class MpesaAttemptSerializer(serializers.ModelSerializer):
                 'STK Push accepted for processing. '
                 'This is not payment success; settlement waits for the M-Pesa callback.'
             )
+        if obj.status == MpesaAttempt.Status.SUCCESS:
+            return 'M-Pesa payment settled onto the canonical ledger.'
         if obj.status == MpesaAttempt.Status.FAILED:
-            return 'M-Pesa did not accept the STK request. No payment was recorded.'
+            return 'M-Pesa did not complete the payment. No payment was recorded.'
+        if obj.status in (MpesaAttempt.Status.CANCELLED, MpesaAttempt.Status.TIMEOUT):
+            return 'M-Pesa did not complete the payment. No payment was recorded.'
         return 'M-Pesa payment attempt is processing.'

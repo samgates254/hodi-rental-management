@@ -6,7 +6,7 @@ See [authorization.md](authorization.md) for the organization role and resource 
 
 See [statements.md](statements.md) for the authenticated tenant financial statement and PDF.
 
-See [mpesa.md](mpesa.md) for Phase 1 M-Pesa Daraja STK initiation. M-Pesa is a provider; it does not settle Payment or the ledger yet.
+See [mpesa.md](mpesa.md) for M-Pesa Daraja STK initiation and callback settlement onto the canonical Payment ledger.
 
 ## Landlord dashboard
 
