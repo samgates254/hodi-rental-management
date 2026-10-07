@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
 import { clientApi } from "@/lib/clientApi";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
+import MaintenanceRequestsPanel from "./ops/MaintenanceRequestsPanel";
+import NotificationBell from "./ops/NotificationBell";
 import "./caretaker-dashboard.css";
 
 type OrganizationMembership = {
@@ -297,7 +299,9 @@ export default function CaretakerDashboard() {
         <nav aria-label="Caretaker dashboard">
           <a href="#overview">Overview</a>
           <a href="#issues">Maintenance issues</a>
+          <a href="#maintenance-requests">Work orders</a>
           <a href="#payments">Rent status</a>
+          <Link href="/marketplace">Browse marketplace</Link>
         </nav>
         <div className="caretaker-sidebar-bottom">
           <span>{organizationName}</span>
@@ -326,6 +330,7 @@ export default function CaretakerDashboard() {
           <button type="button" className="caretaker-refresh" onClick={() => void loadDashboard()} disabled={isLoading}>
             {isLoading ? "Refreshing…" : "Refresh"}
           </button>
+          <NotificationBell />
         </header>
 
         {pageError && <div className="caretaker-alert" role="alert">{pageError}</div>}
@@ -498,6 +503,7 @@ export default function CaretakerDashboard() {
             </div>
           )}
         </section>
+        <MaintenanceRequestsPanel organizationId={organizationId} canWrite />
       </main>
     </div>
   );

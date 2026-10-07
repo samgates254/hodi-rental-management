@@ -343,15 +343,44 @@ export async function listOrganizations(): Promise<OrganizationOption[]> {
   return Array.isArray(data) ? data : [];
 }
 
-/** Public org endpoint for tenants (backend path is singular). */
+/** Public org list used when a tenant must link after signup. Linking itself is authenticated POST. */
 export async function listTenantOrganizations(): Promise<OrganizationOption[]> {
-  const { data } = await clientApi.get<OrganizationOption[] | OrganizationOption>(
+  return listOrganizations();
+}
+
+export type MeResponse = {
+  id: number;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  account_type: string;
+  organization_id: number | null;
+  professional_trade?: string;
+  phone_number?: string;
+  memberships: Array<{
+    organization: number;
+    organization_name: string;
+    role: string;
+    is_active: boolean;
+  }>;
+};
+
+export async function fetchMe(): Promise<MeResponse> {
+  const { data } = await clientApi.get<MeResponse>("/api/v1/accounts/me/");
+  return data;
+}
+
+/** Django: POST /api/v1/accounts/tenant-organization/ { organization_id } */
+export async function linkTenantOrganization(organizationId: number): Promise<{
+  account_type: string;
+  organization_id: number;
+}> {
+  const { data } = await clientApi.post<{ account_type: string; organization_id: number }>(
     "/api/v1/accounts/tenant-organization/",
-    { skipAuth: true },
+    { organization_id: organizationId },
   );
-  if (Array.isArray(data)) return data;
-  if (data && typeof data === "object") return [data as OrganizationOption];
-  return [];
+  return data;
 }
 
 /** Route path after auth based on backend account_type. */

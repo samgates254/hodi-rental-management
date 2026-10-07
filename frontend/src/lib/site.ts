@@ -1,6 +1,7 @@
 /** Shared site navigation — works from any route. */
 export const primaryNav = [
   { label: "Platform", href: "/platform" },
+  { label: "Marketplace", href: "/marketplace" },
   { label: "Solutions", href: "/solutions" },
   { label: "About", href: "/about" },
   { label: "Contact", href: "/contact" },

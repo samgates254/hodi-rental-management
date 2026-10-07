@@ -75,9 +75,14 @@ class RentPaymentViewSet(viewsets.ModelViewSet):
 		serializer.save(recorded_by=self.request.user)
 
 	def perform_update(self, serializer):
+		self.ensure_write_access(serializer.instance.organization_id)
 		lease = serializer.validated_data.get('lease', serializer.instance.lease)
 		self.ensure_write_access(lease.organization_id)
 		serializer.save()
+
+	def perform_destroy(self, instance):
+		self.ensure_write_access(instance.organization_id)
+		instance.delete()
 
 	def ensure_write_access(self, organization_id):
 		if not OrganizationMembership.objects.filter(

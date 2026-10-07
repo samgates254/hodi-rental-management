@@ -15,18 +15,22 @@ import { Button } from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import { Container } from "../components/ui/Container";
 import SectionHead from "../components/ui/SectionHead";
-import { ClientApiError, clientApi } from "../lib/clientApi";
+import { ClientApiError, clientApi, fetchMe } from "../lib/clientApi";
 import ReportIssueModal from "./ReportIssueModal";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
+import NotificationBell from "./ops/NotificationBell";
+import TenantLinkGate from "./ops/TenantLinkGate";
+import TenantProfileEditor from "./ops/TenantProfileEditor";
+import TenantWorkStatus from "./ops/TenantWorkStatus";
+import StatementPanel from "./tenant/StatementPanel";
 import "./client-portal.css";
 
-const PROPERTY_API = "/api/properties/available/";
-const ACTIVE_TENANCY_API = "/api/tenancies/my-current/";
+const MARKETPLACE_AVAILABLE = false;
+const ACTIVE_TENANCY_API = "/api/v1/leases/";
 const ISSUES_API = "/api/v1/maintenance/issues/";
 const CREATE_ISSUE_API = "/api/v1/maintenance/issues/";
-const INVOICES_API = "/api/invoices/my-invoices/";
+const INVOICES_API = "/api/v1/billing/invoices/";
 const PAYMENTS_API = "/api/v1/billing/payments/";
-const STATEMENT_API = "/api/ledger/my-statement/";
 const PAYMENT_FLOW_AVAILABLE = false;
 
 type Property = {
@@ -158,6 +162,16 @@ type SharedRentPayment = {
   method?: string;
   created_at: string;
 };
+type LedgerInvoice = {
+  id: number | string;
+  period_start?: string;
+  period_end?: string;
+  due_date?: string;
+  status?: string;
+  notes?: string;
+  total_cents?: number;
+  balance_cents?: number;
+};
 type Invoice = {
   id: number | string;
   month?: string;
@@ -216,11 +230,57 @@ function fromSharedPayment(payment: SharedRentPayment): Payment {
     status: payment.status,
   };
 }
-type Statement = {
-  tenant_receivable?: number | string;
-  balance?: number | string;
-  cleared?: boolean;
+
+type LeaseRecord = {
+  id: number | string;
+  reference?: string;
+  start_date?: string;
+  end_date?: string | null;
+  monthly_rent_minor?: number;
+  security_deposit_minor?: number;
+  status?: string;
+  unit_name?: string;
+  property_name?: string;
+  property_city?: string;
+  organization_name?: string;
 };
+
+function fromLease(lease: LeaseRecord): Tenancy {
+  return {
+    id: lease.id,
+    flat_number: lease.unit_name,
+    unit_number: lease.unit_name,
+    start_date: lease.start_date,
+    end_date: lease.end_date ?? undefined,
+    monthly_rent: lease.monthly_rent_minor == null ? undefined : lease.monthly_rent_minor / 100,
+    deposit: lease.security_deposit_minor == null ? undefined : lease.security_deposit_minor / 100,
+    status: lease.status,
+    property: {
+      id: lease.id,
+      name: lease.property_name,
+      title: lease.reference ? `${lease.property_name ?? "Home"} · ${lease.reference}` : lease.property_name,
+      location: lease.property_city,
+    },
+    estate: lease.property_name,
+    landlord_name: lease.organization_name,
+  };
+}
+
+function fromLedgerInvoice(invoice: LedgerInvoice): Invoice {
+  const total = Number(invoice.total_cents ?? 0) / 100;
+  const balance = Number(invoice.balance_cents ?? 0) / 100;
+  const period = [invoice.period_start, invoice.period_end].filter(Boolean).join(" – ");
+  return {
+    id: invoice.id,
+    month: invoice.period_start,
+    description: invoice.notes?.trim() || (period ? `Rent ${period}` : "Rent invoice"),
+    amount: total,
+    balance,
+    paid_amount: Math.max(0, total - balance),
+    status: invoice.status,
+    due_date: invoice.due_date,
+  };
+}
 type PaymentRequest = {
   id: number | string;
   status?: string;
@@ -390,12 +450,6 @@ function daysUntil(date?: string) {
   const time = new Date(date).getTime();
   if (!Number.isFinite(time)) return null;
   return Math.ceil((time - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
-}
-
-function isRecent(date?: string) {
-  if (!date) return false;
-  const timestamp = new Date(date).getTime();
-  return Number.isFinite(timestamp) && Date.now() - timestamp <= 7 * 86_400_000;
 }
 
 function scrollToSection(id: string) {
@@ -833,7 +887,6 @@ export default function ClientDashboard() {
   const [issues, setIssues] = useState<MaintenanceIssue[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [statement, setStatement] = useState<Statement | null>(null);
   const [propertyCount, setPropertyCount] = useState(0);
   const [propertyHasNext, setPropertyHasNext] = useState(false);
   const [propertyHasPrevious, setPropertyHasPrevious] = useState(false);
@@ -844,6 +897,7 @@ export default function ClientDashboard() {
   const [isLoadingInvoices, setIsLoadingInvoices] = useState(true);
   const [isLoadingPayments, setIsLoadingPayments] = useState(true);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [needsOrganizationLink, setNeedsOrganizationLink] = useState(false);
   const [propertyError, setPropertyError] = useState("");
   const [propertyLoadError, setPropertyLoadError] = useState("");
   const [tenancyError, setTenancyError] = useState("");
@@ -867,7 +921,6 @@ export default function ClientDashboard() {
   const [activeSection, setActiveSection] = useState("overview");
   const [headerSearch, setHeaderSearch] = useState("");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"mpesa" | "bank_transfer">("mpesa");
@@ -877,7 +930,6 @@ export default function ClientDashboard() {
   const [paymentError, setPaymentError] = useState("");
   const [isInitiatingPayment, setIsInitiatingPayment] = useState(false);
   const [receiptError, setReceiptError] = useState("");
-  const [isDownloadingStatement, setIsDownloadingStatement] = useState(false);
   const propertyRequestId = useRef(0);
   const paymentStartedAt = useRef<number | null>(null);
   const headerSearchInput = useRef<HTMLInputElement>(null);
@@ -894,15 +946,36 @@ export default function ClientDashboard() {
     setClientName([firstName, lastName].filter(Boolean).join(" ") || "Tenant");
     setClientEmail(window.sessionStorage.getItem("hodi_email") ?? "");
     setPhoneNumber(window.sessionStorage.getItem("hodi_phone_number") ?? "");
-    setIsCheckingSession(false);
+    void fetchMe()
+      .then(me => {
+        if (!me.organization_id) setNeedsOrganizationLink(true);
+        const name = [me.first_name, me.last_name].filter(Boolean).join(" ");
+        if (name) setClientName(name);
+        if (me.email) setClientEmail(me.email);
+        if (me.phone_number) setPhoneNumber(me.phone_number);
+      })
+      .catch(() => {
+        window.location.replace("/signin?type=tenant");
+      })
+      .finally(() => setIsCheckingSession(false));
   }, []);
 
   const loadProperties = useCallback(async () => {
+    if (!MARKETPLACE_AVAILABLE) {
+      setIsLoadingProperties(false);
+      setProperties([]);
+      setPropertyCount(0);
+      setPropertyHasNext(false);
+      setPropertyHasPrevious(false);
+      setPropertiesServerPaginated(false);
+      setPropertyLoadError("");
+      return;
+    }
     const requestId = ++propertyRequestId.current;
     setIsLoadingProperties(true);
     setPropertyLoadError("");
     try {
-      const response = await clientApi.get<ApiPage<Property>>(PROPERTY_API, {
+      const response = await clientApi.get<ApiPage<Property>>("/api/properties/available/", {
         params: {
           location: location === "all" ? "" : location,
           price: maxPrice,
@@ -944,31 +1017,17 @@ export default function ClientDashboard() {
     setIsLoadingTenancy(true);
     setTenancyError("");
     try {
-      const response = await clientApi.get<
-        Tenancy | Tenancy[] | { results?: Tenancy[]; data?: Tenancy | Tenancy[] } | null
-      >(ACTIVE_TENANCY_API);
-      const payload = response.data;
-      let currentTenancy: Tenancy | null = null;
-      if (Array.isArray(payload)) {
-        currentTenancy = payload.find(isTenancy) ?? null;
-      } else if (payload && typeof payload === "object" && "results" in payload) {
-        currentTenancy = payload.results?.find(isTenancy) ?? null;
-      } else if (payload && typeof payload === "object" && "data" in payload) {
-        const tenancyData = payload.data;
-        currentTenancy = Array.isArray(tenancyData)
-          ? tenancyData.find(isTenancy) ?? null
-          : isTenancy(tenancyData) ? tenancyData : null;
-      } else if (isTenancy(payload)) {
-        currentTenancy = payload;
-      }
-      setTenancy(currentTenancy);
-      const contactPhone = currentTenancy?.user?.phone ?? currentTenancy?.phone;
-      if (contactPhone) setPhoneNumber(current => current || contactPhone);
+      const response = await clientApi.get<ApiList<LeaseRecord>>(ACTIVE_TENANCY_API);
+      const leases = listFromResponse(response.data);
+      const current = leases.find(lease => lease.status === "ACTIVE") ?? leases[0] ?? null;
+      setTenancy(current ? fromLease(current) : null);
     } catch (error) {
       if (error instanceof ClientApiError && error.status === 404) {
         setTenancy(null);
       } else {
-        setTenancyError("Your tenancy details couldn’t be loaded.");
+        setTenancyError(error instanceof ClientApiError
+          ? error.message
+          : "Your tenancy details couldn’t be loaded.");
       }
     } finally {
       setIsLoadingTenancy(false);
@@ -981,8 +1040,10 @@ export default function ClientDashboard() {
     try {
       const response = await clientApi.get<ApiList<SharedMaintenanceIssue>>(ISSUES_API);
       setIssues(listFromResponse(response.data).map(fromSharedIssue));
-    } catch {
-      setIssueError("Your reported issues couldn’t be loaded. Please try again.");
+    } catch (error) {
+      setIssueError(error instanceof ClientApiError
+        ? error.message
+        : "Your reported issues couldn’t be loaded. Please try again.");
     } finally {
       setIsLoadingIssues(false);
     }
@@ -992,10 +1053,12 @@ export default function ClientDashboard() {
     setIsLoadingInvoices(true);
     setBillingError("");
     try {
-      const response = await clientApi.get<ApiList<Invoice>>(INVOICES_API);
-      setInvoices(listFromResponse(response.data));
-    } catch {
-      setBillingError("Your rent invoices couldn’t be loaded. Please try again.");
+      const response = await clientApi.get<ApiList<LedgerInvoice>>(INVOICES_API);
+      setInvoices(listFromResponse(response.data).map(fromLedgerInvoice));
+    } catch (error) {
+      setBillingError(error instanceof ClientApiError
+        ? error.message
+        : "Your rent invoices couldn’t be loaded. Please try again.");
     } finally {
       setIsLoadingInvoices(false);
     }
@@ -1004,38 +1067,30 @@ export default function ClientDashboard() {
   const loadPayments = useCallback(async () => {
     setIsLoadingPayments(true);
     try {
-      const [paymentResult, statementResult] = await Promise.allSettled([
+      const [paymentResult] = await Promise.allSettled([
         clientApi.get<ApiList<SharedRentPayment>>(PAYMENTS_API),
-        clientApi.get<Statement>(STATEMENT_API),
       ]);
       if (paymentResult.status === "fulfilled") {
         setPayments(listFromResponse(paymentResult.value.data).map(fromSharedPayment));
       }
-      if (statementResult.status === "fulfilled") {
-        setStatement(statementResult.value.data);
-      }
-      setReceiptError(paymentResult.status === "rejected" && statementResult.status === "rejected"
-        ? "Your payment history and statement couldn’t be loaded."
-        : paymentResult.status === "rejected"
-          ? "Your payment history couldn’t be loaded."
-          : statementResult.status === "rejected"
-            ? "Your account statement couldn’t be loaded."
-            : "");
+      setReceiptError(paymentResult.status === "rejected"
+        ? "Your payment history couldn’t be loaded."
+        : "");
     } catch {
-      setReceiptError("Your payment history or statement couldn’t be loaded.");
+      setReceiptError("Your payment history couldn’t be loaded.");
     } finally {
       setIsLoadingPayments(false);
     }
   }, []);
 
   useEffect(() => {
-    if (isCheckingSession) return;
+    if (isCheckingSession || needsOrganizationLink) return;
     void loadProperties();
     void loadTenancy();
     void loadIssues();
     void loadInvoices();
     void loadPayments();
-  }, [isCheckingSession, loadIssues, loadInvoices, loadPayments, loadProperties, loadTenancy]);
+  }, [isCheckingSession, loadIssues, loadInvoices, loadPayments, loadProperties, loadTenancy, needsOrganizationLink]);
 
   const locations = useMemo(
     () => [...new Set(properties.map(displayLocation).filter(item => item !== "Location not listed"))].sort(),
@@ -1230,9 +1285,6 @@ export default function ClientDashboard() {
   const monthlyRent = tenancy?.monthly_rent ?? tenancyProperty?.rent ?? tenancyProperty?.rent_amount;
   const depositBalance = tenancy?.deposit_balance ?? tenancy?.deposit;
   const activeIssuesCount = issues.filter(issue => issueStep(issue.status) < 4).length;
-  const ledgerValue = statement?.tenant_receivable ?? statement?.balance;
-  const ledgerCleared = statement?.cleared === true ||
-    ledgerValue !== undefined && amount(ledgerValue) <= 0;
   const leaseStart = tenancy?.lease_start ?? tenancy?.start_date;
   const leaseEnd = tenancy?.lease_end ?? tenancy?.end_date;
   const leaseStartTimestamp = leaseStart ? new Date(leaseStart).getTime() : NaN;
@@ -1243,21 +1295,6 @@ export default function ClientDashboard() {
   const leaseMonthsUsed = Number.isFinite(leaseStartTimestamp)
     ? Math.max(0, Math.min(leaseDurationMonths, Math.floor((Date.now() - leaseStartTimestamp) / (30.4375 * 86_400_000))))
     : 0;
-  const notifications = [
-    ...(dueInDays !== null && dueInDays <= 5
-      ? [{ title: dueInDays < 0 ? "Rent overdue" : "Rent due soon", description: `Your next rent is ${dueInDays < 0 ? `overdue by ${Math.abs(dueInDays)} days` : dueInDays === 0 ? "due today" : `due in ${dueInDays} days`}.`, icon: "calendar" as const }]
-      : []),
-    ...issues.filter(issue => isRecent(issue.updated_at ?? issue.last_update)).slice(0, 3).map(issue => ({
-      title: "Maintenance update",
-      description: `${issue.title ?? "Your reported issue"} was updated ${formatDate(issue.updated_at ?? issue.last_update)}.`,
-      icon: "wrench" as const,
-    })),
-    ...payments.filter(payment => isPaymentSuccessful(payment.status) && isRecent(payment.date ?? payment.created_at)).slice(0, 2).map(payment => ({
-      title: "Payment confirmed",
-      description: `KES ${money(payment.amount)} payment received.`,
-      icon: "check" as const,
-    })),
-  ];
   const dueLabel = dueInDays !== null && dueInDays < 0
     ? `overdue by ${Math.abs(dueInDays)} day${Math.abs(dueInDays) === 1 ? "" : "s"}`
     : dueInDays === 0
@@ -1309,7 +1346,7 @@ export default function ClientDashboard() {
   }, [pageNotice]);
 
   useEffect(() => {
-    const sections = ["overview", "my-flat", "pay-rent", "maintenance", "browse-rooms", "receipts", "profile"]
+    const sections = ["overview", "my-flat", "pay-rent", "statement", "maintenance", "browse-rooms", "receipts", "profile"]
       .map(id => document.getElementById(id))
       .filter((section): section is HTMLElement => section !== null);
     if (!sections.length) return;
@@ -1456,24 +1493,6 @@ export default function ClientDashboard() {
     }
   }
 
-  async function downloadAnnualStatement() {
-    setIsDownloadingStatement(true);
-    setReceiptError("");
-    try {
-      const response = await clientApi.get<Blob>(STATEMENT_API, {
-        params: { format: "pdf", period: "annual" },
-        responseType: "blob",
-      });
-      const url = URL.createObjectURL(response.data);
-      downloadFromUrl(url, "hodi-annual-statement.pdf");
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch {
-      setReceiptError("The annual statement PDF isn’t available right now.");
-    } finally {
-      setIsDownloadingStatement(false);
-    }
-  }
-
   async function downloadReceipt(payment: Payment) {
     setReceiptError("");
     if (!payment.receipt_url) {
@@ -1512,6 +1531,10 @@ export default function ClientDashboard() {
     );
   }
 
+  if (needsOrganizationLink) {
+    return <TenantLinkGate onLinked={() => setNeedsOrganizationLink(false)} />;
+  }
+
   return (
     <div className={`client-dashboard portal-layout ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileMenuOpen ? "mobile-menu-open" : ""} ${mobileSearchOpen ? "mobile-search-open" : ""}`}>
       <aside className="portal-sidebar" aria-label="Tenant navigation">
@@ -1532,6 +1555,7 @@ export default function ClientDashboard() {
             ["overview", "Dashboard", "grid"],
             ["my-flat", "My home", "home"],
             ["pay-rent", "Rent", "wallet"],
+            ["statement", "Statement", "receipt"],
             ["maintenance", "Maintenance", "wrench"],
           ] as const).map(([id, label, icon]) => (
             <button
@@ -1635,8 +1659,7 @@ export default function ClientDashboard() {
                     if (term && (paymentMatch || invoiceMatch)) {
                       scrollToSection(paymentMatch ? "receipts" : "pay-rent");
                     } else {
-                      setPropertySearch(headerSearch);
-                      setPropertyPage(1);
+                      setPageNotice("Published homes are listed on the public marketplace.");
                       scrollToSection("browse-rooms");
                     }
                     setMobileSearchOpen(false);
@@ -1656,38 +1679,7 @@ export default function ClientDashboard() {
                 window.setTimeout(() => headerSearchInput.current?.focus(), 0);
               }}
             ><Icon name={mobileSearchOpen ? "close" : "search"} size={19} /></button>
-            <div className="portal-notification-wrap">
-              <button
-                type="button"
-                className="portal-notification-button"
-                aria-label={`Notifications, ${notifications.length} updates`}
-                aria-expanded={notificationsOpen}
-                onClick={() => setNotificationsOpen(value => !value)}
-              >
-                <Icon name="bell" />
-                {notifications.length > 0 && <span className="portal-notification-count">{notifications.length}</span>}
-              </button>
-              {notificationsOpen && (
-                <div className="portal-notification-popover">
-                  <div className="portal-notification-heading">
-                    <strong>Notifications</strong><span>{notifications.length} new</span>
-                  </div>
-                  {notifications.length ? notifications.map((notification, index) => (
-                    <button
-                      type="button"
-                      key={`${notification.title}-${index}`}
-                      onClick={() => {
-                        setNotificationsOpen(false);
-                        scrollToSection(notification.icon === "calendar" || notification.icon === "check" ? "pay-rent" : "maintenance");
-                      }}
-                    >
-                      <span><Icon name={notification.icon} size={17} /></span>
-                      <span><strong>{notification.title}</strong><small>{notification.description}</small></span>
-                    </button>
-                  )) : <p>You’re all caught up. New rent and maintenance updates will appear here.</p>}
-                </div>
-              )}
-            </div>
+            <NotificationBell />
             <span className="portal-current-flat"><Icon name="home" size={15} /> Flat {flatNumber}</span>
             <button className="portal-profile-chip" type="button" onClick={() => scrollToSection("profile")}>
               <span className="dashboard-account-avatar">{clientName.slice(0, 1).toUpperCase()}</span>
@@ -1873,14 +1865,27 @@ export default function ClientDashboard() {
           </div>
         </section>
 
+        <StatementPanel />
+
         <section className="dashboard-section dashboard-rooms portal-section" id="browse-rooms" aria-labelledby="available-rooms-title">
           <SectionHead
             eyebrow="Find your next place"
-            title="Available Rooms Near You"
+            title="Available rooms"
             titleId="available-rooms-title"
-            description={`${propertyCount || filteredProperties.length} ${propertyCount === 1 ? "room" : "rooms"} to explore across Kenya`}
+            description="Published homes are listed on the public marketplace. Opening it does not reserve a home."
           />
-
+          {!MARKETPLACE_AVAILABLE && (
+            <div className="dashboard-empty-rooms">
+              <span className="dashboard-empty-room-icon"><Icon name="home" size={26} /></span>
+              <div>
+                <h3>Browse published homes</h3>
+                <p>Available listings live on the public marketplace. This portal does not book a viewing or mark a home as rented.</p>
+                <Link href="/marketplace" className="dashboard-link">Open marketplace</Link>
+              </div>
+            </div>
+          )}
+          {MARKETPLACE_AVAILABLE && (
+          <>
           <div className="dashboard-filters">
             <label className="dashboard-filter-control">
               <span>Search listings</span>
@@ -2017,6 +2022,8 @@ export default function ClientDashboard() {
               </div>
             </div>
           )}
+          </>
+          )}
         </section>
 
         <section className="dashboard-section dashboard-maintenance portal-section" id="maintenance" aria-labelledby="maintenance-title">
@@ -2135,19 +2142,20 @@ export default function ClientDashboard() {
               <EmptyIssues />
             )}
           </div>}
+          <TenantWorkStatus />
         </section>
 
         <section className="dashboard-section portal-section" id="receipts" aria-labelledby="receipts-title">
           <div className="portal-receipts-heading">
-            <SectionHead eyebrow="Your payment history" title="Receipts & statement" titleId="receipts-title" description="Every rent payment, in one secure place." />
-            <Button type="button" variant="secondary" onClick={() => void downloadAnnualStatement()} disabled={isDownloadingStatement}>
-              <Icon name="download" size={16} />{isDownloadingStatement ? "Preparing…" : "Annual statement"}
+            <SectionHead eyebrow="Your payment history" title="Receipts" titleId="receipts-title" description="Rent payments recorded for your lease. The statement section builds a PDF from posted charges and payments." />
+            <Button type="button" variant="secondary" onClick={() => scrollToSection("statement")}>
+              <Icon name="download" size={16} />Open statement
             </Button>
           </div>
-          <div className={`portal-balance-banner ${ledgerCleared ? "is-clear" : ""}`}>
+          <div className="portal-balance-banner">
             <span><Icon name="shield" size={20} /></span>
-            <div><small>DOUBLE-ENTRY TENANT LEDGER</small><strong>Your account: Tenant Receivable KES {ledgerValue === undefined ? isLoadingPayments ? "Checking…" : "Not available" : money(ledgerValue)}</strong></div>
-            <b>{ledgerCleared ? "You are cleared" : ledgerValue === undefined ? "Ledger unavailable" : "Balance outstanding"}</b>
+            <div><small>RENT RECORD</small><strong>{isLoadingPayments ? "Checking payments…" : payments.length ? `${payments.length} rent payment${payments.length === 1 ? "" : "s"} on file` : "No rent payments on file"}</strong></div>
+            <b>Use Statement for the PDF</b>
           </div>
           {receiptError && <p className="dashboard-inline-error" role="alert">{receiptError}<button type="button" className="portal-text-button" onClick={() => void loadPayments()}>Retry</button></p>}
           <div className="portal-table-wrap">
@@ -2173,10 +2181,9 @@ export default function ClientDashboard() {
         </section>
 
         <section className="dashboard-section portal-section portal-profile-section" id="profile" aria-labelledby="profile-title">
-          <SectionHead eyebrow="Your account" title="Profile & support" titleId="profile-title" description="Manage your contact details and find help when you need it." />
+          <SectionHead eyebrow="Your account" title="Profile & support" titleId="profile-title" description={`Update the contact details your property team is allowed to change.${clientEmail ? ` Signed in as ${clientEmail}.` : ""}`} />
+          <TenantProfileEditor />
           <div className="portal-profile-card">
-            <span className="portal-profile-large">{clientName.slice(0, 1).toUpperCase()}</span>
-            <div><small>TENANT ACCOUNT</small><strong>{clientName}</strong><span>{clientEmail || "Email not available"}</span></div>
             <button type="button" className="portal-contact-button" onClick={contactMaintenanceManager}><Icon name="message" size={17} />Contact manager</button>
             <Button type="button" variant="ghost" onClick={() => void signOut()}><Icon name="logout" size={16} />Log out</Button>
           </div>

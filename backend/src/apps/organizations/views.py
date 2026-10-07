@@ -4,6 +4,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from application.services.audit import record_audit
 from common.api import organization_ids_for_user
 
 from .models import Organization, OrganizationMembership
@@ -52,6 +53,7 @@ class OrganizationStaffView(APIView):
     staff_roles = (
         OrganizationMembership.Role.PROPERTY_MANAGER,
         OrganizationMembership.Role.CARETAKER,
+        OrganizationMembership.Role.ACCOUNTANT,
     )
 
     def get_organization(self, organization_id):
@@ -105,6 +107,17 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         require_organization_owner(self.request.user, instance)
+        from apps.billing.models import Invoice, Payment, RentPayment
+        from apps.properties.models import Property
+
+        if Property.objects.filter(organization=instance).exists():
+            raise ValidationError('Organization cannot be deleted while properties exist.')
+        if (
+            Invoice.objects.filter(organization=instance).exists()
+            or Payment.objects.filter(organization=instance).exists()
+            or RentPayment.objects.filter(lease__tenant__organization=instance).exists()
+        ):
+            raise ValidationError('Organization cannot be deleted while financial records exist.')
         instance.delete()
 
 
@@ -120,7 +133,20 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         organization = serializer.validated_data['organization']
         require_organization_owner(self.request.user, organization)
-        serializer.save()
+        membership = serializer.save()
+        record_audit(
+            action='membership.create',
+            object_type='OrganizationMembership',
+            object_id=membership.pk,
+            actor=self.request.user,
+            organization=organization,
+            metadata={
+                'user_id': membership.user_id,
+                'role': membership.role,
+                'is_active': membership.is_active,
+            },
+            request=self.request,
+        )
 
     def perform_update(self, serializer):
         membership = serializer.instance
@@ -130,9 +156,31 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
             role=serializer.validated_data.get('role'),
             is_active=serializer.validated_data.get('is_active'),
         )
-        serializer.save()
+        membership = serializer.save()
+        record_audit(
+            action='membership.update',
+            object_type='OrganizationMembership',
+            object_id=membership.pk,
+            actor=self.request.user,
+            organization=membership.organization,
+            metadata={
+                'user_id': membership.user_id,
+                'role': membership.role,
+                'is_active': membership.is_active,
+            },
+            request=self.request,
+        )
 
     def perform_destroy(self, instance):
         require_organization_owner(self.request.user, instance.organization)
         prevent_removing_last_active_owner(instance, deleting=True)
+        record_audit(
+            action='membership.delete',
+            object_type='OrganizationMembership',
+            object_id=instance.pk,
+            actor=self.request.user,
+            organization=instance.organization,
+            metadata={'user_id': instance.user_id, 'role': instance.role},
+            request=self.request,
+        )
         instance.delete()

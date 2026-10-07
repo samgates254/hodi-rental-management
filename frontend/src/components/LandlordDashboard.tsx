@@ -9,7 +9,13 @@ import {
 } from "react";
 import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
+import AuditLogPanel from "@/components/ops/AuditLogPanel";
+import BillingWorkspace from "@/components/ops/BillingWorkspace";
+import MaintenanceRequestsPanel from "@/components/ops/MaintenanceRequestsPanel";
+import MarketplaceManager from "@/components/marketplace/MarketplaceManager";
+import NotificationBell from "@/components/ops/NotificationBell";
 import "./landlord-dashboard.css";
+import "@/components/ops/ops.css";
 
 const API_ROOT = "/api/v1";
 const TOKEN_KEY = "hodi_api_token";
@@ -201,12 +207,31 @@ function listFromResponse<T>(data: ApiList<T>): T[] {
 }
 
 function errorMessage(payload: unknown, fallback: string) {
+  if (typeof payload === "string") {
+    const text = payload.trim();
+    if (text && !/<!DOCTYPE|Internal Server Error/i.test(text)) return text;
+    return fallback;
+  }
   if (payload && typeof payload === "object") {
     const details = payload as Record<string, unknown>;
-    if (typeof details.detail === "string") return details.detail;
-    if (typeof details.error === "string") return details.error;
-    const firstError = Object.values(details).find(value => typeof value === "string");
-    if (typeof firstError === "string") return firstError;
+    if (typeof details.detail === "string" && details.detail.trim()) return details.detail;
+    if (Array.isArray(details.detail) && details.detail.length) {
+      return details.detail.map(String).join(" ");
+    }
+    if (typeof details.error === "string" && details.error.trim()) return details.error;
+    if (Array.isArray(details.non_field_errors) && details.non_field_errors.length) {
+      return details.non_field_errors.map(String).join(" ");
+    }
+    const parts: string[] = [];
+    for (const [key, value] of Object.entries(details)) {
+      if (key === "detail" || key === "non_field_errors") continue;
+      if (Array.isArray(value) && value.length) {
+        parts.push(`${key}: ${value.map(String).join(" ")}`);
+      } else if (typeof value === "string" && value.trim()) {
+        parts.push(`${key}: ${value}`);
+      }
+    }
+    if (parts.length) return parts.join(" · ");
   }
   return fallback;
 }
@@ -346,7 +371,7 @@ function LoginForm({
             {isSubmitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
-        <p className="landlord-login-note">Your account must belong to at least one Hodi organization.</p>
+        <p className="landlord-login-note">Owners, property managers, and accountants sign in here. Caretakers use caretaker access.</p>
       </section>
     </main>
   );
@@ -373,6 +398,10 @@ export default function LandlordDashboard() {
   const [teamFormOpen, setTeamFormOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
+  const [accountType, setAccountType] = useState("");
+  const [leaseAction, setLeaseAction] = useState<null | { id: Identifier; reference: string; mode: "terminate" | "expire" }>(null);
+  const [leaseEndDate, setLeaseEndDate] = useState("");
+  const [leaseReason, setLeaseReason] = useState("");
 
   const loadDashboard = useCallback(async (authToken: string) => {
     setIsLoading(true);
@@ -423,6 +452,7 @@ export default function LandlordDashboard() {
     }
     const savedToken = sessionStorage.getItem(TOKEN_KEY);
     if (!savedToken) return;
+    setAccountType(sessionStorage.getItem("hodi_account_type") ?? "");
     try {
       const savedMemberships: unknown = JSON.parse(sessionStorage.getItem("hodi_memberships") ?? "[]");
       setMemberships(Array.isArray(savedMemberships) ? savedMemberships as OrganizationMembership[] : []);
@@ -433,9 +463,20 @@ export default function LandlordDashboard() {
     void loadDashboard(savedToken);
   }, [loadDashboard]);
 
-  const canManageTeam = previewMode || memberships.some(
-    membership => String(membership.organization_id) === selectedOrganizationId && membership.role === "OWNER",
-  );
+  const orgRole = memberships.find(
+    membership => String(membership.organization_id) === selectedOrganizationId,
+  )?.role ?? "";
+  const isOwner = previewMode || orgRole === "OWNER" || (!orgRole && accountType === "OWNER");
+  const isManager = orgRole === "PROPERTY_MANAGER";
+  const isAccountant = !previewMode && orgRole === "ACCOUNTANT";
+  const showPortfolio = !isAccountant;
+  const canManageTeam = isOwner;
+  const canWritePortfolio = isOwner || isManager;
+  const canReadBilling = isOwner || isManager || isAccountant;
+  const canWriteLedger = (isOwner || isAccountant) && !previewMode;
+  const canWriteRentLog = (isOwner || isManager || isAccountant) && !previewMode;
+  const canMaintenance = isOwner || isManager;
+  const canAudit = isOwner || isManager || isAccountant;
 
   useEffect(() => {
     if (previewMode) {
@@ -523,6 +564,7 @@ export default function LandlordDashboard() {
       sessionStorage.setItem(TOKEN_KEY, response.token);
       sessionStorage.setItem("hodi_account_type", response.account_type ?? "");
       sessionStorage.setItem("hodi_memberships", JSON.stringify(response.memberships ?? []));
+      setAccountType(response.account_type ?? "");
       setMemberships(response.memberships ?? []);
       setToken(response.token);
       await loadDashboard(response.token);
@@ -686,7 +728,8 @@ export default function LandlordDashboard() {
     setIsSaving(true);
     setPageError("");
     try {
-      await apiRequest<Lease>("/leases/", token, {
+      const requestedStatus = String(form.get("status") ?? "DRAFT");
+      const created = await apiRequest<Lease>("/leases/", token, {
         method: "POST",
         body: JSON.stringify({
           tenant: Number(form.get("tenant")),
@@ -696,14 +739,42 @@ export default function LandlordDashboard() {
           end_date: String(form.get("end_date") ?? "") || null,
           monthly_rent_minor: Math.round(Number(form.get("monthly_rent")) * 100),
           security_deposit_minor: Math.round(Number(form.get("security_deposit") || 0) * 100),
-          status: String(form.get("status") ?? "DRAFT"),
+          status: "DRAFT",
         }),
       });
+      if (requestedStatus === "ACTIVE") {
+        await apiRequest<Lease>(`/leases/${created.id}/activate/`, token, { method: "POST" });
+      }
       setLeaseFormOpen(false);
-      setNotice("Lease added.");
+      setNotice(requestedStatus === "ACTIVE" ? "Lease added and activated. The unit is now occupied." : "Lease added.");
       await loadDashboard(token);
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "The lease couldn’t be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function submitLeaseAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!leaseAction) return;
+    setIsSaving(true);
+    setPageError("");
+    try {
+      if (leaseAction.mode === "terminate") {
+        await apiRequest<Lease>(`/leases/${leaseAction.id}/terminate/`, token, {
+          method: "POST",
+          body: JSON.stringify({ end_date: leaseEndDate, reason: leaseReason }),
+        });
+        setNotice("Lease terminated. If nothing else occupies the unit, it becomes available.");
+      } else {
+        await apiRequest<Lease>(`/leases/${leaseAction.id}/expire/`, token, { method: "POST" });
+        setNotice("Lease expired. If nothing else occupies the unit, it becomes available.");
+      }
+      setLeaseAction(null);
+      await loadDashboard(token);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "The lease couldn’t be updated.");
     } finally {
       setIsSaving(false);
     }
@@ -721,6 +792,8 @@ export default function LandlordDashboard() {
     }
 
     const role = String(form.get("role") ?? "CARETAKER");
+    const roleLabel = role === "CARETAKER" ? "Caretaker" : role === "ACCOUNTANT" ? "Accountant" : "Manager";
+    const accessLabel = role === "CARETAKER" ? "Caretaker" : "Landlord";
     setIsSaving(true);
     setTeamError("");
     try {
@@ -741,7 +814,7 @@ export default function LandlordDashboard() {
       setTeamMembers(current => [staffMember, ...current]);
       setTeamFormOpen(false);
       setNotice(
-        `${role === "CARETAKER" ? "Caretaker" : "Manager"} account created. Share the initial password securely; they should sign in using ${role === "CARETAKER" ? "Caretaker" : "Landlord"} access.`,
+        `${roleLabel} account created. Share the initial password securely; they should sign in using ${accessLabel} access.`,
       );
     } catch (error) {
       setTeamError(error instanceof Error ? error.message : "The team account couldn’t be created.");
@@ -773,11 +846,16 @@ export default function LandlordDashboard() {
         <span className="landlord-sidebar-label">WORKSPACE</span>
         <nav className="landlord-nav" aria-label="Landlord dashboard">
           <a className="is-active" href="#overview"><Icon name="overview" />Overview</a>
-          <a href="#properties"><Icon name="building" />Properties</a>
+          {showPortfolio && <a href="#properties"><Icon name="building" />Properties</a>}
+          {showPortfolio && <a href="#units"><Icon name="building" />Units</a>}
+          {showPortfolio && <a href="#tenants"><Icon name="people" />Tenants</a>}
+          {showPortfolio && <a href="#leases"><Icon name="lease" />Leases</a>}
+          {canWritePortfolio && <a href="#marketplace"><Icon name="building" />Listings</a>}
+          <Link href="/marketplace">Marketplace</Link>
+          {canReadBilling && <a href="#billing"><Icon name="lease" />Billing</a>}
+          {canMaintenance && <a href="#maintenance-requests"><Icon name="building" />Maintenance</a>}
           {canManageTeam && <a href="#team"><Icon name="people" />Team</a>}
-          <a href="#tenants"><Icon name="people" />Tenants</a>
-          <a href="#leases"><Icon name="lease" />Leases</a>
-          <a href="#units"><Icon name="building" />Units</a>
+          {canAudit && !previewMode && <a href="#audit"><Icon name="overview" />Audit</a>}
         </nav>
         <div className="landlord-sidebar-bottom">
           <span className="landlord-sidebar-label">HODI PROPERTY OPERATIONS</span>
@@ -788,7 +866,7 @@ export default function LandlordDashboard() {
       <main className="landlord-main">
         <header className="landlord-topbar">
           <div>
-            <span className="landlord-eyebrow">LANDLORD PORTAL</span>
+            <span className="landlord-eyebrow">{isAccountant ? "ACCOUNTING" : isManager ? "PROPERTY MANAGER" : "LANDLORD PORTAL"}</span>
             <h1>{organization?.name ?? "Your properties"}</h1>
           </div>
           <div className="landlord-topbar-actions">
@@ -819,6 +897,7 @@ export default function LandlordDashboard() {
                 <button type="button" className="landlord-button landlord-button--quiet" onClick={() => void signOut()}>
                   <Icon name="logout" />Sign out
                 </button>
+                <NotificationBell />
               </>
             )}
           </div>
@@ -864,14 +943,16 @@ export default function LandlordDashboard() {
           <>
             <section id="overview" className="landlord-welcome">
               <div>
-                <p className="landlord-eyebrow">YOUR PORTFOLIO</p>
-                <h2>Property overview</h2>
-                <p>A clear view of your properties, homes, tenants, and active leases.</p>
+                <p className="landlord-eyebrow">{isAccountant ? "ACCOUNTS" : "YOUR PORTFOLIO"}</p>
+                <h2>{isAccountant ? "Billing workspace" : "Property overview"}</h2>
+                <p>{isAccountant
+                  ? "Invoices, the rent log, ledger allocation, delinquency, and the audit trail for this organization."
+                  : "A clear view of your properties, homes, tenants, and active leases."}</p>
               </div>
               {isLoading && <span className="landlord-loading-label">Syncing with Hodi…</span>}
             </section>
 
-            <section className="landlord-metrics" aria-label="Portfolio summary">
+            {showPortfolio && <section className="landlord-metrics" aria-label="Portfolio summary">
               <article className="landlord-metric-card">
                 <span>Properties</span>
                 <strong>{organizationData.properties.length}</strong>
@@ -892,8 +973,9 @@ export default function LandlordDashboard() {
                 <strong>{formatMoney(monthlyRentMinor)}</strong>
                 <small>{activeLeases.length} active lease{activeLeases.length === 1 ? "" : "s"}</small>
               </article>
-            </section>
+            </section>}
 
+            {showPortfolio && <>
             <section id="properties" className="landlord-section">
               <div className="landlord-section-heading">
                 <div>
@@ -1010,7 +1092,7 @@ export default function LandlordDashboard() {
               {teamError && <div className="landlord-alert" role="alert">{teamError}</div>}
               {teamFormOpen && !previewMode && (
                 <form className="landlord-inline-form" onSubmit={createTeamMember}>
-                  <h3>Add a manager or caretaker</h3>
+                  <h3>Add a manager, caretaker, or accountant</h3>
                   <p className="landlord-form-note">
                     This creates a login for {organization?.name ?? "this organization"}. Share the initial password securely.
                   </p>
@@ -1024,6 +1106,7 @@ export default function LandlordDashboard() {
                       <select name="role" defaultValue="CARETAKER">
                         <option value="PROPERTY_MANAGER">Property manager</option>
                         <option value="CARETAKER">Caretaker</option>
+                        <option value="ACCOUNTANT">Accountant</option>
                       </select>
                     </label>
                     <label>Initial password<input name="password" type="password" required minLength={8} autoComplete="new-password" /></label>
@@ -1195,7 +1278,7 @@ export default function LandlordDashboard() {
               {organizationData.leases.length ? (
                 <div className="landlord-table-wrap">
                   <table className="landlord-table">
-                    <thead><tr><th>Lease</th><th>Tenant</th><th>Unit</th><th>Monthly rent</th><th>Dates</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Lease</th><th>Tenant</th><th>Unit</th><th>Monthly rent</th><th>Dates</th><th>Status</th>{canWritePortfolio && !previewMode && <th>Actions</th>}</tr></thead>
                     <tbody>
                       {organizationData.leases.map(lease => {
                         const tenant = organizationData.tenants.find(item => String(item.id) === String(lease.tenant));
@@ -1210,6 +1293,32 @@ export default function LandlordDashboard() {
                             <td>{formatMoney(lease.monthly_rent_minor)}</td>
                             <td>{formatDate(lease.start_date)} – {formatDate(lease.end_date)}</td>
                             <td><span className={`landlord-status ${lease.status === "ACTIVE" ? "is-active" : ""}`}>{displayStatus(lease.status)}</span></td>
+                            {canWritePortfolio && !previewMode && (
+                              <td>
+                                {lease.status === "ACTIVE" ? (
+                                  <div className="landlord-section-actions">
+                                    <button
+                                      type="button"
+                                      className="landlord-button landlord-button--quiet"
+                                      onClick={() => {
+                                        setLeaseEndDate(new Date().toISOString().slice(0, 10));
+                                        setLeaseReason("");
+                                        setLeaseAction({ id: lease.id, reference: lease.reference, mode: "terminate" });
+                                      }}
+                                    >
+                                      Terminate
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="landlord-button landlord-button--quiet"
+                                      onClick={() => setLeaseAction({ id: lease.id, reference: lease.reference, mode: "expire" })}
+                                    >
+                                      Expire
+                                    </button>
+                                  </div>
+                                ) : "—"}
+                              </td>
+                            )}
                           </tr>
                         );
                       })}
@@ -1301,7 +1410,62 @@ export default function LandlordDashboard() {
                 </div>
               )}
             </section>
+            </>}
+
+            {canWritePortfolio && !previewMode && (
+              <MarketplaceManager
+                units={organizationData.units}
+                buildings={organizationData.buildings}
+                properties={organizationData.properties}
+              />
+            )}
+
+            {canReadBilling && !previewMode && (
+              <BillingWorkspace
+                key={`${selectedOrganizationId}-${organizationData.tenants.length}-${organizationData.leases.length}`}
+                organizationId={selectedOrganizationId}
+                canWriteLedger={canWriteLedger}
+                canWriteRentLog={canWriteRentLog}
+              />
+            )}
+            {canMaintenance && !previewMode && (
+              <MaintenanceRequestsPanel
+                key={`${selectedOrganizationId}-${organizationData.units.length}-${organizationData.tenants.length}`}
+                organizationId={selectedOrganizationId}
+                canWrite={canWritePortfolio}
+              />
+            )}
+            {canAudit && !previewMode && <AuditLogPanel organizationId={selectedOrganizationId} />}
           </>
+        )}
+        {leaseAction && (
+          <div className="ops-dialog-backdrop">
+            <form className="ops-dialog" onSubmit={event => void submitLeaseAction(event)}>
+              <span className="ops-kicker">{leaseAction.mode === "terminate" ? "TERMINATE LEASE" : "EXPIRE LEASE"}</span>
+              <h3>{leaseAction.reference}</h3>
+              <p className="ops-note">
+                {leaseAction.mode === "terminate"
+                  ? "This ends an active lease. The unit becomes available when no other active lease still occupies it. The server validates the date."
+                  : "This marks the active lease expired. The unit becomes available when no other active lease still occupies it."}
+              </p>
+              {leaseAction.mode === "terminate" && (
+                <>
+                  <label className="ops-field">End date
+                    <input type="date" required value={leaseEndDate} onChange={event => setLeaseEndDate(event.target.value)} />
+                  </label>
+                  <label className="ops-field">Reason
+                    <input value={leaseReason} onChange={event => setLeaseReason(event.target.value)} maxLength={300} />
+                  </label>
+                </>
+              )}
+              <div className="ops-form-actions">
+                <button type="button" className="ops-button" onClick={() => setLeaseAction(null)}>Keep lease</button>
+                <button className="ops-button ops-button--primary" disabled={isSaving}>
+                  {isSaving ? "Saving…" : leaseAction.mode === "terminate" ? "Terminate lease" : "Expire lease"}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
         <footer className="landlord-footer">Hodi property operations <span>·</span> Data synced from your organization</footer>
       </main>

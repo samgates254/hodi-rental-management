@@ -11,6 +11,7 @@ import {
   register as apiRegister,
   type AuthResponse,
 } from "@/lib/clientApi";
+import TenantLinkGate from "@/components/ops/TenantLinkGate";
 
 type UserKind = "tenant" | "landlord" | "caretaker";
 type AuthMode = "signin" | "signup";
@@ -88,6 +89,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   const [userKind, setUserKind] = useState<UserKind>("landlord");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [needsOrganizationLink, setNeedsOrganizationLink] = useState(false);
 
   useEffect(() => {
     const type = new URLSearchParams(window.location.search).get("type");
@@ -151,6 +153,10 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
           );
         }
         rememberSession(auth, profile);
+        if (actualKind === "tenant" && (auth.organization_id === null || auth.organization_id === undefined)) {
+          setNeedsOrganizationLink(true);
+          return;
+        }
         window.location.assign(dashboardFor(actualKind, accountType));
         return;
       }
@@ -160,12 +166,12 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
       const hasCaretakerMembership = memberships.some(
         membership => membership.role === "CARETAKER",
       );
-      const hasManagerMembership = memberships.some(
-        membership => membership.role === "PROPERTY_MANAGER",
+      const hasLandlordMembership = memberships.some(membership =>
+        membership.role === "PROPERTY_MANAGER" || membership.role === "ACCOUNTANT" || membership.role === "OWNER",
       );
       const actualKind = userKind === "caretaker"
         ? hasCaretakerMembership ? "caretaker" : null
-        : userKindFromAccountType(auth.account_type) ?? (hasManagerMembership ? "landlord" : null);
+        : userKindFromAccountType(auth.account_type) ?? (hasLandlordMembership ? "landlord" : null);
       if (!auth.token || !actualKind) {
         throw new Error(userKind === "caretaker"
           ? "This account does not have an active caretaker membership."
@@ -181,6 +187,10 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         email: auth.email || username,
         phone_number: auth.phone_number,
       }, memberships);
+      if (actualKind === "tenant" && (auth.organization_id === null || auth.organization_id === undefined)) {
+        setNeedsOrganizationLink(true);
+        return;
+      }
       window.location.assign(dashboardFor(actualKind, auth.account_type));
     } catch (submitError) {
       setError(errorText(submitError));
@@ -191,6 +201,10 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
   const isSignup = mode === "signup";
   const authInputClass = isSignup ? "h-10 w-full min-w-0" : "h-11 w-full min-w-0";
+
+  if (needsOrganizationLink) {
+    return <TenantLinkGate onLinked={() => window.location.assign("/clients")} />;
+  }
 
   return (
     <main

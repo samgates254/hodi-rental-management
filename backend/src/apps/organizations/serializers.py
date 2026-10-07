@@ -61,6 +61,7 @@ class OrganizationStaffCreateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=(
         (OrganizationMembership.Role.PROPERTY_MANAGER, 'Property manager'),
         (OrganizationMembership.Role.CARETAKER, 'Caretaker'),
+        (OrganizationMembership.Role.ACCOUNTANT, 'Accountant'),
     ))
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)

@@ -23,7 +23,6 @@ ISSUE_STAFF_ROLES = (
 	OrganizationMembership.Role.OWNER,
 	OrganizationMembership.Role.PROPERTY_MANAGER,
 	OrganizationMembership.Role.CARETAKER,
-	OrganizationMembership.Role.TECHNICIAN,
 )
 
 
@@ -47,7 +46,12 @@ class MaintenanceIssueViewSet(
 				tenant__is_active=True,
 				tenant__organization__is_active=True,
 			)
-		).select_related('tenant', 'unit').prefetch_related(
+		).select_related(
+			'tenant',
+			'unit',
+			'unit__building',
+			'unit__building__property',
+		).prefetch_related(
 			'attachments',
 			Prefetch(
 				'updates',

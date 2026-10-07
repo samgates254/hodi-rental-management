@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'apps.accounts', 'apps.organizations', 'apps.properties', 'apps.tenants',
     'apps.leases', 'apps.billing', 'apps.maintenance', 'apps.notifications', 'apps.audit',
+    'apps.marketplace',
 ]
 
 MIDDLEWARE = [
@@ -92,7 +93,6 @@ PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', '3600'))
 if PASSWORD_RESET_TIMEOUT <= 0:
     raise ImproperlyConfigured('PASSWORD_RESET_TIMEOUT must be positive.')
 ACCOUNT_EMAIL_VERIFICATION_PATH = '/api/v1/accounts/verify-email/'
-ACCOUNT_PASSWORD_RESET_CONFIRM_PATH = '/api/v1/accounts/password-reset/confirm/'
 ACCOUNT_PASSWORD_RESET_CONFIRM_PATH = '/api/v1/accounts/password-reset/confirm/'
 
 if DJANGO_ENV == 'production':
@@ -165,6 +165,8 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = 'static/'
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
@@ -197,7 +199,8 @@ CORS_ALLOWED_ORIGINS = [
         'CORS_ALLOWED_ORIGINS',
         # Next.js (3000) + legacy Vite (5173) local frontends
         'http://localhost:3000,http://127.0.0.1:3000,'
-        'http://localhost:5173,http://127.0.0.1:5173',
+        'http://localhost:5173,http://127.0.0.1:5173,'
+        'http://localhost:8080,http://127.0.0.1:8080',
     ).split(',')
     if origin.strip()
 ]

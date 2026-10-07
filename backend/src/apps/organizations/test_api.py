@@ -157,6 +157,33 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
             self.assertEqual(login_response.status_code, status.HTTP_200_OK)
             self.assertEqual(login_response.data['memberships'][0]['role'], role)
 
+    def test_owner_can_create_accountant_account(self):
+        self.client.force_authenticate(self.owner)
+        password = 'Accountant-strong-password-243!'
+        response = self.client.post(
+            reverse('organizations:staff'),
+            {
+                'organization': self.organization.pk,
+                'username': 'new-accountant',
+                'email': 'new-accountant@example.com',
+                'first_name': 'Amina',
+                'last_name': 'Books',
+                'phone_number': '+254712000111',
+                'role': OrganizationMembership.Role.ACCOUNTANT,
+                'password': password,
+                'password_confirm': password,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['role'], OrganizationMembership.Role.ACCOUNTANT)
+        listing = self.client.get(
+            reverse('organizations:staff'),
+            {'organization': self.organization.pk},
+        )
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(row['username'] == 'new-accountant' for row in listing.data))
+
     def test_non_owner_cannot_create_staff_accounts(self):
         self.client.force_authenticate(self.member)
         response = self.client.post(

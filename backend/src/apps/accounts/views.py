@@ -193,6 +193,40 @@ class LoginView(APIView):
 		return Response(response_data, status=status.HTTP_200_OK)
 
 
+class MeView(APIView):
+	permission_classes = (permissions.IsAuthenticated,)
+
+	def get(self, request):
+		user = request.user
+		profile = getattr(user, 'account_profile', None)
+		memberships = OrganizationMembership.objects.filter(
+			user=user,
+		).select_related('organization').order_by('organization__name', 'id')
+		return Response(
+			{
+				'id': user.pk,
+				'username': user.get_username(),
+				'email': user.email,
+				'first_name': user.first_name,
+				'last_name': user.last_name,
+				'account_type': profile.account_type if profile is not None else '',
+				'organization_id': profile.organization_id if profile is not None else None,
+				'professional_trade': profile.professional_trade if profile is not None else '',
+				'phone_number': profile.phone_number if profile is not None else '',
+				'memberships': [
+					{
+						'organization': membership.organization_id,
+						'organization_name': membership.organization.name,
+						'role': membership.role,
+						'is_active': membership.is_active,
+					}
+					for membership in memberships
+				],
+			},
+			status=status.HTTP_200_OK,
+		)
+
+
 class LogoutView(APIView):
 	permission_classes = (permissions.IsAuthenticated,)
 
