@@ -283,3 +283,90 @@ class LedgerPosting(models.Model):
 
 	def __str__(self):
 		return f'{self.direction} {self.account} {self.amount_cents}'
+
+
+class MpesaAttempt(models.Model):
+	"""External Daraja STK lifecycle. This is not the accounting Payment."""
+
+	class Status(models.TextChoices):
+		INITIATED = 'INITIATED', 'Initiated'
+		STK_SENT = 'STK_SENT', 'STK sent'
+		SUCCESS = 'SUCCESS', 'Success'
+		FAILED = 'FAILED', 'Failed'
+		CANCELLED = 'CANCELLED', 'Cancelled'
+		TIMEOUT = 'TIMEOUT', 'Timed out'
+
+	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+	organization = models.ForeignKey(
+		'organizations.Organization',
+		on_delete=models.PROTECT,
+		related_name='mpesa_attempts',
+	)
+	tenant = models.ForeignKey(
+		'tenants.Tenant',
+		on_delete=models.PROTECT,
+		related_name='mpesa_attempts',
+	)
+	invoice = models.ForeignKey(
+		Invoice,
+		on_delete=models.PROTECT,
+		null=True,
+		blank=True,
+		related_name='mpesa_attempts',
+	)
+	initiated_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.PROTECT,
+		related_name='initiated_mpesa_attempts',
+	)
+	amount_cents = models.PositiveBigIntegerField()
+	currency = models.CharField(max_length=3, default='KES')
+	phone_number = models.CharField(max_length=15)
+	status = models.CharField(
+		max_length=20,
+		choices=Status.choices,
+		default=Status.INITIATED,
+	)
+	# STK_SENT means Daraja accepted the prompt request; it is not payment success.
+	merchant_request_id = models.CharField(max_length=64, null=True, blank=True)
+	checkout_request_id = models.CharField(max_length=64, null=True, blank=True)
+	mpesa_receipt_number = models.CharField(max_length=64, null=True, blank=True)
+	response_code = models.CharField(max_length=16, null=True, blank=True)
+	response_description = models.TextField(blank=True, default='')
+	customer_message = models.TextField(blank=True, default='')
+	result_code = models.CharField(max_length=16, null=True, blank=True)
+	result_description = models.TextField(blank=True, default='')
+	account_reference = models.CharField(max_length=12, blank=True, default='')
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ('-created_at',)
+		indexes = [
+			models.Index(fields=('organization', 'tenant', '-created_at')),
+			models.Index(fields=('status', 'created_at')),
+		]
+		constraints = [
+			models.UniqueConstraint(
+				fields=('merchant_request_id',),
+				condition=Q(merchant_request_id__isnull=False),
+				name='unique_mpesa_merchant_request_id',
+			),
+			models.UniqueConstraint(
+				fields=('checkout_request_id',),
+				condition=Q(checkout_request_id__isnull=False),
+				name='unique_mpesa_checkout_request_id',
+			),
+			models.UniqueConstraint(
+				fields=('mpesa_receipt_number',),
+				condition=Q(mpesa_receipt_number__isnull=False),
+				name='unique_mpesa_receipt_number',
+			),
+			models.CheckConstraint(
+				check=Q(amount_cents__gt=0),
+				name='mpesa_attempt_amount_positive',
+			),
+		]
+
+	def __str__(self):
+		return f'MpesaAttempt {self.pk} ({self.status})'

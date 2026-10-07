@@ -6,6 +6,8 @@ See [authorization.md](authorization.md) for the organization role and resource 
 
 See [statements.md](statements.md) for the authenticated tenant financial statement and PDF.
 
+See [mpesa.md](mpesa.md) for Phase 1 M-Pesa Daraja STK initiation. M-Pesa is a provider; it does not settle Payment or the ledger yet.
+
 ## Landlord dashboard
 
 The landlord dashboard uses the authenticated organization-scoped endpoints below. Send the DRF token as `Authorization: Token <token>` on every request; see [authentication](./authentication.md).

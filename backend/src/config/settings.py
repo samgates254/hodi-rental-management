@@ -215,3 +215,28 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',')
     if origin.strip()
 ]
+
+# Safaricom Daraja (M-Pesa). Secrets come from the environment; never hardcode them.
+MPESA_BASE_URL = os.environ.get(
+    'MPESA_BASE_URL',
+    'https://sandbox.safaricom.co.ke',
+).strip().rstrip('/')
+if MPESA_BASE_URL and not MPESA_BASE_URL.lower().startswith('https://'):
+    raise ImproperlyConfigured('MPESA_BASE_URL must use HTTPS.')
+MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', '').strip()
+MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', '').strip()
+MPESA_SHORTCODE = os.environ.get('MPESA_SHORTCODE', '').strip()
+MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', '').strip()
+MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', '').strip()
+if MPESA_CALLBACK_URL and not MPESA_CALLBACK_URL.lower().startswith('https://'):
+    raise ImproperlyConfigured('MPESA_CALLBACK_URL must use HTTPS.')
+try:
+    MPESA_TIMEOUT_SECONDS = int(os.environ.get('MPESA_TIMEOUT_SECONDS', '30'))
+except ValueError as error:
+    raise ImproperlyConfigured('MPESA_TIMEOUT_SECONDS must be an integer.') from error
+if MPESA_TIMEOUT_SECONDS <= 0:
+    raise ImproperlyConfigured('MPESA_TIMEOUT_SECONDS must be positive.')
+MPESA_TRANSACTION_TYPE = os.environ.get(
+    'MPESA_TRANSACTION_TYPE',
+    'CustomerPayBillOnline',
+).strip() or 'CustomerPayBillOnline'

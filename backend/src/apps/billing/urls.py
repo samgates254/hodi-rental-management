@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .statement_views import MyStatementPdfView, MyStatementView
 from .views import RentPaymentViewSet
 from .views_ledger import ChargeViewSet, DelinquencyView, InvoiceViewSet, PaymentViewSet
+from .views_mpesa import MpesaInitiateView
 
 app_name = 'billing'
 
@@ -17,5 +18,6 @@ urlpatterns = [
 	path('statements/me/', MyStatementView.as_view(), name='statement-me'),
 	path('statements/me/pdf/', MyStatementPdfView.as_view(), name='statement-me-pdf'),
 	path('delinquency/', DelinquencyView.as_view(), name='delinquency'),
+	path('mpesa/initiate/', MpesaInitiateView.as_view(), name='mpesa-initiate'),
 	*router.urls,
 ]
