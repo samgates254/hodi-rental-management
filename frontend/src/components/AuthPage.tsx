@@ -13,7 +13,7 @@ import {
 } from "@/lib/clientApi";
 import TenantLinkGate from "@/components/ops/TenantLinkGate";
 
-type UserKind = "tenant" | "landlord" | "caretaker";
+type UserKind = "tenant" | "landlord" | "caretaker" | "technician";
 type AuthMode = "signin" | "signup";
 type OrganizationMembership = {
   organization_id: number | string;
@@ -21,7 +21,7 @@ type OrganizationMembership = {
   role: string;
 };
 
-const ACCOUNT_TYPE: Record<Exclude<UserKind, "caretaker">, "TENANT" | "OWNER"> = {
+const ACCOUNT_TYPE: Record<Exclude<UserKind, "caretaker" | "technician">, "TENANT" | "OWNER"> = {
   tenant: "TENANT",
   landlord: "OWNER",
 };
@@ -38,6 +38,7 @@ function userKindFromAccountType(accountType?: string): UserKind | null {
 
 function dashboardFor(kind: UserKind, accountType?: string) {
   if (kind === "caretaker") return "/caretakers";
+  if (kind === "technician") return "/technicians";
   return dashboardPathForAccountType(accountType);
 }
 
@@ -96,6 +97,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
     if (type === "tenant" || type === "client") setUserKind("tenant");
     if (type === "landlord" || type === "owner") setUserKind("landlord");
     if (type === "caretaker") setUserKind("caretaker");
+    if (type === "technician") setUserKind("technician");
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -108,7 +110,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
     try {
       if (mode === "signup") {
-        if (userKind === "caretaker") {
+        if (userKind === "caretaker" || userKind === "technician") {
           throw new Error("Caretaker access is assigned by your property organization.");
         }
         const profile = {
@@ -166,19 +168,24 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
       const hasCaretakerMembership = memberships.some(
         membership => membership.role === "CARETAKER",
       );
+      const hasTechnicianMembership = memberships.some(membership => membership.role === "TECHNICIAN");
       const hasLandlordMembership = memberships.some(membership =>
         membership.role === "PROPERTY_MANAGER" || membership.role === "ACCOUNTANT" || membership.role === "OWNER",
       );
       const actualKind = userKind === "caretaker"
         ? hasCaretakerMembership ? "caretaker" : null
+        : userKind === "technician"
+          ? hasTechnicianMembership ? "technician" : null
         : userKindFromAccountType(auth.account_type) ?? (hasLandlordMembership ? "landlord" : null);
       if (!auth.token || !actualKind) {
         throw new Error(userKind === "caretaker"
           ? "This account does not have an active caretaker membership."
+          : userKind === "technician"
+            ? "This account does not have an active technician membership."
           : "This account type does not have a Hodi dashboard yet.");
       }
       if (actualKind !== userKind) {
-        const accessType = actualKind === "tenant" ? "client" : "landlord";
+        const accessType = actualKind === "tenant" ? "client" : actualKind === "technician" ? "technician" : "landlord";
         throw new Error(`This account is set up for ${accessType} access.`);
       }
       rememberSession(auth, {
@@ -228,6 +235,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                 ? "Run your portfolio with clarity."
                 : userKind === "caretaker"
                   ? "Keep property operations moving."
+                  : userKind === "technician"
+                    ? "Keep your assigned repair work moving."
                   : "Feel at home with Hodi."}
             </h1>
             <p className={`${isSignup ? "mt-3" : "mt-5"} text-base leading-7 text-[#687381]`}>
@@ -235,6 +244,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                 ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
                 : userKind === "caretaker"
                   ? "Review maintenance requests, track their progress, and check residents’ rent status."
+                  : userKind === "technician"
+                    ? "Review only the work orders assigned to you and submit repair outcomes for verification."
                   : "Keep your home, rent, and maintenance updates connected in one dependable place."}
             </p>
             <div className={`${isSignup ? "mt-5" : "mt-8"} flex gap-3 text-sm`}>
@@ -250,7 +261,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
           <section className={`w-full rounded-2xl border border-[#e6e8ec] bg-white shadow-[0_18px_50px_rgba(25,32,42,0.07)] ${isSignup ? "p-4 sm:p-5" : "p-7 sm:p-10"}`}>
             <p key={userKind} className="text-[10px] font-bold tracking-[0.16em] text-[#778391] auth-role-enter">
-              {userKind === "landlord" ? "LANDLORD PORTAL" : userKind === "caretaker" ? "CARETAKER PORTAL" : "CLIENT PORTAL"}
+              {userKind === "landlord" ? "LANDLORD PORTAL" : userKind === "caretaker" ? "CARETAKER PORTAL" : userKind === "technician" ? "TECHNICIAN PORTAL" : "CLIENT PORTAL"}
             </p>
             <h2 className={`${isSignup ? "mt-2 text-2xl" : "mt-3 text-3xl"} font-display font-semibold tracking-tight`}>
               {isSignup ? "Create your account" : "Welcome back"}
@@ -261,8 +272,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                 : "Sign in to continue to your Hodi dashboard."}
             </p>
 
-            <div className={`${isSignup ? "mt-4 grid-cols-2" : "mt-6 grid-cols-3"} grid gap-2 rounded-lg bg-[#f3f5f5] p-1`}>
-              {(isSignup ? ["landlord", "tenant"] as const : ["landlord", "tenant", "caretaker"] as const).map(kind => (
+            <div className={`${isSignup ? "mt-4 grid-cols-2" : "mt-6 grid-cols-4"} grid gap-2 rounded-lg bg-[#f3f5f5] p-1`}>
+              {(isSignup ? ["landlord", "tenant"] as const : ["landlord", "tenant", "caretaker", "technician"] as const).map(kind => (
                 <button
                   key={kind}
                   type="button"
@@ -277,7 +288,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                       : "text-[#687381] hover:text-[#19202a]"
                   }`}
                 >
-                  {kind === "landlord" ? "Landlord" : kind === "caretaker" ? "Caretaker" : isSignup ? "Client / tenant" : "Tenant"}
+                  {kind === "landlord" ? "Landlord" : kind === "caretaker" ? "Caretaker" : kind === "technician" ? "Technician" : isSignup ? "Client / tenant" : "Tenant"}
                 </button>
               ))}
             </div>
@@ -285,6 +296,11 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             {!isSignup && userKind === "caretaker" && (
               <p key="caretaker-access-hint" className="mt-2 text-xs leading-5 text-[#687381] auth-role-enter">
                 Caretaker access is assigned by your property organization.
+              </p>
+            )}
+            {!isSignup && userKind === "technician" && (
+              <p key="technician-access-hint" className="mt-2 text-xs leading-5 text-[#687381] auth-role-enter">
+                Technician access is assigned by your property organization.
               </p>
             )}
 
@@ -353,7 +369,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
               </button>
             </form>
 
-            {!isSignup && userKind === "caretaker" ? (
+            {!isSignup && (userKind === "caretaker" || userKind === "technician") ? (
               <p className="mt-6 text-center text-sm text-[#687381] auth-role-enter">
                 Need access? Contact your property organization.
               </p>

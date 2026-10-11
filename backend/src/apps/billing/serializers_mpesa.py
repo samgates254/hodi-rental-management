@@ -10,6 +10,7 @@ class MpesaInitiateSerializer(serializers.Serializer):
     amount_cents = serializers.IntegerField(min_value=1)
     phone_number = serializers.CharField(required=False, allow_blank=True, max_length=30)
     invoice = serializers.IntegerField(required=False, min_value=1)
+    idempotency_key = serializers.UUIDField()
 
 
 class MpesaAttemptSerializer(serializers.ModelSerializer):
@@ -62,19 +63,28 @@ class MpesaAttemptSerializer(serializers.ModelSerializer):
 class MpesaAttemptStatusSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     receipt = serializers.SerializerMethodField()
+    message = serializers.SerializerMethodField()
 
     class Meta:
         model = MpesaAttempt
-        fields = ('id', 'status', 'amount_cents', 'currency', 'receipt', 'created_at')
+        fields = ('id', 'status', 'amount_cents', 'currency', 'receipt', 'created_at', 'message')
         read_only_fields = fields
 
     def get_status(self, obj):
         if obj.status == MpesaAttempt.Status.SUCCESS:
             return 'SUCCESSFUL'
-        if obj.status in (MpesaAttempt.Status.FAILED, MpesaAttempt.Status.CANCELLED):
+        if obj.status == MpesaAttempt.Status.CANCELLED:
+            return 'CANCELLED'
+        if obj.status == MpesaAttempt.Status.FAILED:
             return 'FAILED'
         if obj.status == MpesaAttempt.Status.TIMEOUT:
             return 'EXPIRED'
+        if obj.reconciliation_state in (
+            MpesaAttempt.ReconciliationState.UNRESOLVED,
+            MpesaAttempt.ReconciliationState.SUCCESS_NEEDS_RECEIPT,
+            MpesaAttempt.ReconciliationState.EXHAUSTED,
+        ):
+            return 'UNRESOLVED'
         if obj.status in (MpesaAttempt.Status.INITIATED, MpesaAttempt.Status.STK_SENT) and obj.created_at < timezone.now() - timedelta(minutes=2):
             return 'UNRESOLVED'
         return 'PENDING'
@@ -83,3 +93,17 @@ class MpesaAttemptStatusSerializer(serializers.ModelSerializer):
         if obj.status == MpesaAttempt.Status.SUCCESS:
             return obj.mpesa_receipt_number
         return None
+
+    def get_message(self, obj):
+        status_value = self.get_status(obj)
+        if status_value == 'SUCCESSFUL':
+            return 'M-Pesa confirmed the payment and it is recorded in your rent ledger.'
+        if status_value == 'CANCELLED':
+            return 'The M-Pesa payment prompt was cancelled. No payment was recorded.'
+        if status_value == 'FAILED':
+            return 'M-Pesa did not complete the payment. No payment was recorded.'
+        if status_value == 'EXPIRED':
+            return 'The payment request expired without a completed payment.'
+        if status_value == 'UNRESOLVED':
+            return 'No final provider confirmation is available yet. Check this attempt before starting another payment.'
+        return 'The M-Pesa prompt is still pending. This is not a confirmed payment.'

@@ -859,7 +859,7 @@ export default function LandlordDashboard() {
         </nav>
         <div className="landlord-sidebar-bottom">
           <span className="landlord-sidebar-label">HODI PROPERTY OPERATIONS</span>
-          <a href="/" className="landlord-back-link">Back to Hodi website</a>
+          <Link href="/" className="landlord-back-link">Back to Hodi website</Link>
         </div>
       </aside>
 
@@ -1422,7 +1422,7 @@ export default function LandlordDashboard() {
 
             {canReadBilling && !previewMode && (
               <BillingWorkspace
-                key={`${selectedOrganizationId}-${organizationData.tenants.length}-${organizationData.leases.length}`}
+                key={`billing-${selectedOrganizationId}`}
                 organizationId={selectedOrganizationId}
                 canWriteLedger={canWriteLedger}
                 canWriteRentLog={canWriteRentLog}
@@ -1430,7 +1430,7 @@ export default function LandlordDashboard() {
             )}
             {canMaintenance && !previewMode && (
               <MaintenanceRequestsPanel
-                key={`${selectedOrganizationId}-${organizationData.units.length}-${organizationData.tenants.length}`}
+                key={`maintenance-${selectedOrganizationId}`}
                 organizationId={selectedOrganizationId}
                 canWrite={canWritePortfolio}
               />

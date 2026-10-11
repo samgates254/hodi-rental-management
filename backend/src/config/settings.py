@@ -218,12 +218,20 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # Safaricom Daraja (M-Pesa). Secrets come from the environment; never hardcode them.
-MPESA_BASE_URL = os.environ.get(
-    'MPESA_BASE_URL',
-    'https://sandbox.safaricom.co.ke',
-).strip().rstrip('/')
-if MPESA_BASE_URL and not MPESA_BASE_URL.lower().startswith('https://'):
-    raise ImproperlyConfigured('MPESA_BASE_URL must use HTTPS.')
+_mpesa_environment = os.environ.get('MPESA_ENVIRONMENT', '').strip().lower()
+if DJANGO_ENV == 'production' and not _mpesa_environment:
+    raise ImproperlyConfigured('MPESA_ENVIRONMENT must be explicitly set in production.')
+MPESA_ENVIRONMENT = _mpesa_environment or 'sandbox'
+if MPESA_ENVIRONMENT not in {'sandbox', 'production'}:
+    raise ImproperlyConfigured('MPESA_ENVIRONMENT must be sandbox or production.')
+_mpesa_expected_base_url = (
+    'https://api.safaricom.co.ke'
+    if MPESA_ENVIRONMENT == 'production'
+    else 'https://sandbox.safaricom.co.ke'
+)
+MPESA_BASE_URL = os.environ.get('MPESA_BASE_URL', _mpesa_expected_base_url).strip().rstrip('/')
+if MPESA_BASE_URL != _mpesa_expected_base_url:
+    raise ImproperlyConfigured('MPESA_BASE_URL does not match MPESA_ENVIRONMENT.')
 MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', '').strip()
 MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', '').strip()
 MPESA_SHORTCODE = os.environ.get('MPESA_SHORTCODE', '').strip()
@@ -238,6 +246,22 @@ if DJANGO_ENV == 'production' and (
     not MPESA_CALLBACK_URL or MPESA_CALLBACK_AUTH_TOKEN not in urlsplit(MPESA_CALLBACK_URL).path.split('/')
 ):
     raise ImproperlyConfigured('MPESA_CALLBACK_URL must include MPESA_CALLBACK_AUTH_TOKEN as a path segment in production.')
+if MPESA_ENVIRONMENT == 'production':
+    _missing_mpesa_production = [name for name, value in {
+        'MPESA_CONSUMER_KEY': MPESA_CONSUMER_KEY,
+        'MPESA_CONSUMER_SECRET': MPESA_CONSUMER_SECRET,
+        'MPESA_SHORTCODE': MPESA_SHORTCODE,
+        'MPESA_PASSKEY': MPESA_PASSKEY,
+        'MPESA_CALLBACK_URL': MPESA_CALLBACK_URL,
+    }.items() if not value]
+    if _missing_mpesa_production:
+        raise ImproperlyConfigured('Production Daraja configuration is incomplete: ' + ', '.join(_missing_mpesa_production))
+    if not MPESA_SHORTCODE.isdigit():
+        raise ImproperlyConfigured('MPESA_SHORTCODE must contain only digits.')
+    if len(MPESA_CALLBACK_AUTH_TOKEN) < 32:
+        raise ImproperlyConfigured('MPESA_CALLBACK_AUTH_TOKEN must contain at least 32 characters for production.')
+    if MPESA_CALLBACK_AUTH_TOKEN not in urlsplit(MPESA_CALLBACK_URL).path.split('/'):
+        raise ImproperlyConfigured('MPESA_CALLBACK_URL must include the callback token path segment.')
 try:
     MPESA_TIMEOUT_SECONDS = int(os.environ.get('MPESA_TIMEOUT_SECONDS', '30'))
 except ValueError as error:
@@ -248,3 +272,5 @@ MPESA_TRANSACTION_TYPE = os.environ.get(
     'MPESA_TRANSACTION_TYPE',
     'CustomerPayBillOnline',
 ).strip() or 'CustomerPayBillOnline'
+if MPESA_TRANSACTION_TYPE not in {'CustomerPayBillOnline', 'CustomerBuyGoodsOnline'}:
+    raise ImproperlyConfigured('MPESA_TRANSACTION_TYPE must be CustomerPayBillOnline or CustomerBuyGoodsOnline.')

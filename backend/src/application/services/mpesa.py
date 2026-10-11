@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import logging
 import re
+import hashlib
+import json
+
+from django.db import IntegrityError, transaction
 
 from rest_framework.exceptions import APIException, NotFound, ValidationError
 
@@ -108,6 +112,7 @@ def initiate_mpesa_stk(
     amount_cents,
     phone_number='',
     invoice_id=None,
+    idempotency_key=None,
     request=None,
     client=None,
 ):
@@ -122,24 +127,46 @@ def initiate_mpesa_stk(
     phone = normalize_kenya_msisdn(phone_number or tenant.phone_number)
     invoice = _load_invoice(invoice_id=invoice_id, tenant=tenant)
     account_reference = _account_reference(tenant=tenant, invoice=invoice)
+    fingerprint = hashlib.sha256(json.dumps({
+        'tenant': tenant.pk,
+        'invoice': invoice.pk if invoice is not None else None,
+        'amount_cents': cents,
+        'phone_number': phone,
+    }, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
 
+    if idempotency_key:
+        existing = MpesaAttempt.objects.filter(tenant=tenant, idempotency_key=idempotency_key).first()
+        if existing is not None:
+            if existing.request_fingerprint != fingerprint:
+                raise ValidationError({'idempotency_key': 'This key was already used for a different payment request.'})
+            return existing
     client = client or MpesaClient.from_settings()
     try:
         client.require_configured()
     except MpesaConfigError as error:
         raise ValidationError({'detail': str(error)}) from error
-
-    attempt = MpesaAttempt.objects.create(
-        organization=tenant.organization,
-        tenant=tenant,
-        invoice=invoice,
-        initiated_by=actor,
-        amount_cents=cents,
-        currency='KES',
-        phone_number=phone,
-        status=MpesaAttempt.Status.INITIATED,
-        account_reference=account_reference,
-    )
+    try:
+        with transaction.atomic():
+            attempt = MpesaAttempt.objects.create(
+                organization=tenant.organization,
+                tenant=tenant,
+                invoice=invoice,
+                initiated_by=actor,
+                amount_cents=cents,
+                currency='KES',
+                phone_number=phone,
+                status=MpesaAttempt.Status.INITIATED,
+                account_reference=account_reference,
+                idempotency_key=idempotency_key or '',
+                request_fingerprint=fingerprint if idempotency_key else '',
+            )
+    except IntegrityError:
+        if not idempotency_key:
+            raise
+        existing = MpesaAttempt.objects.filter(tenant=tenant, idempotency_key=idempotency_key).first()
+        if existing is None or existing.request_fingerprint != fingerprint:
+            raise ValidationError({'idempotency_key': 'This payment request could not be safely deduplicated.'})
+        return existing
     record_audit(
         action='mpesa.stk.initiate',
         object_type='MpesaAttempt',
@@ -162,15 +189,24 @@ def initiate_mpesa_stk(
             transaction_desc='Rent payment',
         )
     except MpesaTimeoutError as error:
-        _mark_failed(attempt, 'Daraja request timed out.')
-        raise MpesaUnavailable() from error
+        attempt.reconciliation_state = MpesaAttempt.ReconciliationState.UNRESOLVED
+        attempt.result_description = 'Daraja response timed out; payment prompt outcome is unknown.'
+        attempt.save(update_fields=('reconciliation_state', 'result_description', 'updated_at'))
+        record_audit(
+            action='mpesa.stk.initiate_unresolved', object_type='MpesaAttempt', object_id=attempt.pk,
+            actor=actor, organization=attempt.organization,
+            metadata={'reason': 'provider_timeout', 'amount_cents': cents}, request=request,
+        )
+        return attempt
     except MpesaAuthError as error:
         _mark_failed(attempt, 'Daraja rejected the OAuth credentials.')
         raise MpesaUnavailable() from error
     except (MpesaHTTPError, MpesaResponseError, MpesaError) as error:
-        _mark_failed(attempt, 'Daraja request failed.')
+        attempt.reconciliation_state = MpesaAttempt.ReconciliationState.UNRESOLVED
+        attempt.result_description = 'Daraja response was inconclusive; payment prompt outcome is unknown.'
+        attempt.save(update_fields=('reconciliation_state', 'result_description', 'updated_at'))
         logger.error('Daraja STK failed attempt_id=%s', attempt.pk)
-        raise MpesaUnavailable() from error
+        return attempt
 
     attempt.merchant_request_id = _blank_to_none(result.merchant_request_id)
     attempt.checkout_request_id = _blank_to_none(result.checkout_request_id)
@@ -178,7 +214,11 @@ def initiate_mpesa_stk(
     attempt.response_description = result.response_description or ''
     attempt.customer_message = result.customer_message or ''
     if result.accepted:
-        attempt.status = MpesaAttempt.Status.STK_SENT
+        if attempt.checkout_request_id and attempt.merchant_request_id:
+            attempt.status = MpesaAttempt.Status.STK_SENT
+        else:
+            attempt.reconciliation_state = MpesaAttempt.ReconciliationState.UNRESOLVED
+            attempt.result_description = 'Daraja accepted the request without usable request identifiers.'
     else:
         attempt.status = MpesaAttempt.Status.FAILED
         attempt.result_description = result.response_description or 'Daraja did not accept the STK request.'
@@ -190,6 +230,7 @@ def initiate_mpesa_stk(
         'customer_message',
         'status',
         'result_description',
+        'reconciliation_state',
         'updated_at',
     ))
     return attempt

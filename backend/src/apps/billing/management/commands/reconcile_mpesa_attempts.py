@@ -71,7 +71,7 @@ class Command(BaseCommand):
         for snapshot in attempts:
             try:
                 query = client.stk_query(checkout_request_id=snapshot.checkout_request_id)
-                outcome, result_code, description = classify_stk_query(snapshot, query)
+                outcome, result_code, description = classify_stk_query(snapshot, query, conservative=True)
             except MpesaError:
                 outcome, result_code, description = 'UNRESOLVED', '', ''
             with transaction.atomic():

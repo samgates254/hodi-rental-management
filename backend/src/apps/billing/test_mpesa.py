@@ -1,4 +1,5 @@
 from datetime import date
+import uuid
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -21,7 +22,17 @@ from apps.tenants.models import Tenant
 from application.services.mpesa import initiate_mpesa_stk, kes_from_cents, normalize_kenya_msisdn
 from infrastructure.payments.mpesa import MpesaClient, StkPushResult
 
-CALLBACK_URL = 'https://example.test/api/v1/billing/mpesa/callback/'
+CALLBACK_URL = 'https://example.test/api/v1/billing/mpesa/callback/test-token/'
+
+
+class IdempotentTestAPIClient(APIClient):
+    """Existing initiation fixtures use unique request keys by default."""
+
+    def post(self, path, data=None, *args, **kwargs):
+        if path.endswith('/mpesa/initiate/') and isinstance(data, dict):
+            data = {**data}
+            data.setdefault('idempotency_key', str(uuid.uuid4()))
+        return super().post(path, data, *args, **kwargs)
 
 MPESA_SETTINGS = dict(
     MPESA_BASE_URL='https://sandbox.safaricom.co.ke',
@@ -30,6 +41,7 @@ MPESA_SETTINGS = dict(
     MPESA_SHORTCODE='123456',
     MPESA_PASSKEY='test-passkey',
     MPESA_CALLBACK_URL=CALLBACK_URL,
+    MPESA_CALLBACK_AUTH_TOKEN='test-token',
     MPESA_TIMEOUT_SECONDS=5,
     MPESA_TRANSACTION_TYPE='CustomerPayBillOnline',
 )
@@ -56,6 +68,7 @@ class FakeMpesaClient(MpesaClient):
             shortcode=MPESA_SETTINGS['MPESA_SHORTCODE'],
             passkey=MPESA_SETTINGS['MPESA_PASSKEY'],
             callback_url=MPESA_SETTINGS['MPESA_CALLBACK_URL'],
+            callback_auth_token=MPESA_SETTINGS['MPESA_CALLBACK_AUTH_TOKEN'],
             urlopen=lambda request, timeout=None: None,
         )
         self.result = result if result is not None else _accepted_result()
@@ -184,7 +197,7 @@ class MpesaPhoneAndAmountTests(TestCase):
 class MpesaInitiateApiTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
-        self.client = APIClient()
+        self.client = IdempotentTestAPIClient()
         self.tenant_user = user_model.objects.create_user(username='tenant', password='secret')
         self.other_user = user_model.objects.create_user(username='other-tenant', password='secret')
         self.owner = user_model.objects.create_user(username='owner', password='secret')
@@ -351,17 +364,52 @@ class MpesaInitiateApiTests(TestCase):
         self.assertEqual(attempt.checkout_request_id, 'c-fail')
         self.assertEqual(Payment.objects.count(), 0)
 
-    def test_provider_timeout_persists_failed_attempt(self):
+    def test_provider_timeout_stays_unresolved_and_retry_does_not_send_another_prompt(self):
         from infrastructure.payments.mpesa import MpesaTimeoutError
 
         self.client.force_authenticate(self.tenant_user)
         fake = FakeMpesaClient(error=MpesaTimeoutError('Daraja request timed out.'))
         with self._patch_client(fake):
-            response = self.client.post(self.url, {'amount_cents': 10000}, format='json')
-        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+            response = self.client.post(self.url, {'amount_cents': 10000, 'idempotency_key': '8c35842b-d849-4fb0-9231-7ea815bd48c0'}, format='json')
+            retried = self.client.post(self.url, {'amount_cents': 10000, 'idempotency_key': '8c35842b-d849-4fb0-9231-7ea815bd48c0'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(retried.data['id'], response.data['id'])
         attempt = MpesaAttempt.objects.get()
-        self.assertEqual(attempt.status, MpesaAttempt.Status.FAILED)
+        self.assertEqual(attempt.status, MpesaAttempt.Status.INITIATED)
+        self.assertEqual(attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
         self.assertEqual(Payment.objects.count(), 0)
+        self.assertEqual(len(fake.stk_calls), 1)
+
+    def test_duplicate_payment_request_is_idempotent(self):
+        self.client.force_authenticate(self.tenant_user)
+        fake = FakeMpesaClient()
+        payload = {'amount_cents': 10000, 'idempotency_key': '8c35842b-d849-4fb0-9231-7ea815bd48c0'}
+        with self._patch_client(fake):
+            first = self.client.post(self.url, payload, format='json')
+            second = self.client.post(self.url, payload, format='json')
+        self.assertEqual(first.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(second.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(second.data['id'], first.data['id'])
+        self.assertEqual(MpesaAttempt.objects.count(), 1)
+        self.assertEqual(len(fake.stk_calls), 1)
+
+    def test_idempotency_key_cannot_be_reused_for_different_payment(self):
+        self.client.force_authenticate(self.tenant_user)
+        fake = FakeMpesaClient()
+        key = '8c35842b-d849-4fb0-9231-7ea815bd48c0'
+        with self._patch_client(fake):
+            first = self.client.post(self.url, {'amount_cents': 10000, 'idempotency_key': key}, format='json')
+            conflict = self.client.post(self.url, {'amount_cents': 20000, 'idempotency_key': key}, format='json')
+        self.assertEqual(first.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(conflict.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(MpesaAttempt.objects.count(), 1)
+        self.assertEqual(len(fake.stk_calls), 1)
+
+    def test_idempotency_key_is_required(self):
+        unaided_client = APIClient()
+        unaided_client.force_authenticate(self.tenant_user)
+        response = unaided_client.post(self.url, {'amount_cents': 10000}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_invalid_amount_rejected(self):
         self.client.force_authenticate(self.tenant_user)

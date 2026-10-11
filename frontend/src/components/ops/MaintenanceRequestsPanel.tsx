@@ -15,10 +15,38 @@ type MembershipRow = { user: number | string; role: string; organization: number
 type WorkOrder = {
   id: number | string;
   assignee: number | null;
+  assignee_name?: string | null;
+  assigned_to_me?: boolean;
   status: string;
+  assignment_status?: "NOT_REQUIRED" | "PENDING" | "ACCEPTED" | "DECLINED" | null;
+  assignment_responded_at?: string | null;
+  assignment_decline_reason?: string;
   assigned_at?: string | null;
   completed_at?: string | null;
   notes?: string;
+};
+
+type RepairQuotation = {
+  id: number | string;
+  labour_estimate_cents: number;
+  materials_estimate_cents: number;
+  other_estimate_cents: number;
+  total_estimate_cents: number;
+  explanation: string;
+  status: string;
+  decision_notes?: string;
+};
+
+type RepairCompletion = {
+  id: number | string;
+  diagnosis: string;
+  failure_category: string;
+  resolution_summary: string;
+  outcome: string;
+  actual_total_cents: number | null;
+  status: string;
+  follow_up_required: boolean;
+  follow_up_reason?: string;
 };
 
 type MaintenanceRequestRow = {
@@ -29,13 +57,25 @@ type MaintenanceRequestRow = {
   title: string;
   description: string;
   status: string;
+  category: string;
+  hazard: number;
+  vulnerability: number;
   priority_class: number;
   emergency_override: boolean;
+  safety_override: boolean;
+  safety_override_reason?: string;
+  triage_notes?: string;
+  requires_approval: boolean;
+  follow_up_at?: string | null;
+  follow_up_reason?: string;
+  follow_up_assignee_name?: string | null;
   created_at: string;
   updated_at?: string;
   completed_at?: string | null;
   closed_at?: string | null;
   work_order?: WorkOrder | null;
+  quotations?: RepairQuotation[];
+  completion?: RepairCompletion | null;
 };
 
 type Assignee = { id: string; label: string };
@@ -59,14 +99,17 @@ export default function MaintenanceRequestsPanel({
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
 
   const load = useCallback(async () => {
     if (!organizationId) return;
     setLoading(true);
     setError("");
     try {
-      const [requestRows, unitRows, buildingRows, propertyRows, tenantRows] = await Promise.all([
-        getList<MaintenanceRequestRow>("/api/v1/maintenance/requests/"),
+      const requestRows = await getList<MaintenanceRequestRow>("/api/v1/maintenance/requests/");
+      setRequests(requestRows.filter(row => String(row.organization) === organizationId));
+      if (!canWrite) return;
+      const [unitRows, buildingRows, propertyRows, tenantRows] = await Promise.all([
         getList<UnitRow>("/api/v1/properties/units/"),
         getList<BuildingRow>("/api/v1/properties/buildings/"),
         getList<PropertyRow>("/api/v1/properties/"),
@@ -80,7 +123,6 @@ export default function MaintenanceRequestsPanel({
       setBuildings(orgBuildings);
       setUnits(unitRows.filter(row => buildingIds.has(String(row.building))));
       setTenants(tenantRows.filter(row => String(row.organization) === organizationId));
-      setRequests(requestRows.filter(row => String(row.organization) === organizationId));
 
       let people: Assignee[] = [];
       try {
@@ -103,7 +145,7 @@ export default function MaintenanceRequestsPanel({
     } finally {
       setLoading(false);
     }
-  }, [organizationId]);
+  }, [canWrite, organizationId]);
 
   useEffect(() => {
     void load();
@@ -179,36 +221,145 @@ export default function MaintenanceRequestsPanel({
     }
   }
 
-  async function complete() {
+  async function triage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (!selected) return;
+    const form = new FormData(event.currentTarget);
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/complete/`, {});
-      setNotice("Work order marked complete.");
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/triage/`, {
+        category: String(form.get("category") ?? "OTHER").trim().toUpperCase(),
+        hazard: Number(form.get("hazard")),
+        vulnerability: Number(form.get("vulnerability")),
+        notes: String(form.get("notes") ?? ""),
+        safety_override: form.get("safety_override") === "on",
+        safety_override_reason: String(form.get("safety_override_reason") ?? ""),
+        requires_approval: form.get("requires_approval") === "on",
+      });
+      setNotice("Triage details saved.");
       await load();
-    } catch (completeError) {
-      setError(apiErrorMessage(completeError, "The work order couldn’t be completed."));
+    } catch (triageError) {
+      setError(apiErrorMessage(triageError, "Triage details couldn’t be saved."));
     } finally {
       setBusy(false);
     }
   }
 
-  async function closeRequest() {
+  async function submitQuotation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (!selected) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
+    const form = new FormData(event.currentTarget);
+    setBusy(true); setError(""); setNotice("");
     try {
-      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/close/`, {});
-      setNotice("Request closed.");
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/quotations/`, {
+        labour_estimate_cents: Number(form.get("labour_estimate_cents")),
+        materials_estimate_cents: Number(form.get("materials_estimate_cents")),
+        other_estimate_cents: Number(form.get("other_estimate_cents") || 0),
+        explanation: String(form.get("explanation") ?? "").trim(),
+      });
+      setNotice("Quotation submitted for review.");
       await load();
-    } catch (closeError) {
-      setError(apiErrorMessage(closeError, "The request couldn’t be closed."));
-    } finally {
-      setBusy(false);
-    }
+    } catch (quoteError) {
+      setError(apiErrorMessage(quoteError, "The quotation couldn’t be submitted."));
+    } finally { setBusy(false); }
+  }
+
+  async function startWork() {
+    if (!selected) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/start/`, {});
+      setNotice("Work started."); await load();
+    } catch (startError) { setError(apiErrorMessage(startError, "Work couldn’t be started.")); }
+    finally { setBusy(false); }
+  }
+
+  async function respondToAssignment(accept: boolean, reason = "") {
+    if (!selected) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/${accept ? "accept" : "decline"}/`,
+        accept ? {} : { reason });
+      setNotice(accept ? "Assignment accepted." : "Assignment declined and returned to the property team.");
+      await load();
+    } catch (responseError) {
+      setError(apiErrorMessage(responseError, "Your assignment response couldn’t be saved."));
+    } finally { setBusy(false); }
+  }
+
+  async function scheduleFollowUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected?.work_order?.assignee) return;
+    const form = new FormData(event.currentTarget);
+    const localTime = String(form.get("follow_up_at") ?? "");
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/follow-up/`, {
+        follow_up_at: new Date(localTime).toISOString(),
+        reason: String(form.get("reason") ?? "").trim(),
+        assignee_id: selected.work_order.assignee,
+      });
+      setNotice("Repair follow-up scheduled."); await load();
+    } catch (scheduleError) {
+      setError(apiErrorMessage(scheduleError, "Follow-up couldn’t be scheduled."));
+    } finally { setBusy(false); }
+  }
+
+  async function submitCompletion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    const materialDescription = String(form.get("material_description") ?? "").trim();
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/complete/`, {
+        diagnosis: String(form.get("diagnosis") ?? "").trim(),
+        failure_category: String(form.get("failure_category") ?? "OTHER").trim().toUpperCase(),
+        resolution_summary: String(form.get("resolution_summary") ?? "").trim(),
+        outcome: String(form.get("outcome") ?? "FIXED"),
+        labour_cost_cents: Number(form.get("labour_cost_cents")),
+        materials_cost_cents: Number(form.get("materials_cost_cents")),
+        other_cost_cents: Number(form.get("other_cost_cents") || 0),
+        follow_up_reason: String(form.get("follow_up_reason") ?? "").trim(),
+        materials: materialDescription ? [{
+          description: materialDescription,
+          quantity: String(form.get("quantity") || "1"),
+          unit: String(form.get("unit") || "piece"),
+          unit_cost_cents: Number(form.get("unit_cost_cents") || 0),
+        }] : [],
+      });
+      setNotice("Repair submitted for verification."); await load();
+    } catch (completionError) { setError(apiErrorMessage(completionError, "Completion couldn’t be submitted.")); }
+    finally { setBusy(false); }
+  }
+
+  async function decideQuote(quote: RepairQuotation, approved: boolean) {
+    if (!selected) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/quotations/${quote.id}/decision/`, {
+        approved,
+        notes: approved ? "Approved for the submitted scope." : "Please revise and resubmit this estimate.",
+      });
+      setNotice(approved ? "Quotation approved." : "Quotation rejected."); await load();
+    } catch (decisionError) { setError(apiErrorMessage(decisionError, "The quotation decision couldn’t be saved.")); }
+    finally { setBusy(false); }
+  }
+
+  async function verifyCompletion(approved: boolean) {
+    if (!selected?.completion) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await clientApi.post(`/api/v1/maintenance/requests/${selected.id}/verify/`, {
+        completion_id: selected.completion.id,
+        approved,
+        notes: approved ? "Repair checked and accepted." : "Please complete the follow-up work described by the property team.",
+      });
+      setNotice(approved ? "Repair verified and closed." : "Further repair work requested."); await load();
+    } catch (verificationError) { setError(apiErrorMessage(verificationError, "The verification decision couldn’t be saved.")); }
+    finally { setBusy(false); }
   }
 
   const finished = selected && ["COMPLETED", "CLOSED", "CANCELLED"].includes(selected.status);
@@ -310,11 +461,41 @@ export default function MaintenanceRequestsPanel({
             <div><dt>Status</dt><dd>{humanize(selected.status)}</dd></div>
             <div><dt>Priority</dt><dd>Class {selected.priority_class}{selected.emergency_override ? " · emergency override" : ""}</dd></div>
             <div><dt>Work order</dt><dd>{selected.work_order ? `${humanize(selected.work_order.status)} · ${assigneeName(selected.work_order.assignee)}` : "—"}</dd></div>
+            <div><dt>Assignment response</dt><dd>{humanize(selected.work_order?.assignment_status ?? "Not recorded")}</dd></div>
             <div><dt>Opened</dt><dd>{formatWhen(selected.created_at)}</dd></div>
             <div><dt>Assigned</dt><dd>{formatWhen(selected.work_order?.assigned_at)}</dd></div>
             <div><dt>Completed</dt><dd>{formatWhen(selected.completed_at || selected.work_order?.completed_at)}</dd></div>
             <div><dt>Closed</dt><dd>{formatWhen(selected.closed_at)}</dd></div>
           </dl>
+          {selected.work_order?.assignment_decline_reason && (
+            <p className="ops-alert"><strong>Technician declined:</strong> {selected.work_order.assignment_decline_reason} Reassign this request to continue.</p>
+          )}
+          {selected.follow_up_at && (
+            <article className="ops-note">
+              <strong>Follow-up scheduled · {formatWhen(selected.follow_up_at)}</strong>
+              <p>{selected.follow_up_reason}</p>
+              <p>Responsible: {selected.follow_up_assignee_name ?? "Assigned repair team"}</p>
+            </article>
+          )}
+          {canWrite && !finished && (
+            <form className="ops-form" onSubmit={event => void triage(event)}>
+              <h3>Triage and safety</h3>
+              <div className="ops-grid">
+                <label>Repair category
+                  <select name="category" defaultValue={selected.category || "OTHER"}>
+                    {["OTHER", "PLUMBING", "ELECTRICAL", "CARPENTRY", "HVAC", "MASONRY"].map(category => <option key={category}>{category}</option>)}
+                  </select>
+                </label>
+                <label>Hazard 1–5<input name="hazard" type="number" min={1} max={5} defaultValue={selected.hazard} required /></label>
+                <label>Vulnerability 1–5<input name="vulnerability" type="number" min={1} max={5} defaultValue={selected.vulnerability} required /></label>
+              </div>
+              <label>Internal triage notes<textarea name="notes" defaultValue={selected.triage_notes ?? ""} /></label>
+              <label className="ops-check"><input name="safety_override" type="checkbox" defaultChecked={selected.safety_override} /> Safety exception to quotation approval</label>
+              <label>Safety exception reason<input name="safety_override_reason" defaultValue={selected.safety_override_reason ?? ""} maxLength={500} /></label>
+              <label className="ops-check"><input name="requires_approval" type="checkbox" defaultChecked={selected.requires_approval} /> Require an approved quotation before work starts</label>
+              <div className="ops-form-actions"><button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Save triage"}</button></div>
+            </form>
+          )}
           {canWrite && !finished && (
             <form className="ops-form" onSubmit={event => void assign(event)}>
               <div className="ops-grid">
@@ -330,18 +511,112 @@ export default function MaintenanceRequestsPanel({
                 <button className="ops-button ops-button--primary" disabled={busy || assignees.length === 0}>
                   {busy ? "Saving…" : "Assign"}
                 </button>
-                <button className="ops-button" type="button" disabled={busy} onClick={() => void complete()}>Complete work</button>
               </div>
               {assignees.length === 0 && <p className="ops-note">No staff membership was returned, so assignment isn’t available.</p>}
             </form>
           )}
-          {canWrite && selected.status === "COMPLETED" && (
+          {selected.quotations?.map(quote => (
+            <article className="ops-note" key={quote.id}>
+              <strong>Quotation · {humanize(quote.status)} · KES {(quote.total_estimate_cents / 100).toFixed(2)}</strong>
+              <p>{quote.explanation}</p>
+              {canWrite && quote.status === "PENDING" && (
+                <div className="ops-form-actions">
+                  <button type="button" className="ops-button ops-button--primary" disabled={busy} onClick={() => void decideQuote(quote, true)}>Approve scope</button>
+                  <button type="button" className="ops-button" disabled={busy} onClick={() => void decideQuote(quote, false)}>Reject / revise</button>
+                </div>
+              )}
+            </article>
+          ))}
+          {selected.work_order?.assigned_to_me && selected.work_order.status === "ASSIGNED" && selected.work_order.assignment_status === "PENDING" && (
+            <form className="ops-form" onSubmit={event => {
+              event.preventDefault();
+              void respondToAssignment(false, declineReason);
+            }}>
+              <h3>Respond to assignment</h3>
+              <p>Accept this repair or decline with a reason so the property team can reassign it.</p>
+              <div className="ops-form-actions">
+                <button type="button" className="ops-button ops-button--primary" disabled={busy} onClick={() => void respondToAssignment(true)}>Accept assignment</button>
+                <label>Reason for declining<input value={declineReason} onChange={event => setDeclineReason(event.target.value)} maxLength={500} required /></label>
+                <button type="submit" className="ops-button" disabled={busy || !declineReason.trim()}>Decline assignment</button>
+              </div>
+            </form>
+          )}
+          {selected.work_order?.assigned_to_me && selected.work_order.status === "ASSIGNED" && (selected.work_order.assignment_status === "ACCEPTED" || selected.work_order.assignment_status === "NOT_REQUIRED" || !selected.work_order.assignment_status) && (
             <div className="ops-form-actions">
-              <button className="ops-button ops-button--primary" type="button" disabled={busy} onClick={() => void closeRequest()}>
-                {busy ? "Closing…" : "Close request"}
+              <button type="button" className="ops-button ops-button--primary" disabled={busy} onClick={() => void startWork()}>
+                {busy ? "Saving…" : "Start assigned work"}
               </button>
             </div>
           )}
+          {selected.work_order?.assigned_to_me && selected.work_order.status === "IN_PROGRESS" && (
+            <form className="ops-form" onSubmit={event => void submitCompletion(event)}>
+              <h3>Submit repair for verification</h3>
+              <label>Diagnosis<input name="diagnosis" required /></label>
+              <div className="ops-grid">
+                <label>Failure category<input name="failure_category" required maxLength={50} /></label>
+                <label>Outcome
+                  <select name="outcome" defaultValue="FIXED">
+                    <option value="FIXED">Fixed</option><option value="PARTIALLY_FIXED">Partially fixed</option>
+                    <option value="REPLACED">Replaced</option><option value="NO_FAULT_FOUND">No fault found</option>
+                    <option value="NEEDS_FOLLOW_UP">Needs follow-up</option>
+                  </select>
+                </label>
+                <label>Labour cost (KES cents)<input name="labour_cost_cents" type="number" min={0} step={1} required /></label>
+                <label>Materials cost (KES cents)<input name="materials_cost_cents" type="number" min={0} step={1} required /></label>
+                <label>Other cost (KES cents)<input name="other_cost_cents" type="number" min={0} step={1} defaultValue={0} /></label>
+              </div>
+              <label>Resolution summary<textarea name="resolution_summary" required /></label>
+              <label>Follow-up reason<input name="follow_up_reason" maxLength={500} /></label>
+              <div className="ops-grid">
+                <label>Material used (optional)<input name="material_description" maxLength={200} /></label>
+                <label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" defaultValue="1" /></label>
+                <label>Unit<input name="unit" defaultValue="piece" maxLength={30} /></label>
+                <label>Unit cost (KES cents)<input name="unit_cost_cents" type="number" min={0} step={1} defaultValue={0} /></label>
+              </div>
+              <div className="ops-form-actions"><button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Submit completion"}</button></div>
+            </form>
+          )}
+          {selected.work_order?.assigned_to_me && !finished && selected.work_order.assignment_status !== "PENDING" && !selected.quotations?.some(quote => quote.status === "PENDING") && (
+            <form className="ops-form" onSubmit={event => void submitQuotation(event)}>
+              <h3>Submit quotation</h3>
+              <div className="ops-grid">
+                <label>Labour estimate (KES cents)<input name="labour_estimate_cents" type="number" min={0} step={1} required /></label>
+                <label>Materials estimate (KES cents)<input name="materials_estimate_cents" type="number" min={0} step={1} required /></label>
+                <label>Other estimate (KES cents)<input name="other_estimate_cents" type="number" min={0} step={1} defaultValue={0} /></label>
+              </div>
+              <label>Scope and assumptions<textarea name="explanation" required /></label>
+              <div className="ops-form-actions"><button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Submit quotation"}</button></div>
+            </form>
+          )}
+          {selected.completion && (
+            <article className="ops-note">
+              <strong>Repair outcome: {humanize(selected.completion.outcome)} · {humanize(selected.completion.status)}</strong>
+              <p>{selected.completion.diagnosis}</p>
+              <p>{selected.completion.resolution_summary}</p>
+              {selected.completion.follow_up_required && <p>Follow-up: {selected.completion.follow_up_reason}</p>}
+              {selected.completion.actual_total_cents != null && <p>Actual cost: KES {(selected.completion.actual_total_cents / 100).toFixed(2)}</p>}
+              {canWrite && selected.completion.status === "SUBMITTED" && selected.completion.outcome !== "NEEDS_FOLLOW_UP" && (
+                <div className="ops-form-actions">
+                  <button type="button" className="ops-button ops-button--primary" disabled={busy} onClick={() => void verifyCompletion(true)}>Verify and close</button>
+                  <button type="button" className="ops-button" disabled={busy} onClick={() => void verifyCompletion(false)}>Request further work</button>
+                </div>
+              )}
+              {canWrite && selected.completion.status === "SUBMITTED" && selected.completion.outcome === "NEEDS_FOLLOW_UP" && (
+                <p className="ops-note">This repair cannot be verified as resolved. Reject it for further work, then schedule the follow-up.</p>
+              )}
+            </article>
+          )}
+          {canWrite && selected.completion &&
+            (selected.completion.outcome === "NEEDS_FOLLOW_UP" || selected.completion.status === "REJECTED") &&
+            (selected.status === "COMPLETED" || selected.status === "IN_PROGRESS") && (
+              <form className="ops-form" onSubmit={event => void scheduleFollowUp(event)}>
+                <h3>Schedule repair follow-up</h3>
+                <p>Responsible party: {selected.work_order?.assignee_name ?? "No assigned technician"}</p>
+                <label>Date and time<input name="follow_up_at" type="datetime-local" required /></label>
+                <label>Reason<input name="reason" maxLength={500} required defaultValue={selected.completion.follow_up_reason ?? ""} /></label>
+                <div className="ops-form-actions"><button className="ops-button ops-button--primary" disabled={busy || !selected.work_order?.assignee}>{busy ? "Saving…" : "Schedule follow-up"}</button></div>
+              </form>
+            )}
           {selected.work_order?.notes && <p className="ops-note">Work order notes: {selected.work_order.notes}</p>}
         </div>
       )}

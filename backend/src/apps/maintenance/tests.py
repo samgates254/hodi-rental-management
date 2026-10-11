@@ -112,7 +112,8 @@ class MaintenanceIssueApiTests(TestCase):
 			{'status': MaintenanceIssue.Status.RESOLVED, 'note': 'Repair verified.'},
 			format='json',
 		)
-		self.assertEqual(resolved.status_code, status.HTTP_201_CREATED)
+		self.assertEqual(resolved.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(MaintenanceRequest.objects.get(pk=created.data['operational_request_id']).status, MaintenanceRequest.Status.OPEN)
 		reopened = self.client.post(
 			f"/api/v1/maintenance/issues/{created.data['id']}/updates/",
 			{'status': MaintenanceIssue.Status.IN_PROGRESS},

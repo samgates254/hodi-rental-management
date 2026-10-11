@@ -5,7 +5,7 @@ This roadmap sequences the platform around a reliable rental and operating core.
 | Milestone | Scope | Gate |
 | --- | --- | --- |
 | M2 | Operational and financial integrity: invoice idempotency, lease occupancy protection, verified payment outcomes, tenant API contracts, and a coherent maintenance identity. | Reconciliation and authorization tests pass; production database concurrency behavior is verified. |
-| M3 | Unified maintenance and repair outcomes: triage, assignment, quotations/approval where needed, completion verification, and structured failure/outcome data. | M2 records are linked without losing history; property teams can complete and verify repairs end to end. |
+| M3 | **Implemented foundation:** unified maintenance and repair outcomes: triage, eligible assignment, request-scoped quotations/approval, completion verification, actual costs, materials used, and structured failure/outcome data. | Continue hardening PostgreSQL concurrency, technician response handling, cancellation policy, and production role workflows before broad rollout. See [maintenance workflow](./maintenance-workflow.md). |
 | M4 | Parts catalog, supplier procurement, and asset lifecycle. | Repeated repair demand and part usage show a justified catalog/procurement workflow. |
 | M5 | One validated household marketplace transaction. | Catalog/order ownership, payment settlement, refunds, and fulfillment responsibilities are defined. |
 | M6 | Utility and transaction integrations. | Provider contracts, authorization, reconciliation, and tenant data controls are reviewed. |

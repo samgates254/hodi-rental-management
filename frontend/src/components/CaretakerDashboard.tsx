@@ -29,6 +29,8 @@ type MaintenanceIssue = {
   tenant_name?: string;
   unit_name?: string;
   property_name?: string;
+  operational_request_id?: number | null;
+  operational_status?: string | null;
   title: string;
   category?: string;
   priority?: string;
@@ -390,7 +392,9 @@ export default function CaretakerDashboard() {
                       <h3>{issue.title}</h3>
                       <p>{issue.tenant_name ?? "Resident"} · {[issue.property_name, issue.unit_name].filter(Boolean).join(" · ") || "Property not listed"}</p>
                     </div>
-                    <span className={`caretaker-status status-${issue.status.toLowerCase()}`}>{humanize(issue.status)}</span>
+                    <span className={`caretaker-status status-${(issue.operational_status ?? issue.status).toLowerCase()}`}>
+                      {humanize(issue.operational_status ?? issue.status)}
+                    </span>
                   </div>
                   <div className="caretaker-issue-meta">
                     <span>{humanize(issue.category ?? "General")}</span>
@@ -410,7 +414,9 @@ export default function CaretakerDashboard() {
                       ))}
                     </ol>
                   ) : null}
-                  {issue.status !== "RESOLVED" && (
+                  {issue.operational_request_id ? (
+                    <p className="caretaker-issue-description">This repair uses the unified work order. Triage, assignment and verification are managed in the repair queue below.</p>
+                  ) : issue.status !== "RESOLVED" && (
                     <form className="caretaker-update-form" onSubmit={event => void updateIssue(issue, event)}>
                       <label>
                         Update status

@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from apps.leases.models import Lease
 from apps.properties.models import Unit
-from .models import MaintenanceIssue, MaintenanceIssueAttachment, MaintenanceIssueUpdate
+from .models import MaintenanceIssue, MaintenanceIssueAttachment, MaintenanceIssueUpdate, WorkOrder
 
 MAX_ISSUE_ATTACHMENTS = 5
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -45,12 +45,18 @@ class MaintenanceIssueSerializer(serializers.ModelSerializer):
 	property_name = serializers.CharField(source='unit.building.property.name', read_only=True)
 	organization = serializers.IntegerField(source='tenant.organization_id', read_only=True)
 	operational_request_id = serializers.IntegerField(read_only=True, allow_null=True)
+	operational_status = serializers.CharField(source='operational_request.status', read_only=True, allow_null=True)
+	follow_up_at = serializers.SerializerMethodField()
+	follow_up_reason = serializers.SerializerMethodField()
+	repair_outcome = serializers.SerializerMethodField()
+	repair_resolution = serializers.SerializerMethodField()
 
 	class Meta:
 		model = MaintenanceIssue
 		fields = (
 			'id', 'organization', 'tenant', 'tenant_name', 'unit', 'unit_name',
 			'property_name', 'operational_request_id', 'title',
+			'operational_status', 'repair_outcome', 'repair_resolution', 'follow_up_at', 'follow_up_reason',
 			'category', 'priority', 'description', 'status', 'resolved_at',
 			'created_at', 'updated_at', 'updates', 'attachments',
 		)
@@ -71,6 +77,36 @@ class MaintenanceIssueSerializer(serializers.ModelSerializer):
 			}
 			for attachment in issue.attachments.all()
 		]
+
+	def get_repair_outcome(self, issue):
+		if not issue.operational_request_id:
+			return None
+		try:
+			order = issue.operational_request.work_order
+		except WorkOrder.DoesNotExist:
+			return None
+		completion = order.completions.order_by('-submitted_at', '-pk').first()
+		return completion.outcome if completion else None
+
+	def get_repair_resolution(self, issue):
+		if not issue.operational_request_id:
+			return ''
+		try:
+			order = issue.operational_request.work_order
+		except WorkOrder.DoesNotExist:
+			return ''
+		completion = order.completions.order_by('-submitted_at', '-pk').first()
+		return completion.resolution_summary if completion else ''
+
+	def get_follow_up_at(self, issue):
+		if not issue.operational_request_id:
+			return None
+		return issue.operational_request.follow_up_at
+
+	def get_follow_up_reason(self, issue):
+		if not issue.operational_request_id:
+			return ''
+		return issue.operational_request.follow_up_reason
 
 
 class MaintenanceIssueCreateSerializer(serializers.ModelSerializer):

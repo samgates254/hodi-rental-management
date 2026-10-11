@@ -12,7 +12,6 @@ from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from django.db import IntegrityError, transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.billing.models import MpesaAttempt, Payment
@@ -41,7 +40,7 @@ class CallbackValidationError(Exception):
     """Success-callback metadata failed HODI checks. Do not create a Payment."""
 
 
-def classify_stk_query(attempt, query) -> tuple[str, str, str]:
+def classify_stk_query(attempt, query, *, conservative=False) -> tuple[str, str, str]:
     """Return transaction outcome only when the query response is tied to this attempt.
 
     Daraja ResponseCode acknowledges the query request. ResultCode is the
@@ -55,8 +54,20 @@ def classify_stk_query(attempt, query) -> tuple[str, str, str]:
     if (not result_code or checkout != str(attempt.checkout_request_id or '')
             or merchant != str(attempt.merchant_request_id or '')):
         return 'UNRESOLVED', '', ''
-    return ('SUCCESS' if result_code == '0' else 'FAILED', result_code,
-            str(query.get('ResultDesc') or ''))
+    # Daraja's ResponseCode acknowledges the query request, not the underlying
+    # transaction. Treat success as verified only with a complete result.
+    # Automatic reconciliation is deliberately conservative: only known
+    # terminal cancellation/timeout codes may close an attempt. The callback
+    # path can still validate a specific nonzero result against its matching
+    # provider query without misclassifying an unknown code as a known state.
+    description = query.get('ResultDesc')
+    if not isinstance(description, str) or not description.strip():
+        return 'UNRESOLVED', '', ''
+    if result_code == '0':
+        return 'SUCCESS', result_code, description.strip()
+    if not conservative or result_code in CANCELLED_CODES | TIMEOUT_CODES:
+        return 'FAILED', result_code, description.strip()
+    return 'UNRESOLVED', '', ''
 
 
 @dataclass
@@ -133,7 +144,7 @@ def _amount_to_cents(value) -> int:
 
 def _parse_transaction_date(value):
     if value is None or value == '':
-        return timezone.localdate()
+        raise CallbackValidationError('Callback TransactionDate is required.')
     raw = str(value).strip()
     try:
         moment = datetime.strptime(raw, '%Y%m%d%H%M%S').replace(tzinfo=NAIROBI)
@@ -144,7 +155,7 @@ def _parse_transaction_date(value):
 
 def _phones_match(attempt_phone: str, callback_phone) -> bool:
     if callback_phone is None or str(callback_phone).strip() == '':
-        return True
+        return False
     try:
         normalized = normalize_kenya_msisdn(str(callback_phone))
     except ValidationError:

@@ -224,6 +224,10 @@ class MpesaCallbackTests(APITestCase):
         self.assertEqual(Payment.objects.count(), 0)
         self.assertEqual(PaymentAllocation.objects.count(), 0)
         self.assertEqual(LedgerPosting.objects.count(), 0)
+        self.client.force_authenticate(self.tenant_user)
+        status_response = self.client.get(f'/api/v1/billing/mpesa/attempts/{self.attempt.pk}/')
+        self.assertEqual(status_response.data['status'], 'CANCELLED')
+        self.assertIn('cancelled', status_response.data['message'].lower())
         self.charge.refresh_from_db()
         self.assertEqual(self.charge.balance_cents, 150000)
 
@@ -370,6 +374,30 @@ class MpesaCallbackTests(APITestCase):
         self.attempt.refresh_from_db()
         self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
 
+    def test_missing_phone_does_not_settle(self):
+        payload = stk_payload()
+        payload['Body']['stkCallback']['CallbackMetadata']['Item'] = [
+            item for item in payload['Body']['stkCallback']['CallbackMetadata']['Item']
+            if item['Name'] != 'PhoneNumber'
+        ]
+        response = self.post_callback(payload)
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_missing_transaction_date_does_not_fabricate_received_date(self):
+        payload = stk_payload()
+        payload['Body']['stkCallback']['CallbackMetadata']['Item'] = [
+            item for item in payload['Body']['stkCallback']['CallbackMetadata']['Item']
+            if item['Name'] != 'TransactionDate'
+        ]
+        response = self.post_callback(payload)
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(Payment.objects.count(), 0)
+
     def test_correct_phone_aliases_match(self):
         response = self.post_callback(stk_payload(phone='0700000010'))
         self.assertTrue(response.data['settled'])
@@ -489,6 +517,7 @@ class MpesaCallbackConcurrencyTests(TransactionTestCase):
                 'ResponseCode': '0', 'ResultCode': '0',
                 'CheckoutRequestID': checkout_request_id,
                 'MerchantRequestID': attempt.merchant_request_id if attempt else '',
+                'ResultDesc': 'Provider transaction result',
             }
         self.query_patcher = patch(
             'apps.billing.views_mpesa.MpesaClient.stk_query',

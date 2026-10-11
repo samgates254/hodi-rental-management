@@ -7,6 +7,7 @@ Secrets, access tokens, and STK passwords must never be logged.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import urllib.error
@@ -14,9 +15,11 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,7 @@ class MpesaClient:
         shortcode: str,
         passkey: str,
         callback_url: str,
+        callback_auth_token: str = '',
         timeout_seconds: int = 30,
         transaction_type: str = 'CustomerPayBillOnline',
         urlopen=None,
@@ -101,6 +105,7 @@ class MpesaClient:
         self.shortcode = shortcode or ''
         self.passkey = passkey or ''
         self.callback_url = callback_url or ''
+        self.callback_auth_token = callback_auth_token or ''
         self.timeout_seconds = timeout_seconds
         self.transaction_type = transaction_type or 'CustomerPayBillOnline'
         self._urlopen = urlopen or urllib.request.urlopen
@@ -114,6 +119,7 @@ class MpesaClient:
             'shortcode': settings.MPESA_SHORTCODE,
             'passkey': settings.MPESA_PASSKEY,
             'callback_url': settings.MPESA_CALLBACK_URL,
+            'callback_auth_token': settings.MPESA_CALLBACK_AUTH_TOKEN,
             'timeout_seconds': settings.MPESA_TIMEOUT_SECONDS,
             'transaction_type': settings.MPESA_TRANSACTION_TYPE,
         }
@@ -132,16 +138,59 @@ class MpesaClient:
             missing.append('MPESA_PASSKEY')
         if not self.callback_url:
             missing.append('MPESA_CALLBACK_URL')
+        if not self.callback_auth_token:
+            missing.append('MPESA_CALLBACK_AUTH_TOKEN')
         if missing:
             logger.error('M-Pesa is not configured: missing %s', ', '.join(missing))
             raise MpesaConfigError('M-Pesa is not configured.')
+        if str(self.shortcode).strip() != self.shortcode or not self.shortcode.isdigit():
+            raise MpesaConfigError('M-Pesa shortcode configuration is invalid.')
+        try:
+            callback = urlsplit(self.callback_url)
+        except ValueError as error:
+            raise MpesaConfigError('MPESA_CALLBACK_URL must be a valid public HTTPS URL.') from error
+        if (callback.scheme.lower() != 'https' or not callback.hostname or callback.username
+                or callback.password or callback.query or callback.fragment):
+            raise MpesaConfigError('MPESA_CALLBACK_URL must be a valid public HTTPS URL.')
+        if self.callback_auth_token not in callback.path.split('/'):
+            raise MpesaConfigError('MPESA_CALLBACK_URL must include the configured callback token path segment.')
         if not self.callback_url.lower().startswith('https://'):
             raise MpesaConfigError('MPESA_CALLBACK_URL must use HTTPS.')
         if not self.base_url.lower().startswith('https://'):
             raise MpesaConfigError('MPESA_BASE_URL must use HTTPS.')
+        if self.transaction_type not in {'CustomerPayBillOnline', 'CustomerBuyGoodsOnline'}:
+            raise MpesaConfigError('M-Pesa transaction type configuration is invalid.')
+        if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, int) or self.timeout_seconds <= 0:
+            raise MpesaConfigError('M-Pesa request timeout configuration is invalid.')
+
+    def _oauth_cache_key(self):
+        digest = hashlib.sha256(
+            f'{self.base_url}\0{self.consumer_key}\0{self.consumer_secret}'.encode('utf-8')
+        ).hexdigest()
+        return f'daraja:oauth:{digest}'
+
+    def _clear_cached_access_token(self):
+        cache.delete(self._oauth_cache_key())
+
+    def _authorized_json_request(self, build_request, access_token=None):
+        token = access_token or self.get_access_token()
+        try:
+            return self._json_request(build_request(token))
+        except MpesaAuthError:
+            if access_token:
+                raise
+            # A definite HTTP 401/403 means the request was not authorized.
+            # Refresh once; never retry ambiguous transport failures.
+            self._clear_cached_access_token()
+            refreshed_token = self.get_access_token()
+            return self._json_request(build_request(refreshed_token))
 
     def get_access_token(self) -> str:
         self.require_configured()
+        cache_key = self._oauth_cache_key()
+        cached_token = cache.get(cache_key)
+        if isinstance(cached_token, str) and cached_token:
+            return cached_token
         query = urllib.parse.urlencode({'grant_type': 'client_credentials'})
         url = f'{self.base_url}{OAUTH_PATH}?{query}'
         basic = base64.b64encode(
@@ -160,7 +209,16 @@ class MpesaClient:
         access_token = payload.get('access_token')
         if not isinstance(access_token, str) or not access_token.strip():
             raise MpesaResponseError('Daraja OAuth response did not include an access token.')
-        return access_token.strip()
+        try:
+            expires_in = int(payload.get('expires_in'))
+        except (TypeError, ValueError) as error:
+            raise MpesaResponseError('Daraja OAuth response did not include a valid token expiry.') from error
+        if expires_in <= 0:
+            raise MpesaResponseError('Daraja OAuth response did not include a valid token expiry.')
+        token = access_token.strip()
+        # Daraja tokens are documented as one hour; leave a one-minute safety margin.
+        cache.set(cache_key, token, timeout=max(1, expires_in - 60))
+        return token
 
     def stk_push(
         self,
@@ -177,7 +235,6 @@ class MpesaClient:
             raise MpesaError('STK amount must be a positive whole number of Kenyan shillings.')
         stamp = timestamp or daraja_timestamp()
         password = stk_password(self.shortcode, self.passkey, stamp)
-        token = access_token or self.get_access_token()
         body = {
             'BusinessShortCode': self.shortcode,
             'Password': password,
@@ -191,18 +248,21 @@ class MpesaClient:
             'AccountReference': (account_reference or 'RENT')[:12],
             'TransactionDesc': (transaction_desc or 'Rent payment')[:13],
         }
-        request = urllib.request.Request(
-            f'{self.base_url}{STK_PATH}',
-            data=json.dumps(body).encode('utf-8'),
-            method='POST',
-            headers={
-                'Authorization': f'Bearer {token}',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-            },
-        )
-        logger.info('Daraja STK Push request path=%s amount_kes=%s', STK_PATH, amount_kes)
-        payload = self._json_request(request)
+        def build_request(token):
+            return urllib.request.Request(
+                f'{self.base_url}{STK_PATH}',
+                data=json.dumps(body).encode('utf-8'),
+                method='POST',
+                headers={
+                    'Authorization': f'Bearer {token}',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+            )
+        # Payment amounts are sensitive financial data. Keep request logs to a
+        # fixed endpoint path; never include request payload fields.
+        logger.info('Daraja STK Push request path=%s', STK_PATH)
+        payload = self._authorized_json_request(build_request, access_token)
         response_code = str(payload.get('ResponseCode', '')).strip()
         if response_code == '':
             raise MpesaResponseError('Daraja STK response did not include ResponseCode.')
@@ -220,22 +280,22 @@ class MpesaClient:
         if not checkout_request_id:
             raise MpesaError('CheckoutRequestID is required.')
         stamp = timestamp or daraja_timestamp()
-        token = access_token or self.get_access_token()
         body = {
             'BusinessShortCode': self.shortcode,
             'Password': stk_password(self.shortcode, self.passkey, stamp),
             'Timestamp': stamp,
             'CheckoutRequestID': checkout_request_id,
         }
-        request = urllib.request.Request(
-            f'{self.base_url}{STK_QUERY_PATH}', data=json.dumps(body).encode('utf-8'),
-            method='POST', headers={
-                'Authorization': f'Bearer {token}', 'Content-Type': 'application/json',
-                'Accept': 'application/json',
-            },
-        )
+        def build_request(token):
+            return urllib.request.Request(
+                f'{self.base_url}{STK_QUERY_PATH}', data=json.dumps(body).encode('utf-8'),
+                method='POST', headers={
+                    'Authorization': f'Bearer {token}', 'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+            )
         logger.info('Daraja STK query request path=%s', STK_QUERY_PATH)
-        return self._json_request(request)
+        return self._authorized_json_request(build_request, access_token)
 
     def _json_request(self, request: urllib.request.Request) -> dict:
         path = _request_path(request)
@@ -250,6 +310,8 @@ class MpesaClient:
             logger.error('Daraja HTTP error path=%s status=%s', path, error.code)
             if error.code in (400, 401, 403) and path == OAUTH_PATH:
                 raise MpesaAuthError('Daraja rejected the OAuth credentials.') from error
+            if error.code in (401, 403):
+                raise MpesaAuthError('Daraja rejected the access token.') from error
             raise MpesaHTTPError('Daraja request failed.') from error
         except urllib.error.URLError as error:
             reason = error.reason
@@ -264,6 +326,8 @@ class MpesaClient:
             logger.error('Daraja HTTP error path=%s status=%s', path, status)
             if int(status) in (400, 401, 403) and path == OAUTH_PATH:
                 raise MpesaAuthError('Daraja rejected the OAuth credentials.')
+            if int(status) in (401, 403):
+                raise MpesaAuthError('Daraja rejected the access token.')
             raise MpesaHTTPError('Daraja request failed.')
 
         try:

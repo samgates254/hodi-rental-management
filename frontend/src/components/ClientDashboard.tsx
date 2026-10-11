@@ -33,6 +33,7 @@ const INVOICES_API = "/api/v1/billing/invoices/";
 const PAYMENTS_API = "/api/v1/billing/ledger-payments/";
 const PAYMENT_FLOW_AVAILABLE = true;
 const MPESA_ATTEMPT_STORAGE_KEY = "hodi_mpesa_attempt_id";
+const MPESA_IDEMPOTENCY_STORAGE_KEY = "hodi_mpesa_idempotency_key";
 
 type Property = {
   id: number | string;
@@ -110,6 +111,11 @@ type MaintenanceIssue = {
   category?: string;
   priority?: string;
   status?: string;
+  operational_status?: string | null;
+  repair_outcome?: string | null;
+  repair_resolution?: string;
+  follow_up_at?: string | null;
+  follow_up_reason?: string;
   image?: string | null;
   images?: Array<string | { image?: string; url?: string }>;
   attachments?: MaintenanceAttachment[];
@@ -141,6 +147,11 @@ type SharedMaintenanceIssue = {
   category: string;
   priority: string;
   status: string;
+  operational_status?: string | null;
+  repair_outcome?: string | null;
+  repair_resolution?: string;
+  follow_up_at?: string | null;
+  follow_up_reason?: string;
   created_at: string;
   updated_at: string;
   attachments?: MaintenanceAttachment[];
@@ -206,6 +217,11 @@ function fromSharedIssue(issue: SharedMaintenanceIssue): MaintenanceIssue {
     category: issue.category,
     priority: issue.priority,
     status: issue.status,
+    operational_status: issue.operational_status,
+    repair_outcome: issue.repair_outcome,
+    repair_resolution: issue.repair_resolution,
+    follow_up_at: issue.follow_up_at,
+    follow_up_reason: issue.follow_up_reason,
     created_at: issue.created_at,
     updated_at: issue.updated_at,
     attachments: issue.attachments,
@@ -293,6 +309,7 @@ type PaymentRequest = {
   credit_amount?: number | string;
   payment_settled?: boolean;
   accepted?: boolean;
+  reconciliation_state?: string;
 };
 type ApiPage<T> = ApiList<T> & {
   count?: number;
@@ -789,7 +806,7 @@ function IssueCard({
           <div className="dashboard-issue-title-line">
             <h3>{issue.title ?? "Maintenance request"}</h3>
             <span className={`dashboard-status-badge status-${(issue.status ?? "submitted").toLowerCase().replace(/[^a-z]+/g, "-")}`}>
-              {humanizeStatus(issue.status)}
+              {issue.operational_status === "COMPLETED" ? "Awaiting verification" : issue.operational_status === "CANCELLED" ? "Cancelled" : issue.operational_status === "CLOSED" ? "Verified and closed" : humanizeStatus(issue.status)}
             </span>
           </div>
           <p>{issue.category ?? "Other"} · {humanizeStatus(issue.priority ?? "medium")} priority</p>
@@ -797,6 +814,19 @@ function IssueCard({
       </div>
 
       {issue.description && <p className="dashboard-issue-description">{issue.description}</p>}
+      {issue.repair_outcome && (
+        <div className="dashboard-agent-comment">
+          <strong>Repair outcome · {humanizeStatus(issue.repair_outcome)}</strong>
+          <p>{issue.repair_resolution}</p>
+        </div>
+      )}
+      {issue.follow_up_at && (
+        <div className="dashboard-agent-comment">
+          <strong>Follow-up scheduled</strong>
+          <p>{new Date(issue.follow_up_at).toLocaleString("en-KE", { dateStyle: "medium", timeStyle: "short" })}</p>
+          {issue.follow_up_reason && <p>{issue.follow_up_reason}</p>}
+        </div>
+      )}
       {(issue.assigned_agent || issue.fundi) && (
         <div className="portal-issue-assignees">
           {issue.assigned_agent && <span><Icon name="user" size={15} /><strong>Agent:</strong> {issue.assigned_agent.full_name ?? issue.assigned_agent.name ?? "Assigned"}</span>}
@@ -1371,7 +1401,7 @@ export default function ClientDashboard() {
       }
       if (elapsed >= 120_000 && paymentStage !== "reconciling") {
         setPaymentStage("reconciling");
-        setPaymentError("This payment is taking longer than usual. We’re safely checking its status with M-Pesa.");
+        setPaymentError("This payment is taking longer than usual. No final confirmation has arrived; it will not be marked successful until verified.");
       }
       try {
         const response = await clientApi.get<PaymentRequest>(
@@ -1410,7 +1440,7 @@ export default function ClientDashboard() {
           void loadPayments();
           return;
         }
-        if (["FAILED", "EXPIRED"].includes(current.status ?? "")) {
+        if (["FAILED", "CANCELLED", "EXPIRED"].includes(current.status ?? "")) {
           window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
           setPaymentStage("failed");
           setPaymentError(current.message ?? "The payment was not completed. Please try again.");
@@ -1449,8 +1479,8 @@ export default function ClientDashboard() {
       setPaymentError("There are no outstanding invoices to pay.");
       return;
     }
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      setPaymentError("Enter a valid payment amount.");
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isInteger(parsedAmount)) {
+      setPaymentError("Enter a positive whole number of Kenyan shillings for M-Pesa.");
       return;
     }
     if (paymentMethod === "mpesa" && !/^(?:\+?254|0)?[17]\d{8}$/.test(normalizedPhone)) {
@@ -1459,12 +1489,15 @@ export default function ClientDashboard() {
     }
     setIsInitiatingPayment(true);
     try {
+      const idempotencyKey = window.sessionStorage.getItem(MPESA_IDEMPOTENCY_STORAGE_KEY) || window.crypto.randomUUID();
+      window.sessionStorage.setItem(MPESA_IDEMPOTENCY_STORAGE_KEY, idempotencyKey);
       const response = await clientApi.post<PaymentRequest>(
         "/api/v1/billing/mpesa/initiate/",
         {
           invoice: selectedInvoice.id,
-          amount_cents: Math.round(parsedAmount * 100),
+          amount_cents: parsedAmount * 100,
           phone_number: normalizedPhone,
+          idempotency_key: idempotencyKey,
         },
       );
       const request = response.data;
@@ -1473,14 +1506,18 @@ export default function ClientDashboard() {
       }
       setPaymentRequest(request);
       window.sessionStorage.setItem(MPESA_ATTEMPT_STORAGE_KEY, String(request.id));
+      window.sessionStorage.removeItem(MPESA_IDEMPOTENCY_STORAGE_KEY);
       paymentStartedAt.current = Date.now();
       setPaymentStage(
         request.payment_settled === true
           ? "success"
-          : request.status === "UNRESOLVED"
+          : request.accepted !== true || request.status === "UNRESOLVED"
             ? "reconciling"
             : "pending",
       );
+      if (request.accepted !== true && request.payment_settled !== true) {
+        setPaymentError("The request outcome is uncertain. Check this attempt before starting another payment.");
+      }
       if (request.payment_settled === true) {
         void loadInvoices();
         void loadPayments();
@@ -1489,6 +1526,9 @@ export default function ClientDashboard() {
         setPageNotice(`KES ${money(parsedAmount - outstandingTotal)} will be credited to your next rent.`);
       }
     } catch (error) {
+      if (error instanceof ClientApiError && error.status >= 400 && error.status < 500 && error.status !== 429) {
+        window.sessionStorage.removeItem(MPESA_IDEMPOTENCY_STORAGE_KEY);
+      }
       setPaymentError(
         error instanceof ClientApiError
           ? error.message

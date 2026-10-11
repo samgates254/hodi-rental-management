@@ -118,7 +118,7 @@ class MaintenanceIssueViewSet(
 		}[issue.priority]
 		operational_request = create_request(
 			unit=issue.unit, tenant=tenant, title=issue.title, description=issue.description,
-			hazard=hazard, actor=request.user, request=request,
+			hazard=hazard, category=issue.category, actor=request.user, request=request,
 		)
 		issue.operational_request = operational_request
 		issue.save(update_fields=('operational_request', 'updated_at'))
@@ -148,19 +148,16 @@ class MaintenanceIssueViewSet(
 		operational_request = None
 		if issue.operational_request_id:
 			operational_request = MaintenanceRequest.objects.select_for_update().get(pk=issue.operational_request_id)
-			if new_status == MaintenanceIssue.Status.OPEN and operational_request.status != MaintenanceRequest.Status.OPEN:
-				raise serializers.ValidationError({'status': 'A maintenance request cannot move back to open.'})
-			if new_status == MaintenanceIssue.Status.IN_PROGRESS and operational_request.status in (
-				MaintenanceRequest.Status.COMPLETED,
-				MaintenanceRequest.Status.CLOSED,
-				MaintenanceRequest.Status.CANCELLED,
-			):
-				raise serializers.ValidationError({'status': 'A finished maintenance request cannot be reopened.'})
-			if new_status == MaintenanceIssue.Status.RESOLVED and operational_request.status in (
-				MaintenanceRequest.Status.CLOSED,
-				MaintenanceRequest.Status.CANCELLED,
-			):
-				raise serializers.ValidationError({'status': 'A closed or cancelled maintenance request cannot be resolved again.'})
+			expected_issue_status = {
+				MaintenanceRequest.Status.OPEN: MaintenanceIssue.Status.OPEN,
+				MaintenanceRequest.Status.IN_PROGRESS: MaintenanceIssue.Status.IN_PROGRESS,
+				MaintenanceRequest.Status.COMPLETED: MaintenanceIssue.Status.IN_PROGRESS,
+				MaintenanceRequest.Status.CLOSED: MaintenanceIssue.Status.RESOLVED,
+			}.get(operational_request.status)
+			if new_status == MaintenanceIssue.Status.RESOLVED and operational_request.status != MaintenanceRequest.Status.CLOSED:
+				raise serializers.ValidationError({'status': 'Linked repairs must be completed and verified through the repair workflow.'})
+			if new_status is not None and new_status != expected_issue_status:
+				raise serializers.ValidationError({'status': 'Update repair state through the linked request workflow.'})
 
 		if new_status is not None:
 			issue.status = new_status
@@ -175,20 +172,8 @@ class MaintenanceIssueViewSet(
 			status=new_status,
 			note=note,
 		)
-		if operational_request is not None:
-			if new_status == MaintenanceIssue.Status.IN_PROGRESS:
-				operational_request.status = MaintenanceRequest.Status.IN_PROGRESS
-				operational_request.save(update_fields=('status', 'updated_at'))
-				WorkOrder.objects.filter(request=operational_request).update(status=WorkOrder.Status.IN_PROGRESS)
-			elif new_status == MaintenanceIssue.Status.RESOLVED:
-				operational_request.status = MaintenanceRequest.Status.COMPLETED
-				operational_request.completed_at = timezone.now()
-				operational_request.save(update_fields=('status', 'completed_at', 'updated_at'))
-				WorkOrder.objects.filter(request=operational_request).update(
-					status=WorkOrder.Status.COMPLETED, completed_at=operational_request.completed_at,
-				)
-			if note:
-				MaintenanceComment.objects.create(request=operational_request, author=request.user, body=note)
+		if operational_request is not None and note:
+			MaintenanceComment.objects.create(request=operational_request, author=request.user, body=note)
 		return Response(
 			MaintenanceIssueUpdateSerializer(update).data,
 			status=status.HTTP_201_CREATED,

@@ -39,10 +39,11 @@ class MpesaInitiateView(APIView):
             amount_cents=serializer.validated_data['amount_cents'],
             phone_number=serializer.validated_data.get('phone_number') or '',
             invoice_id=serializer.validated_data.get('invoice'),
+            idempotency_key=str(serializer.validated_data['idempotency_key']) if serializer.validated_data.get('idempotency_key') else None,
             request=request,
         )
         payload = MpesaAttemptSerializer(attempt).data
-        if attempt.status == MpesaAttempt.Status.STK_SENT:
+        if attempt.status in (MpesaAttempt.Status.STK_SENT, MpesaAttempt.Status.INITIATED):
             return Response(payload, status=status.HTTP_202_ACCEPTED)
         return Response(payload, status=status.HTTP_400_BAD_REQUEST)
 

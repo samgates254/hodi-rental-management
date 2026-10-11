@@ -10,7 +10,7 @@ from apps.audit.models import AuditLog
 from apps.billing.models import MpesaAttempt, Payment
 from apps.organizations.models import Organization
 from apps.tenants.models import Tenant
-from infrastructure.payments.mpesa import MpesaTimeoutError
+from infrastructure.payments.mpesa import MpesaHTTPError, MpesaTimeoutError
 from django.contrib.auth import get_user_model
 
 
@@ -77,6 +77,62 @@ class MpesaReconciliationCommandTests(TestCase):
         self.attempt.refresh_from_db()
         self.assertEqual(self.attempt.status, MpesaAttempt.Status.CANCELLED)
         self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.PROVIDER_FAILED)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_query_http_500_keeps_attempt_unresolved_and_retryable(self):
+        with patch('infrastructure.payments.mpesa.MpesaClient.stk_query', side_effect=MpesaHTTPError('Daraja request failed.')) as query:
+            self.run_command()
+            self.attempt.refresh_from_db()
+            self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+            self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
+            self.assertEqual(self.attempt.reconciliation_attempts, 1)
+
+            # Backoff prevents an immediate duplicate request. A later retry
+            # can query again without creating a second payment attempt/posting.
+            self.run_command()
+            query.assert_called_once()
+            MpesaAttempt.objects.filter(pk=self.attempt.pk).update(
+                last_reconciliation_at=timezone.now() - timedelta(minutes=3),
+            )
+            query.side_effect = None
+            query.return_value = self.query_result('1032')
+            self.run_command()
+
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.CANCELLED)
+        self.assertEqual(self.attempt.reconciliation_attempts, 2)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_malformed_query_responses_remain_unresolved(self):
+        malformed = [
+            None,
+            {'ResponseCode': '0', 'ResultCode': '1032'},
+            self.query_result('1032', ResultDesc=''),
+            self.query_result('1032', MerchantRequestID=''),
+        ]
+        for response in malformed:
+            with self.subTest(response=response):
+                MpesaAttempt.objects.filter(pk=self.attempt.pk).update(
+                    status=MpesaAttempt.Status.STK_SENT,
+                    reconciliation_state=MpesaAttempt.ReconciliationState.UNRESOLVED,
+                    reconciliation_attempts=0,
+                    last_reconciliation_at=None,
+                )
+                with patch('infrastructure.payments.mpesa.MpesaClient.stk_query', return_value=response):
+                    self.run_command()
+                self.attempt.refresh_from_db()
+                self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+                self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
+                self.assertEqual(Payment.objects.count(), 0)
+
+    def test_unknown_nonzero_result_code_is_not_treated_as_terminal_failure(self):
+        # Query acceptance is not an outcome, and an undocumented/processing
+        # result code is not enough for HODI to close an attempt.
+        with patch('infrastructure.payments.mpesa.MpesaClient.stk_query', return_value=self.query_result('4999')):
+            self.run_command()
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
         self.assertEqual(Payment.objects.count(), 0)
 
     def test_transport_error_is_audited_and_retryable(self):

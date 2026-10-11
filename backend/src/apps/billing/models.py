@@ -352,6 +352,10 @@ class MpesaAttempt(models.Model):
 	result_code = models.CharField(max_length=16, null=True, blank=True)
 	result_description = models.TextField(blank=True, default='')
 	account_reference = models.CharField(max_length=12, blank=True, default='')
+	# Client generated idempotency key plus a request fingerprint prevent browser
+	# retries from creating a second STK prompt. Blank keys preserve old rows.
+	idempotency_key = models.CharField(max_length=64, blank=True, default='')
+	request_fingerprint = models.CharField(max_length=64, blank=True, default='')
 	reconciliation_attempts = models.PositiveSmallIntegerField(default=0)
 	last_reconciliation_at = models.DateTimeField(null=True, blank=True)
 	reconciliation_state = models.CharField(
@@ -367,6 +371,11 @@ class MpesaAttempt(models.Model):
 			models.Index(fields=('status', 'created_at')),
 		]
 		constraints = [
+			models.UniqueConstraint(
+				fields=('tenant', 'idempotency_key'),
+				condition=~Q(idempotency_key=''),
+				name='unique_mpesa_attempt_idempotency_per_tenant',
+			),
 			models.UniqueConstraint(
 				fields=('merchant_request_id',),
 				condition=Q(merchant_request_id__isnull=False),

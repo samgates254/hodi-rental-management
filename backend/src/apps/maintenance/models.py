@@ -1,4 +1,3 @@
-from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -133,6 +132,7 @@ class MaintenanceRequest(models.Model):
 		on_delete=models.PROTECT,
 		related_name='maintenance_requests',
 	)
+	category = models.CharField(max_length=50, default='OTHER')
 	tenant = models.ForeignKey(
 		Tenant,
 		on_delete=models.PROTECT,
@@ -157,6 +157,25 @@ class MaintenanceRequest(models.Model):
 	priority_class = models.PositiveSmallIntegerField()
 	score_millis = models.PositiveIntegerField()
 	emergency_override = models.BooleanField(default=False)
+	safety_override = models.BooleanField(default=False)
+	safety_override_reason = models.CharField(max_length=500, blank=True)
+	safety_override_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='maintenance_safety_overrides',
+	)
+	triage_notes = models.TextField(blank=True)
+	triaged_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='triaged_maintenance_requests',
+	)
+	triaged_at = models.DateTimeField(null=True, blank=True)
+	requires_approval = models.BooleanField(default=False)
+	follow_up_at = models.DateTimeField(null=True, blank=True)
+	follow_up_reason = models.CharField(max_length=500, blank=True)
+	follow_up_assignee = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='maintenance_follow_ups',
+	)
 	completed_at = models.DateTimeField(null=True, blank=True)
 	closed_at = models.DateTimeField(null=True, blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
@@ -226,6 +245,126 @@ class WorkOrder(models.Model):
 
 	def __str__(self):
 		return f'Work order {self.pk}'
+
+
+class WorkOrderAssignment(models.Model):
+	class Status(models.TextChoices):
+		NOT_REQUIRED = 'NOT_REQUIRED', 'No technician response required'
+		PENDING = 'PENDING', 'Awaiting technician response'
+		ACCEPTED = 'ACCEPTED', 'Accepted'
+		DECLINED = 'DECLINED', 'Declined'
+
+	work_order = models.ForeignKey(WorkOrder, on_delete=models.PROTECT, related_name='assignments')
+	previous_assignee = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='maintenance_assignments_from',
+	)
+	new_assignee = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+		related_name='maintenance_assignments_to',
+	)
+	actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='maintenance_assignment_actions')
+	notes = models.TextField(blank=True)
+	status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+	responded_at = models.DateTimeField(null=True, blank=True)
+	decline_reason = models.CharField(max_length=500, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ('created_at', 'pk')
+
+
+class RepairQuotation(models.Model):
+	class Status(models.TextChoices):
+		PENDING = 'PENDING', 'Pending'
+		APPROVED = 'APPROVED', 'Approved'
+		REJECTED = 'REJECTED', 'Rejected'
+
+	work_order = models.ForeignKey(WorkOrder, on_delete=models.PROTECT, related_name='quotations')
+	revision_of = models.ForeignKey(
+		'self', on_delete=models.PROTECT, null=True, blank=True, related_name='revisions',
+	)
+	submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='repair_quotations')
+	labour_estimate_cents = models.PositiveBigIntegerField(default=0)
+	materials_estimate_cents = models.PositiveBigIntegerField(default=0)
+	other_estimate_cents = models.PositiveBigIntegerField(default=0)
+	explanation = models.TextField()
+	status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+	reviewed_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='reviewed_repair_quotations',
+	)
+	decision_at = models.DateTimeField(null=True, blank=True)
+	decision_notes = models.TextField(blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	@property
+	def total_estimate_cents(self):
+		return self.labour_estimate_cents + self.materials_estimate_cents + self.other_estimate_cents
+
+	class Meta:
+		ordering = ('-created_at', '-pk')
+		constraints = [
+			models.CheckConstraint(condition=models.Q(labour_estimate_cents__gte=0), name='repair_quote_labour_nonnegative'),
+			models.CheckConstraint(condition=models.Q(materials_estimate_cents__gte=0), name='repair_quote_materials_nonnegative'),
+			models.CheckConstraint(condition=models.Q(other_estimate_cents__gte=0), name='repair_quote_other_nonnegative'),
+		]
+
+
+class RepairCompletion(models.Model):
+	class Status(models.TextChoices):
+		SUBMITTED = 'SUBMITTED', 'Submitted'
+		REJECTED = 'REJECTED', 'Rejected for further work'
+		VERIFIED = 'VERIFIED', 'Verified'
+
+	class Outcome(models.TextChoices):
+		FIXED = 'FIXED', 'Fixed'
+		PARTIALLY_FIXED = 'PARTIALLY_FIXED', 'Partially fixed'
+		REPLACED = 'REPLACED', 'Replaced'
+		NO_FAULT_FOUND = 'NO_FAULT_FOUND', 'No fault found'
+		NEEDS_FOLLOW_UP = 'NEEDS_FOLLOW_UP', 'Needs follow-up'
+
+	work_order = models.ForeignKey(WorkOrder, on_delete=models.PROTECT, related_name='completions')
+	diagnosis = models.TextField()
+	failure_category = models.CharField(max_length=50)
+	resolution_summary = models.TextField()
+	outcome = models.CharField(max_length=24, choices=Outcome.choices)
+	labour_cost_cents = models.PositiveBigIntegerField(default=0)
+	materials_cost_cents = models.PositiveBigIntegerField(default=0)
+	other_cost_cents = models.PositiveBigIntegerField(default=0)
+	submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='repair_completions_submitted')
+	submitted_at = models.DateTimeField(auto_now_add=True)
+	status = models.CharField(max_length=12, choices=Status.choices, default=Status.SUBMITTED)
+	verified_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='repair_completions_verified',
+	)
+	verified_at = models.DateTimeField(null=True, blank=True)
+	verification_notes = models.TextField(blank=True)
+	follow_up_required = models.BooleanField(default=False)
+	follow_up_reason = models.CharField(max_length=500, blank=True)
+
+	class Meta:
+		ordering = ('-submitted_at', '-pk')
+		constraints = [
+			models.CheckConstraint(condition=models.Q(labour_cost_cents__gte=0), name='repair_completion_labour_nonnegative'),
+			models.CheckConstraint(condition=models.Q(materials_cost_cents__gte=0), name='repair_completion_materials_nonnegative'),
+			models.CheckConstraint(condition=models.Q(other_cost_cents__gte=0), name='repair_completion_other_nonnegative'),
+		]
+
+
+class RepairMaterialUsed(models.Model):
+	completion = models.ForeignKey(RepairCompletion, on_delete=models.PROTECT, related_name='materials')
+	description = models.CharField(max_length=200)
+	quantity = models.DecimalField(max_digits=12, decimal_places=3)
+	unit = models.CharField(max_length=30)
+	unit_cost_cents = models.PositiveBigIntegerField(default=0)
+
+	class Meta:
+		constraints = [
+			models.CheckConstraint(condition=models.Q(quantity__gt=0), name='repair_material_quantity_positive'),
+			models.CheckConstraint(condition=models.Q(unit_cost_cents__gte=0), name='repair_material_cost_nonnegative'),
+		]
 
 
 class TechnicianProfile(models.Model):

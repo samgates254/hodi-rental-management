@@ -14,20 +14,28 @@ from apps.organizations.models import Organization, OrganizationMembership
 from apps.tenants.models import Tenant
 from application.services.maintenance import (
     _ensure_legacy_issue,
+    accept_assignment,
     add_comment,
     assign_request,
-    close_request,
-    complete_request,
+    cancel_request,
     create_request,
+    decide_quotation,
+    decline_assignment,
     preview_matches,
+    schedule_follow_up,
+    start_work,
+    submit_completion,
+    submit_quotation,
+    triage_request,
     update_request,
+    verify_completion,
 )
 from common.permissions import (
     organization_ids_for_resource,
     user_can_access_organization_resource,
 )
 
-from .models import MaintenanceRequest, TechnicianProfile, WorkOrder
+from .models import MaintenanceRequest, RepairCompletion, RepairQuotation, TechnicianProfile, WorkOrder
 from .request_serializers import (
     AssignSerializer,
     CommentWriteSerializer,
@@ -36,6 +44,15 @@ from .request_serializers import (
     MaintenanceRequestUpdateSerializer,
     MaintenanceRequestWriteSerializer,
     WorkOrderSerializer,
+    TriageSerializer,
+    QuotationWriteSerializer,
+    QuotationDecisionSerializer,
+    RepairQuotationSerializer,
+    CompletionWriteSerializer,
+    RepairCompletionSerializer,
+    VerificationSerializer,
+    AssignmentDeclineSerializer,
+    FollowUpScheduleSerializer,
 )
 
 
@@ -63,7 +80,13 @@ def _request_queryset(user):
     return (
         MaintenanceRequest.objects.filter(
             Q(unit__building__property__organization_id__in=read_ids)
-            | Q(work_order__assignee=user)
+            | Q(
+                work_order__assignee=user,
+                unit__building__property__organization__is_active=True,
+                unit__building__property__organization__memberships__user=user,
+                unit__building__property__organization__memberships__is_active=True,
+                unit__building__property__organization__memberships__role=OrganizationMembership.Role.TECHNICIAN,
+            )
             | Q(tenant__user=user, tenant__is_active=True)
         )
         .select_related('unit', 'tenant', 'created_by', 'work_order', 'unit__building__property')
@@ -144,6 +167,8 @@ class MaintenanceRequestViewSet(
             title=data['title'],
             description=data['description'],
             hazard=data['hazard'],
+            category=data.get('category', 'OTHER'),
+            requires_approval=data.get('requires_approval', False) if _staff_write(request.user, unit.organization_id) else False,
             vulnerability=data.get('vulnerability', 1),
             building_age_years=data.get('building_age_years'),
             age_band_value=data.get('age_band_value'),
@@ -152,7 +177,7 @@ class MaintenanceRequestViewSet(
         )
         _ensure_legacy_issue(maintenance_request, actor=request.user)
         return Response(
-            MaintenanceRequestSerializer(maintenance_request).data,
+            MaintenanceRequestSerializer(maintenance_request, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -168,7 +193,17 @@ class MaintenanceRequestViewSet(
             actor=request.user,
             request=request,
         )
-        return Response(MaintenanceRequestSerializer(maintenance_request).data)
+        return Response(MaintenanceRequestSerializer(maintenance_request, context={'request': request}).data)
+
+    @action(detail=True, methods=('post',), url_path='triage')
+    def triage(self, request, pk=None):
+        row = self.get_object()
+        if not _staff_write(request.user, row.organization_id):
+            raise PermissionDenied('You do not have permission to triage this request.')
+        serializer = TriageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        row = triage_request(row, actor=request.user, request=request, **serializer.validated_data)
+        return Response(MaintenanceRequestSerializer(row, context={'request': request}).data)
 
     def update(self, request, *args, **kwargs):
         return self.partial_update(request, *args, **kwargs)
@@ -208,7 +243,83 @@ class MaintenanceRequestViewSet(
             actor=request.user,
             request=request,
         )
-        return Response(MaintenanceRequestSerializer(maintenance_request).data)
+        return Response(MaintenanceRequestSerializer(maintenance_request, context={'request': request}).data)
+
+    @action(detail=True, methods=('post',), url_path='start')
+    def start(self, request, pk=None):
+        row = self.get_object()
+        order = start_work(row, actor=request.user, request=request)
+        return Response(WorkOrderSerializer(order, context={'request': request}).data)
+
+    @action(detail=True, methods=('post',), url_path='accept')
+    def accept(self, request, pk=None):
+        row = self.get_object()
+        accept_assignment(row, actor=request.user, request=request)
+        return Response(WorkOrderSerializer(row.work_order, context={'request': request}).data)
+
+    @action(detail=True, methods=('post',), url_path='decline')
+    def decline(self, request, pk=None):
+        row = self.get_object()
+        serializer = AssignmentDeclineSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        decline_assignment(row, actor=request.user, request=request, **serializer.validated_data)
+        row.refresh_from_db()
+        return Response(MaintenanceRequestSerializer(row, context={'request': request}).data)
+
+    @action(detail=True, methods=('post',), url_path='follow-up')
+    def follow_up(self, request, pk=None):
+        row = self.get_object()
+        if not _staff_write(request.user, row.organization_id):
+            raise PermissionDenied('Only authorized maintenance staff can schedule repair follow-up.')
+        serializer = FollowUpScheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        assignee_id = data.get('assignee_id', row.work_order.assignee_id)
+        assignee = get_user_model().objects.filter(pk=assignee_id, is_active=True).first() if assignee_id else None
+        if assignee is None:
+            raise ValidationError({'assignee_id': 'Choose an active maintenance member.'})
+        row = schedule_follow_up(
+            row, actor=request.user, follow_up_at=data['follow_up_at'], reason=data['reason'],
+            assignee=assignee, request=request,
+        )
+        return Response(MaintenanceRequestSerializer(row, context={'request': request}).data)
+
+    @action(detail=True, methods=('get', 'post'), url_path='quotations')
+    def quotations(self, request, pk=None):
+        row = self.get_object()
+        if request.method == 'GET':
+            quotes = row.work_order.quotations.all()
+            if row.tenant_id and row.tenant.user_id == request.user.id:
+                quotes = quotes.filter(status='APPROVED')
+            return Response(RepairQuotationSerializer(quotes, many=True, context={'request': request}).data)
+        if not _staff_write(request.user, row.organization_id) and row.work_order.assignee_id != request.user.id:
+            raise PermissionDenied('Only assigned technicians or maintenance staff can submit a quotation.')
+        serializer = QuotationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        quote = submit_quotation(
+            row.work_order, actor=request.user,
+            labour=data['labour_estimate_cents'], materials=data['materials_estimate_cents'],
+            other=data['other_estimate_cents'], explanation=data['explanation'], request=request,
+        )
+        return Response(RepairQuotationSerializer(quote, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=('post',), url_path=r'quotations/(?P<quotation_id>[^/.]+)/decision')
+    def quotation_decision(self, request, pk=None, quotation_id=None):
+        row = self.get_object()
+        if not _staff_write(request.user, row.organization_id):
+            raise PermissionDenied('Only authorized maintenance staff can decide quotations.')
+        try:
+            quote = row.work_order.quotations.get(pk=quotation_id)
+        except RepairQuotation.DoesNotExist as error:
+            raise NotFound('Quotation not found.') from error
+        serializer = QuotationDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        decision = serializer.validated_data
+        quote = decide_quotation(
+            quote, actor=request.user, approve=decision['approved'], notes=decision.get('notes', ''), request=request,
+        )
+        return Response(RepairQuotationSerializer(quote, context={'request': request}).data)
 
     @action(detail=True, methods=('post',), url_path='complete')
     def complete(self, request, pk=None):
@@ -217,27 +328,53 @@ class MaintenanceRequestViewSet(
         is_assignee = work_order.assignee_id == request.user.id
         if not is_assignee and not _staff_write(request.user, maintenance_request.organization_id):
             raise PermissionDenied('You do not have permission for this organization.')
-        maintenance_request = complete_request(
-            maintenance_request,
-            notes=request.data.get('notes', '') if isinstance(request.data, dict) else '',
-            actor=request.user,
-            request=request,
+        if not is_assignee:
+            raise PermissionDenied('Only the assigned technician can submit completion.')
+        serializer = CompletionWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        completion = submit_completion(
+            work_order, actor=request.user, data=serializer.validated_data,
+            materials=serializer.validated_data.pop('materials', []), request=request,
         )
-        return Response(MaintenanceRequestSerializer(maintenance_request).data)
+        return Response(RepairCompletionSerializer(completion, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=('post',), url_path='verify')
+    def verify(self, request, pk=None):
+        row = self.get_object()
+        if not _staff_write(request.user, row.organization_id):
+            raise PermissionDenied('Only authorized maintenance staff can verify repairs.')
+        serializer = VerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        completion_id = request.data.get('completion_id')
+        try:
+            completion = row.work_order.completions.get(pk=completion_id)
+        except RepairCompletion.DoesNotExist as error:
+            raise NotFound('Completion record not found.') from error
+        completion = verify_completion(completion, actor=request.user, request=request, **serializer.validated_data)
+        return Response(RepairCompletionSerializer(completion, context={'request': request}).data)
 
     @action(detail=True, methods=('post',), url_path='close')
     def close(self, request, pk=None):
         maintenance_request = self.get_object()
-        work_order = maintenance_request.work_order
-        is_assignee = work_order.assignee_id == request.user.id
-        if not is_assignee and not _staff_write(request.user, maintenance_request.organization_id):
+        if not _staff_write(request.user, maintenance_request.organization_id):
             raise PermissionDenied('You do not have permission for this organization.')
-        maintenance_request = close_request(
-            maintenance_request,
-            actor=request.user,
-            request=request,
+        completion = maintenance_request.work_order.completions.filter(status='SUBMITTED').order_by('-submitted_at').first()
+        if completion is None:
+            raise ValidationError({'completion': 'A submitted repair outcome is required before verification.'})
+        completion = verify_completion(
+            completion, actor=request.user, approved=True,
+            notes=request.data.get('notes', '') if isinstance(request.data, dict) else '', request=request,
         )
-        return Response(MaintenanceRequestSerializer(maintenance_request).data)
+        return Response(RepairCompletionSerializer(completion, context={'request': request}).data)
+
+    @action(detail=True, methods=('post',), url_path='cancel')
+    def cancel(self, request, pk=None):
+        row = self.get_object()
+        if not _staff_write(request.user, row.organization_id):
+            raise PermissionDenied('Only maintenance staff can cancel a request.')
+        reason = request.data.get('reason', '') if isinstance(request.data, dict) else ''
+        row = cancel_request(row, actor=request.user, reason=reason, request=request)
+        return Response(MaintenanceRequestSerializer(row, context={'request': request}).data)
 
     @action(detail=True, methods=('get', 'post'), url_path='comments')
     def comments(self, request, pk=None):

@@ -14,3 +14,7 @@ backend/env/
 frontend/node_modules/
 frontend/.next/
 frontend/tsconfig.tsbuildinfo
+
+backend/.env.backup
+backend/.env.repair-backup-*
+*.deb
