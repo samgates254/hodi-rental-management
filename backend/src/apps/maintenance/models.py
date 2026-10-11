@@ -43,6 +43,10 @@ class MaintenanceIssue(models.Model):
 		default=Status.OPEN,
 	)
 	resolved_at = models.DateTimeField(null=True, blank=True)
+	operational_request = models.OneToOneField(
+		'MaintenanceRequest', null=True, blank=True, on_delete=models.PROTECT,
+		related_name='legacy_issue',
+	)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
 

@@ -41,6 +41,24 @@ class CallbackValidationError(Exception):
     """Success-callback metadata failed HODI checks. Do not create a Payment."""
 
 
+def classify_stk_query(attempt, query) -> tuple[str, str, str]:
+    """Return transaction outcome only when the query response is tied to this attempt.
+
+    Daraja ResponseCode acknowledges the query request. ResultCode is the
+    queried STK transaction result. Missing fields/references are unresolved.
+    """
+    if not isinstance(query, dict) or str(query.get('ResponseCode') or '').strip() != '0':
+        return 'UNRESOLVED', '', ''
+    result_code = str(query.get('ResultCode') or '').strip()
+    checkout = str(query.get('CheckoutRequestID') or '').strip()
+    merchant = str(query.get('MerchantRequestID') or '').strip()
+    if (not result_code or checkout != str(attempt.checkout_request_id or '')
+            or merchant != str(attempt.merchant_request_id or '')):
+        return 'UNRESOLVED', '', ''
+    return ('SUCCESS' if result_code == '0' else 'FAILED', result_code,
+            str(query.get('ResultDesc') or ''))
+
+
 @dataclass
 class CallbackResult:
     matched: bool
@@ -226,11 +244,7 @@ def _validate_success(attempt, stk) -> tuple[str, object]:
     if attempt.tenant_id is None or attempt.organization_id is None:
         raise CallbackValidationError('Attempt is missing tenant or organization.')
     merchant = str(stk.get('MerchantRequestID') or '').strip()
-    if (
-        attempt.merchant_request_id
-        and merchant
-        and merchant != attempt.merchant_request_id
-    ):
+    if not attempt.merchant_request_id or not merchant or merchant != attempt.merchant_request_id:
         raise CallbackValidationError('MerchantRequestID does not match the attempt.')
     meta = _metadata_map(stk)
     receipt = str(meta.get('MpesaReceiptNumber') or '').strip()
@@ -245,7 +259,51 @@ def _validate_success(attempt, stk) -> tuple[str, object]:
     return receipt, received_date
 
 
-def settle_stk_callback(*, payload, request=None) -> CallbackResult:
+def validate_stk_success_callback(attempt, payload):
+    """Validate success metadata without mutating attempts or ledger records."""
+    stk = parse_stk_callback(payload)
+    if _result_code(stk) != '0':
+        raise CallbackValidationError('Callback is not a successful STK result.')
+    return _validate_success(attempt, stk)
+
+
+@transaction.atomic
+def settle_verified_stk_failure(*, checkout_request_id, merchant_request_id, result_code, result_description='', provider_query, request=None):
+    """Apply a provider-verified terminal failure while holding the attempt lock."""
+    attempt = _lock_attempt(checkout_request_id)
+    if attempt is None or not attempt.merchant_request_id or attempt.merchant_request_id != merchant_request_id:
+        return _ack(matched=False, settled=False, duplicate=False, status='UNRESOLVED',
+                    detail='Provider result could not be matched to the stored attempt.')
+    outcome, verified_code, verified_description = classify_stk_query(attempt, provider_query)
+    if outcome != 'FAILED' or verified_code != str(result_code):
+        return _ack(matched=True, settled=False, duplicate=False, status='UNRESOLVED',
+                    detail='Provider outcome is not a verified failure.', attempt=attempt)
+    if attempt.status == MpesaAttempt.Status.SUCCESS:
+        return _ack(matched=True, settled=True, duplicate=True, status=attempt.status,
+                    detail='Attempt was already settled.', attempt=attempt)
+    if attempt.status in TERMINAL_FAILURE:
+        return _ack(matched=True, settled=False, duplicate=True, status=attempt.status,
+                    detail='Attempt was already closed.', attempt=attempt)
+    if str(result_code) == '0':
+        return _ack(matched=True, settled=False, duplicate=False, status='UNRESOLVED',
+                    detail='Provider outcome is not a failure.', attempt=attempt)
+    status_value = map_failure_status(str(result_code))
+    _mark_attempt(
+        attempt,
+        status=status_value,
+        result_code=str(result_code),
+        result_description=verified_description or result_description or 'M-Pesa did not complete the payment.',
+    )
+    record_audit(
+        action='mpesa.stk.provider_failure', object_type='MpesaAttempt', object_id=attempt.pk,
+        actor=attempt.initiated_by, organization=attempt.organization,
+        metadata={'result_code': str(result_code), 'status': status_value}, request=request,
+    )
+    return _ack(matched=True, settled=False, duplicate=False, status=attempt.status,
+                detail='Provider confirmed that M-Pesa did not complete the payment.', attempt=attempt)
+
+
+def settle_stk_callback(*, payload, provider_query=None, request=None) -> CallbackResult:
     stk = parse_stk_callback(payload)
     checkout = str(stk.get('CheckoutRequestID')).strip()
     result_code = _result_code(stk)
@@ -263,15 +321,17 @@ def settle_stk_callback(*, payload, request=None) -> CallbackResult:
                 metadata={'result_code': result_code},
             )
             return _ack(
-                matched=False,
-                settled=False,
-                duplicate=False,
-                status='UNMATCHED',
-                detail=(
-                    'Callback accepted. No matching M-Pesa attempt is stored. '
-                    'STK Query recovery is a later phase.'
-                ),
+                matched=False, settled=False, duplicate=False, status='UNMATCHED',
+                detail='Callback is unmatched and requires reconciliation.',
             )
+
+        if _result_code(stk) != '0':
+            return _ack(matched=True, settled=False, duplicate=False, status='UNRESOLVED',
+                        detail='Only a provider-verified success can be settled as a payment.', attempt=attempt)
+        query_outcome, query_code, _query_description = classify_stk_query(attempt, provider_query)
+        if query_outcome != 'SUCCESS' or query_code != '0':
+            return _ack(matched=True, settled=False, duplicate=False, status='UNRESOLVED',
+                        detail='Provider outcome is not a verified success.', attempt=attempt)
 
         if attempt.status == MpesaAttempt.Status.SUCCESS:
             payment = None
@@ -291,30 +351,9 @@ def settle_stk_callback(*, payload, request=None) -> CallbackResult:
             )
 
         if result_code != '0':
-            if attempt.status in OPEN_STATUSES:
-                _mark_attempt(
-                    attempt,
-                    status=map_failure_status(result_code),
-                    result_code=result_code,
-                    result_description=result_desc or 'M-Pesa did not complete the payment.',
-                )
-                record_audit(
-                    action='mpesa.stk.callback',
-                    object_type='MpesaAttempt',
-                    object_id=attempt.pk,
-                    actor=attempt.initiated_by,
-                    organization=attempt.organization,
-                    metadata={'result_code': result_code, 'status': attempt.status},
-                    request=request,
-                )
-            return _ack(
-                matched=True,
-                settled=False,
-                duplicate=attempt.status in TERMINAL_FAILURE,
-                status=attempt.status,
-                detail='M-Pesa did not complete the payment. No payment was recorded.',
-                attempt=attempt,
-            )
+            return _ack(matched=True, settled=False, duplicate=False, status='UNRESOLVED',
+                        detail='A provider-verified failure result is required before closing this attempt.',
+                        attempt=attempt)
 
         if attempt.status in TERMINAL_FAILURE:
             return _ack(
@@ -329,14 +368,8 @@ def settle_stk_callback(*, payload, request=None) -> CallbackResult:
         try:
             receipt, received_date = _validate_success(attempt, stk)
         except CallbackValidationError as error:
-            _mark_attempt(
-                attempt,
-                status=MpesaAttempt.Status.FAILED,
-                result_code=result_code,
-                result_description=str(error),
-            )
             record_audit(
-                action='mpesa.stk.callback_rejected',
+                action='mpesa.stk.callback_discrepancy',
                 object_type='MpesaAttempt',
                 object_id=attempt.pk,
                 actor=attempt.initiated_by,
@@ -348,8 +381,8 @@ def settle_stk_callback(*, payload, request=None) -> CallbackResult:
                 matched=True,
                 settled=False,
                 duplicate=False,
-                status=attempt.status,
-                detail='Callback failed validation. No payment was recorded.',
+                status='UNRESOLVED',
+                detail='Callback failed validation. No payment was recorded and the attempt remains open.',
                 attempt=attempt,
             )
 

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 NAIROBI = ZoneInfo('Africa/Nairobi')
 OAUTH_PATH = '/oauth/v1/generate'
 STK_PATH = '/mpesa/stkpush/v1/processrequest'
+STK_QUERY_PATH = '/mpesa/stkpushquery/v1/query'
 
 
 class MpesaError(Exception):
@@ -212,6 +213,29 @@ class MpesaClient:
             response_description=str(payload.get('ResponseDescription') or ''),
             customer_message=str(payload.get('CustomerMessage') or ''),
         )
+
+    def stk_query(self, *, checkout_request_id: str, access_token: str | None = None, timestamp: str | None = None) -> dict:
+        """Ask Daraja for the provider-side outcome of an existing STK request."""
+        self.require_configured()
+        if not checkout_request_id:
+            raise MpesaError('CheckoutRequestID is required.')
+        stamp = timestamp or daraja_timestamp()
+        token = access_token or self.get_access_token()
+        body = {
+            'BusinessShortCode': self.shortcode,
+            'Password': stk_password(self.shortcode, self.passkey, stamp),
+            'Timestamp': stamp,
+            'CheckoutRequestID': checkout_request_id,
+        }
+        request = urllib.request.Request(
+            f'{self.base_url}{STK_QUERY_PATH}', data=json.dumps(body).encode('utf-8'),
+            method='POST', headers={
+                'Authorization': f'Bearer {token}', 'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+        )
+        logger.info('Daraja STK query request path=%s', STK_QUERY_PATH)
+        return self._json_request(request)
 
     def _json_request(self, request: urllib.request.Request) -> dict:
         path = _request_path(request)

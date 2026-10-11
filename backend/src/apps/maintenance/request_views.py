@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
@@ -12,6 +13,7 @@ from apps.leases.models import Lease
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.tenants.models import Tenant
 from application.services.maintenance import (
+    _ensure_legacy_issue,
     add_comment,
     assign_request,
     close_request,
@@ -25,7 +27,7 @@ from common.permissions import (
     user_can_access_organization_resource,
 )
 
-from .models import MaintenanceRequest, WorkOrder
+from .models import MaintenanceRequest, TechnicianProfile, WorkOrder
 from .request_serializers import (
     AssignSerializer,
     CommentWriteSerializer,
@@ -102,6 +104,7 @@ class MaintenanceRequestViewSet(
             return MaintenanceRequestUpdateSerializer
         return MaintenanceRequestSerializer
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = MaintenanceRequestWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -147,6 +150,7 @@ class MaintenanceRequestViewSet(
             actor=request.user,
             request=request,
         )
+        _ensure_legacy_issue(maintenance_request, actor=request.user)
         return Response(
             MaintenanceRequestSerializer(maintenance_request).data,
             status=status.HTTP_201_CREATED,
@@ -180,17 +184,23 @@ class MaintenanceRequestViewSet(
         field_name = 'user_id' if supplied_user_id else 'technician_id'
         user_id = serializer.validated_data.get('user_id', serializer.validated_data.get('technician_id'))
         assignee = get_user_model().objects.filter(pk=user_id, is_active=True).first()
-        is_member = assignee is not None and OrganizationMembership.objects.filter(
+        membership = OrganizationMembership.objects.filter(
             user=assignee,
             organization_id=maintenance_request.organization_id,
             organization__is_active=True,
             is_active=True,
             role__in=ASSIGNABLE_ROLES,
-        ).exists()
-        if not is_member:
+        ).first() if assignee is not None else None
+        if membership is None:
             raise ValidationError({
                 field_name: 'Assignee must be an active maintenance member of this organization.',
             })
+        if membership.role == OrganizationMembership.Role.TECHNICIAN:
+            profile = TechnicianProfile.objects.filter(user=assignee).first()
+            if profile is None or not profile.verified or not profile.available:
+                raise ValidationError({
+                    field_name: 'Technicians must have a verified, available technician profile.',
+                })
         maintenance_request = assign_request(
             maintenance_request,
             assignee=assignee,

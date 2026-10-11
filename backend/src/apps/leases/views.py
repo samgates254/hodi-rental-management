@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from apps.tenants.models import Tenant
+from apps.properties.models import Unit
 from application.services.leases import activate_lease, expire_lease, terminate_lease
 from common.permissions import (
 	organization_ids_for_resource,
@@ -117,6 +118,15 @@ class LeaseViewSet(LeaseScopedViewSet):
 
 	@transaction.atomic
 	def save_and_validate(self, serializer):
+		unit = serializer.validated_data.get('unit')
+		unit_ids = {unit.pk} if unit is not None else set()
+		if serializer.instance is not None:
+			unit_ids.add(serializer.instance.unit_id)
+		# All lease writes serialize on their shared Unit row before checking
+		# temporal overlaps. PostgreSQL therefore cannot accept two concurrent
+		# overlapping writes for one unit.
+		if unit_ids:
+			list(Unit.objects.select_for_update().filter(pk__in=unit_ids).order_by('pk'))
 		instance = serializer.save()
 		try:
 			instance.full_clean()

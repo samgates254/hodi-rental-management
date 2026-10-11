@@ -14,7 +14,7 @@ from apps.accounts.models import AccountProfile
 from apps.audit.models import AuditLog
 from apps.billing.models import LedgerPosting, RentPayment
 from apps.leases.models import Lease
-from apps.maintenance.models import MaintenanceIssue, MaintenanceRequest, WorkOrder
+from apps.maintenance.models import MaintenanceIssue, MaintenanceRequest, TechnicianProfile, WorkOrder
 from apps.notifications.models import Notification
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
@@ -83,6 +83,13 @@ class SecurityWorldMixin:
         self.member(self.org_a, self.caretaker_a, Role.CARETAKER)
         self.member(self.org_a, self.accountant_a, Role.ACCOUNTANT)
         self.member(self.org_a, self.technician_a, Role.TECHNICIAN)
+        TechnicianProfile.objects.create(
+            user=self.technician_a,
+            trade='PLUMBER',
+            skills=['PLUMBER'],
+            verified=True,
+            available=True,
+        )
         self.member(self.org_a, self.support_a, Role.SUPPORT)
         self.member(self.org_a, self.bridge, Role.OWNER)
         self.caretaker_b_membership = self.member(self.org_b, self.bridge, Role.CARETAKER)

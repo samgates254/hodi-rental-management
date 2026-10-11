@@ -311,3 +311,24 @@ class MpesaClientStkTests(SimpleTestCase):
         client = MpesaClient.from_settings()
         self.assertEqual(client.callback_url, CALLBACK_URL)
         self.assertEqual(client.base_url, 'https://sandbox.safaricom.co.ke')
+
+    def test_stk_query_returns_raw_provider_outcome_and_sends_checkout_reference(self):
+        captured = {}
+        def urlopen(request, timeout=None):
+            captured['request'] = request
+            captured['body'] = json.loads(request.data)
+            return FakeResponse({
+                'ResponseCode': '0', 'ResultCode': '1032',
+                'CheckoutRequestID': 'checkout-1', 'MerchantRequestID': 'merchant-1',
+                'ResultDesc': 'Cancelled',
+            })
+
+        result = _client(urlopen).stk_query(
+            checkout_request_id='checkout-1', access_token=ACCESS_TOKEN,
+            timestamp='20261007120000',
+        )
+        self.assertEqual(result['ResponseCode'], '0')
+        self.assertEqual(result['ResultCode'], '1032')
+        self.assertEqual(captured['body']['CheckoutRequestID'], 'checkout-1')
+        self.assertEqual(captured['body']['Timestamp'], '20261007120000')
+        self.assertIn('/mpesa/stkpushquery/v1/query', captured['request'].full_url)

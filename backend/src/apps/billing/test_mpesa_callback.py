@@ -1,5 +1,6 @@
 import threading
 import time
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import OperationalError, connection
@@ -21,8 +22,9 @@ from apps.billing.models import (
 from apps.notifications.models import Notification
 from apps.organizations.models import Organization
 from apps.tenants.models import Tenant
+from infrastructure.payments.mpesa import MpesaTimeoutError
 
-CALLBACK_URL = '/api/v1/billing/mpesa/callback/'
+CALLBACK_URL = '/api/v1/billing/mpesa/callback/path-token-secret/'
 STATEMENT_URL = '/api/v1/billing/statements/me/'
 
 MPESA_SETTINGS = dict(
@@ -31,8 +33,8 @@ MPESA_SETTINGS = dict(
     MPESA_CONSUMER_SECRET='test-consumer-secret-do-not-log',
     MPESA_SHORTCODE='123456',
     MPESA_PASSKEY='test-passkey-do-not-log',
-    MPESA_CALLBACK_URL='https://example.test/api/v1/billing/mpesa/callback/',
-    MPESA_CALLBACK_AUTH_TOKEN='',
+    MPESA_CALLBACK_URL='https://example.test/api/v1/billing/mpesa/callback/path-token-secret/',
+    MPESA_CALLBACK_AUTH_TOKEN='path-token-secret',
     MPESA_TIMEOUT_SECONDS=5,
     MPESA_TRANSACTION_TYPE='CustomerPayBillOnline',
 )
@@ -75,6 +77,21 @@ def stk_payload(
 @override_settings(**MPESA_SETTINGS)
 class MpesaCallbackTests(APITestCase):
     def setUp(self):
+        self.provider_result_code = '0'
+        def verified_query(*, checkout_request_id):
+            attempt = MpesaAttempt.objects.filter(checkout_request_id=checkout_request_id).first()
+            return {
+                'ResponseCode': '0', 'ResultCode': self.provider_result_code,
+                'CheckoutRequestID': checkout_request_id,
+                'MerchantRequestID': attempt.merchant_request_id if attempt else '',
+                'ResultDesc': 'Provider transaction result',
+            }
+        self.query_patcher = patch(
+            'apps.billing.views_mpesa.MpesaClient.stk_query',
+            side_effect=verified_query,
+        )
+        self.query_patcher.start()
+        self.addCleanup(self.query_patcher.stop)
         user_model = get_user_model()
         self.tenant_user = user_model.objects.create_user(username='cb-tenant', password='secret')
         self.other_user = user_model.objects.create_user(username='cb-other', password='secret')
@@ -174,7 +191,26 @@ class MpesaCallbackTests(APITestCase):
         self.assertEqual(credits[0]['credit_cents'], 150000)
         self.assertEqual(statement.data['outstanding_cents'], 0)
 
+    def test_mismatched_provider_query_leaves_attempt_unresolved(self):
+        with patch('apps.billing.views_mpesa.MpesaClient.stk_query', return_value={
+            'ResponseCode': '0', 'ResultCode': '0',
+            'CheckoutRequestID': 'another-checkout', 'MerchantRequestID': 'm-1',
+        }):
+            response = self.post_callback(stk_payload())
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['status'], 'UNRESOLVED')
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    @override_settings(MPESA_CALLBACK_AUTH_TOKEN='')
+    def test_callback_fails_closed_when_authentication_is_not_configured(self):
+        response = self.post_callback(stk_payload(), url='/api/v1/billing/mpesa/callback/')
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(Payment.objects.count(), 0)
+
     def test_valid_failure_creates_no_payment(self):
+        self.provider_result_code = '1032'
         payload = stk_payload(
             result_code=1032,
             result_desc='Request cancelled by user',
@@ -191,7 +227,64 @@ class MpesaCallbackTests(APITestCase):
         self.charge.refresh_from_db()
         self.assertEqual(self.charge.balance_cents, 150000)
 
+    def test_failure_with_wrong_merchant_reference_does_not_close_attempt(self):
+        response = self.post_callback(stk_payload(
+            result_code=1032, result_desc='cancelled', include_metadata=False, merchant='forged-merchant',
+        ))
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+
+    def test_failure_with_wrong_checkout_reference_does_not_close_attempt(self):
+        response = self.post_callback(stk_payload(
+            checkout='unknown-checkout', result_code=1032, include_metadata=False,
+        ))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'UNMATCHED')
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+
+    def test_failure_callback_requires_provider_failure_result(self):
+        with patch('apps.billing.views_mpesa.MpesaClient.stk_query', side_effect=MpesaTimeoutError('timeout')):
+            response = self.post_callback(stk_payload(result_code=1032, include_metadata=False))
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_callback_failure_conflicting_with_provider_success_stays_unresolved(self):
+        response = self.post_callback(stk_payload(result_code=1032, include_metadata=False))
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+
+    def test_callback_success_conflicting_with_provider_failure_stays_unresolved(self):
+        self.provider_result_code = '1032'
+        response = self.post_callback(stk_payload())
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_query_response_without_transaction_result_stays_unresolved(self):
+        with patch('apps.billing.views_mpesa.MpesaClient.stk_query', return_value={
+            'ResponseCode': '0', 'CheckoutRequestID': self.attempt.checkout_request_id,
+            'MerchantRequestID': self.attempt.merchant_request_id,
+        }):
+            response = self.post_callback(stk_payload())
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+
+    def test_query_transport_error_does_not_mutate_attempt(self):
+        with patch('apps.billing.views_mpesa.MpesaClient.stk_query', side_effect=MpesaTimeoutError('timeout')):
+            response = self.post_callback(stk_payload())
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+
     def test_timeout_result_code(self):
+        self.provider_result_code = '1037'
         response = self.post_callback(stk_payload(
             result_code=1037,
             result_desc='DS timeout',
@@ -203,6 +296,7 @@ class MpesaCallbackTests(APITestCase):
         self.assertEqual(Payment.objects.count(), 0)
 
     def test_generic_nonzero_result_is_failed(self):
+        self.provider_result_code = '2001'
         response = self.post_callback(stk_payload(
             result_code=2001,
             result_desc='Wrong PIN',
@@ -248,18 +342,20 @@ class MpesaCallbackTests(APITestCase):
 
     def test_wrong_amount_does_not_settle(self):
         response = self.post_callback(stk_payload(amount=1))
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['status'], 'UNRESOLVED')
         self.assertFalse(response.data['settled'])
         self.attempt.refresh_from_db()
-        self.assertEqual(self.attempt.status, MpesaAttempt.Status.FAILED)
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
         self.assertEqual(Payment.objects.count(), 0)
 
     def test_wrong_phone_does_not_settle(self):
         response = self.post_callback(stk_payload(phone='254711111111'))
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
         self.assertFalse(response.data['settled'])
         self.assertEqual(Payment.objects.count(), 0)
         self.attempt.refresh_from_db()
-        self.assertEqual(self.attempt.status, MpesaAttempt.Status.FAILED)
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
 
     def test_missing_receipt_does_not_settle(self):
         payload = stk_payload()
@@ -268,8 +364,11 @@ class MpesaCallbackTests(APITestCase):
             {'Name': 'PhoneNumber', 'Value': 254700000010},
         ]
         response = self.post_callback(payload)
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
         self.assertFalse(response.data['settled'])
         self.assertEqual(Payment.objects.count(), 0)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
 
     def test_correct_phone_aliases_match(self):
         response = self.post_callback(stk_payload(phone='0700000010'))
@@ -364,12 +463,18 @@ class MpesaCallbackTests(APITestCase):
 
     @override_settings(**{**MPESA_SETTINGS, 'MPESA_CALLBACK_AUTH_TOKEN': 'path-token-secret'})
     def test_callback_token_gate(self):
-        denied = self.post_callback(stk_payload())
+        denied = self.post_callback(stk_payload(), url='/api/v1/billing/mpesa/callback/')
         self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(Payment.objects.count(), 0)
+        with self.assertLogs('apps.billing.views_mpesa', level='WARNING') as captured:
+            invalid = self.post_callback(
+                stk_payload(), url='/api/v1/billing/mpesa/callback/wrong-secret/'
+            )
+        self.assertEqual(invalid.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertNotIn('wrong-secret', '\n'.join(captured.output))
         allowed = self.post_callback(
             stk_payload(),
-            url='/api/v1/billing/mpesa/callback/path-token-secret/',
+            url=CALLBACK_URL,
         )
         self.assertEqual(allowed.status_code, status.HTTP_200_OK)
         self.assertTrue(allowed.data['settled'])
@@ -378,6 +483,19 @@ class MpesaCallbackTests(APITestCase):
 @override_settings(**MPESA_SETTINGS)
 class MpesaCallbackConcurrencyTests(TransactionTestCase):
     def setUp(self):
+        def verified_query(*, checkout_request_id):
+            attempt = MpesaAttempt.objects.filter(checkout_request_id=checkout_request_id).first()
+            return {
+                'ResponseCode': '0', 'ResultCode': '0',
+                'CheckoutRequestID': checkout_request_id,
+                'MerchantRequestID': attempt.merchant_request_id if attempt else '',
+            }
+        self.query_patcher = patch(
+            'apps.billing.views_mpesa.MpesaClient.stk_query',
+            side_effect=verified_query,
+        )
+        self.query_patcher.start()
+        self.addCleanup(self.query_patcher.stop)
         user_model = get_user_model()
         self.tenant_user = user_model.objects.create_user(username='cb-conc', password='secret')
         self.organization = Organization.objects.create(name='Concurrent Homes')

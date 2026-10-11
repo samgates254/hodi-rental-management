@@ -306,6 +306,32 @@ class MpesaInitiateApiTests(TestCase):
         self.assertFalse(Payment.objects.filter(status=Payment.Status.ALLOCATED).exists())
         self.assertFalse(Payment.objects.filter(status=Payment.Status.PENDING).exists())
 
+    def test_tenant_can_read_only_their_own_attempt_status(self):
+        attempt = MpesaAttempt.objects.create(
+            organization=self.organization, tenant=self.tenant, invoice=self.invoice,
+            initiated_by=self.tenant_user, amount_cents=150000, phone_number='254700000010',
+            status=MpesaAttempt.Status.STK_SENT, checkout_request_id='private-checkout',
+        )
+        self.client.force_authenticate(self.tenant_user)
+        own = self.client.get(f'/api/v1/billing/mpesa/attempts/{attempt.pk}/')
+        self.assertEqual(own.status_code, status.HTTP_200_OK)
+        self.assertEqual(own.data['status'], 'PENDING')
+        self.assertNotIn('phone_number', own.data)
+        self.assertNotIn('checkout_request_id', own.data)
+        self.client.force_authenticate(self.other_user)
+        hidden = self.client.get(f'/api/v1/billing/mpesa/attempts/{attempt.pk}/')
+        self.assertEqual(hidden.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_attempt_status_exposes_terminal_failure(self):
+        attempt = MpesaAttempt.objects.create(
+            organization=self.organization, tenant=self.tenant, invoice=self.invoice,
+            initiated_by=self.tenant_user, amount_cents=150000, phone_number='254700000010',
+            status=MpesaAttempt.Status.TIMEOUT,
+        )
+        self.client.force_authenticate(self.tenant_user)
+        response = self.client.get(f'/api/v1/billing/mpesa/attempts/{attempt.pk}/')
+        self.assertEqual(response.data['status'], 'EXPIRED')
+
     def test_nonzero_daraja_response_fails_without_settlement(self):
         self.client.force_authenticate(self.tenant_user)
         fake = FakeMpesaClient(result=_accepted_result(

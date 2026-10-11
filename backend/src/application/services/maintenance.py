@@ -4,6 +4,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.leases.models import Lease
 from apps.maintenance.models import (
+    MaintenanceIssue,
+    MaintenanceIssueUpdate,
     MaintenanceComment,
     MaintenanceRequest,
     TechnicianProfile,
@@ -19,6 +21,46 @@ from rental_os.algorithms.matching import MatchingError
 
 
 OPEN_FOR_EDIT = {MaintenanceRequest.Status.OPEN, MaintenanceRequest.Status.IN_PROGRESS}
+
+
+def _sync_legacy_issue(maintenance_request, *, actor, status, note=''):
+    issue = MaintenanceIssue.objects.select_for_update().filter(operational_request=maintenance_request).first()
+    if issue is None:
+        return
+    issue.status = status
+    issue.resolved_at = timezone.now() if status == MaintenanceIssue.Status.RESOLVED else None
+    issue.save(update_fields=('status', 'resolved_at', 'updated_at'))
+    MaintenanceIssueUpdate.objects.create(issue=issue, author=actor, status=status, note=note)
+
+
+def _ensure_legacy_issue(maintenance_request, *, actor):
+    if maintenance_request.tenant_id is None:
+        return None
+    issue = MaintenanceIssue.objects.filter(operational_request=maintenance_request).first()
+    if issue is not None:
+        return issue
+    priority = _legacy_priority_for_hazard(maintenance_request.hazard)
+    issue = MaintenanceIssue.objects.create(
+        tenant=maintenance_request.tenant,
+        unit=maintenance_request.unit,
+        title=maintenance_request.title,
+        category='OTHER',
+        priority=priority,
+        description=maintenance_request.description,
+        operational_request=maintenance_request,
+    )
+    MaintenanceIssueUpdate.objects.create(issue=issue, author=actor, status=issue.status, note='Issue created')
+    return issue
+
+
+def _legacy_priority_for_hazard(hazard):
+    if hazard >= 5:
+        return MaintenanceIssue.Priority.URGENT
+    if hazard >= 4:
+        return MaintenanceIssue.Priority.HIGH
+    if hazard <= 2:
+        return MaintenanceIssue.Priority.LOW
+    return MaintenanceIssue.Priority.NORMAL
 
 
 def score_maintenance(*, hazard, vulnerability, building_age_years=None, age_band_value=None):
@@ -138,6 +180,37 @@ def update_request(maintenance_request, *, validated_data, actor, request=None):
         maintenance_request.emergency_override = result.emergency_override
     maintenance_request.full_clean()
     maintenance_request.save()
+    issue = MaintenanceIssue.objects.select_for_update().filter(
+        operational_request=maintenance_request,
+    ).first()
+    if issue is not None:
+        if (issue.tenant_id != maintenance_request.tenant_id
+                or issue.unit_id != maintenance_request.unit_id
+                or issue.organization_id != maintenance_request.organization_id):
+            raise ValidationError({'detail': 'Linked maintenance records have inconsistent ownership.'})
+        changed_fields = []
+        for field in ('title', 'description'):
+            value = getattr(maintenance_request, field)
+            if getattr(issue, field) != value:
+                setattr(issue, field, value)
+                changed_fields.append(field)
+        priority = _legacy_priority_for_hazard(maintenance_request.hazard)
+        if issue.priority != priority:
+            issue.priority = priority
+            changed_fields.append('priority')
+        if changed_fields:
+            issue.save(update_fields=tuple(changed_fields + ['updated_at']))
+            MaintenanceIssueUpdate.objects.create(
+                issue=issue, author=actor, status=issue.status,
+                note='Request details updated: ' + ', '.join(changed_fields),
+            )
+    record_audit(
+        action='maintenance.update', object_type='MaintenanceRequest',
+        object_id=maintenance_request.pk, actor=actor,
+        organization=maintenance_request.unit.building.property.organization,
+        metadata={'updated_fields': sorted(validated_data.keys()), 'linked_issue': issue is not None},
+        request=request,
+    )
     return maintenance_request
 
 
@@ -165,6 +238,7 @@ def assign_request(maintenance_request, *, assignee, actor, notes='', request=No
     work_order.save()
     maintenance_request.status = MaintenanceRequest.Status.IN_PROGRESS
     maintenance_request.save(update_fields=('status', 'updated_at'))
+    _sync_legacy_issue(maintenance_request, actor=actor, status=MaintenanceIssue.Status.IN_PROGRESS, note=notes)
     organization = maintenance_request.unit.building.property.organization
     record_audit(
         action='maintenance.assign',
@@ -226,6 +300,7 @@ def complete_request(maintenance_request, *, actor, notes='', request=None):
     maintenance_request.status = MaintenanceRequest.Status.COMPLETED
     maintenance_request.completed_at = now
     maintenance_request.save(update_fields=('status', 'completed_at', 'updated_at'))
+    _sync_legacy_issue(maintenance_request, actor=actor, status=MaintenanceIssue.Status.RESOLVED, note=notes)
     organization = maintenance_request.unit.building.property.organization
     record_audit(
         action='maintenance.complete',
@@ -261,6 +336,7 @@ def close_request(maintenance_request, *, actor, request=None):
     maintenance_request.status = MaintenanceRequest.Status.CLOSED
     maintenance_request.closed_at = now
     maintenance_request.save(update_fields=('status', 'closed_at', 'updated_at'))
+    _sync_legacy_issue(maintenance_request, actor=actor, status=MaintenanceIssue.Status.RESOLVED, note='Request closed')
     organization = maintenance_request.unit.building.property.organization
     record_audit(
         action='maintenance.close',
@@ -309,8 +385,8 @@ def preview_matches(*, organization, jobs):
         skills = tuple(dict.fromkeys(skills))
         rating = profile.rating_milli if profile is not None else 4000
         acceptance = profile.acceptance_milli if profile is not None else 800
-        verified = profile.verified if profile is not None else True
-        available = profile.available if profile is not None else True
+        verified = profile.verified if profile is not None else False
+        available = profile.available if profile is not None else False
         technicians.append(Technician(
             technician_id=str(membership.user_id),
             skills=skills,

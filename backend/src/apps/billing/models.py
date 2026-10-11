@@ -97,6 +97,9 @@ class Invoice(models.Model):
 	period_start = models.DateField()
 	period_end = models.DateField()
 	due_date = models.DateField()
+	# Stable idempotency key for a generated billing event. Blank for historical
+	# invoices and intentionally distinct manual adjustments.
+	generation_key = models.CharField(max_length=160, blank=True, default='')
 	status = models.CharField(
 		max_length=20,
 		choices=DocumentStatus.choices,
@@ -112,6 +115,11 @@ class Invoice(models.Model):
 	class Meta:
 		ordering = ('-period_start', '-id')
 		constraints = [
+			models.UniqueConstraint(
+				fields=('organization', 'generation_key'),
+				condition=~Q(generation_key=''),
+				name='unique_invoice_generation_key_per_org',
+			),
 			models.CheckConstraint(
 				check=Q(period_end__gte=models.F('period_start')),
 				name='invoice_period_end_on_or_after_start',
@@ -296,6 +304,13 @@ class MpesaAttempt(models.Model):
 		CANCELLED = 'CANCELLED', 'Cancelled'
 		TIMEOUT = 'TIMEOUT', 'Timed out'
 
+	class ReconciliationState(models.TextChoices):
+		NOT_CHECKED = 'NOT_CHECKED', 'Not checked'
+		UNRESOLVED = 'UNRESOLVED', 'Unresolved'
+		SUCCESS_NEEDS_RECEIPT = 'SUCCESS_NEEDS_RECEIPT', 'Provider success needs receipt review'
+		PROVIDER_FAILED = 'PROVIDER_FAILED', 'Provider confirmed failure'
+		EXHAUSTED = 'EXHAUSTED', 'Retry limit reached'
+
 	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 	organization = models.ForeignKey(
 		'organizations.Organization',
@@ -337,6 +352,11 @@ class MpesaAttempt(models.Model):
 	result_code = models.CharField(max_length=16, null=True, blank=True)
 	result_description = models.TextField(blank=True, default='')
 	account_reference = models.CharField(max_length=12, blank=True, default='')
+	reconciliation_attempts = models.PositiveSmallIntegerField(default=0)
+	last_reconciliation_at = models.DateTimeField(null=True, blank=True)
+	reconciliation_state = models.CharField(
+		max_length=32, choices=ReconciliationState.choices, default=ReconciliationState.NOT_CHECKED,
+	)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
 

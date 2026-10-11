@@ -25,13 +25,14 @@ import TenantWorkStatus from "./ops/TenantWorkStatus";
 import StatementPanel from "./tenant/StatementPanel";
 import "./client-portal.css";
 
-const MARKETPLACE_AVAILABLE = false;
+const MARKETPLACE_AVAILABLE = true;
 const ACTIVE_TENANCY_API = "/api/v1/leases/";
 const ISSUES_API = "/api/v1/maintenance/issues/";
 const CREATE_ISSUE_API = "/api/v1/maintenance/issues/";
 const INVOICES_API = "/api/v1/billing/invoices/";
-const PAYMENTS_API = "/api/v1/billing/payments/";
-const PAYMENT_FLOW_AVAILABLE = false;
+const PAYMENTS_API = "/api/v1/billing/ledger-payments/";
+const PAYMENT_FLOW_AVAILABLE = true;
+const MPESA_ATTEMPT_STORAGE_KEY = "hodi_mpesa_attempt_id";
 
 type Property = {
   id: number | string;
@@ -154,11 +155,11 @@ type SharedMaintenanceIssue = {
 type SharedRentPayment = {
   id: number | string;
   reference?: string;
-  lease_reference?: string;
-  amount_minor: number;
-  due_date: string;
+  external_id?: string;
+  amount_cents: number;
+  received_date: string;
+  execution_timestamp?: string | null;
   status: string;
-  paid_at?: string | null;
   method?: string;
   created_at: string;
 };
@@ -220,14 +221,14 @@ function fromSharedIssue(issue: SharedMaintenanceIssue): MaintenanceIssue {
 function fromSharedPayment(payment: SharedRentPayment): Payment {
   return {
     id: payment.id,
-    reference: payment.reference || payment.lease_reference,
-    date: payment.paid_at ?? payment.created_at,
+    reference: payment.reference || payment.external_id,
+    transaction_id: payment.external_id,
+    date: payment.execution_timestamp ?? payment.received_date,
     created_at: payment.created_at,
-    due_date: payment.due_date,
-    amount: payment.amount_minor / 100,
-    description: payment.lease_reference ? `Rent · ${payment.lease_reference}` : "Rent payment",
+    amount: payment.amount_cents / 100,
+    description: "Rent payment",
     method: payment.method,
-    status: payment.status,
+    status: payment.status === "ALLOCATED" ? "SUCCESSFUL" : payment.status,
   };
 }
 
@@ -287,7 +288,11 @@ type PaymentRequest = {
   message?: string;
   reference?: string;
   amount?: number | string;
+  amount_cents?: number;
+  receipt?: string | null;
   credit_amount?: number | string;
+  payment_settled?: boolean;
+  accepted?: boolean;
 };
 type ApiPage<T> = ApiList<T> & {
   count?: number;
@@ -923,7 +928,7 @@ export default function ClientDashboard() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"mpesa" | "bank_transfer">("mpesa");
+  const paymentMethod = "mpesa" as const;
   const [phoneNumber, setPhoneNumber] = useState("");
   const [paymentRequest, setPaymentRequest] = useState<PaymentRequest | null>(null);
   const [paymentStage, setPaymentStage] = useState<"idle" | "pending" | "reconciling" | "success" | "failed">("idle");
@@ -960,6 +965,15 @@ export default function ClientDashboard() {
       .finally(() => setIsCheckingSession(false));
   }, []);
 
+  useEffect(() => {
+    const savedAttemptId = window.sessionStorage.getItem(MPESA_ATTEMPT_STORAGE_KEY);
+    if (!savedAttemptId || !/^[0-9a-f-]{36}$/i.test(savedAttemptId)) return;
+    setPaymentRequest({ id: savedAttemptId, status: "UNRESOLVED" });
+    setPaymentStage("reconciling");
+    setPaymentError("This payment has no final status yet. You can check its status again without starting another payment.");
+    paymentStartedAt.current = Date.now() - 240_000;
+  }, []);
+
   const loadProperties = useCallback(async () => {
     if (!MARKETPLACE_AVAILABLE) {
       setIsLoadingProperties(false);
@@ -975,21 +989,24 @@ export default function ClientDashboard() {
     setIsLoadingProperties(true);
     setPropertyLoadError("");
     try {
-      const response = await clientApi.get<ApiPage<Property>>("/api/properties/available/", {
+      const response = await clientApi.get<ApiPage<Property & { monthly_rent_minor?: number; area?: string; city?: string; property_name?: string; unit_label?: string; available?: boolean }>>("/api/v1/marketplace/listings/", {
         params: {
-          location: location === "all" ? "" : location,
-          price: maxPrice,
-          bedrooms: bedrooms === "all" ? "" : bedrooms === "bedsitter" ? "bedsitter" : bedrooms.replace("br", ""),
-          house_type: bedrooms === "all" ? "" : bedrooms,
-          amenities: amenities.join(","),
-          search: propertySearch.trim(),
+          location: location === "all" ? propertySearch.trim() : location,
+          max_rent: maxPrice * 100,
+          bedrooms: bedrooms === "all" ? "" : bedrooms === "bedsitter" ? 0 : bedrooms.replace("br", ""),
+          amenity: amenities,
           page: propertyPage,
-          page_size: 12,
-          available: availableNow ? "true" : "",
         },
       });
       if (requestId !== propertyRequestId.current) return;
-      const responseProperties = listFromResponse(response.data);
+      const responseProperties = listFromResponse(response.data).map(item => ({
+        ...item,
+        rent: item.monthly_rent_minor == null ? undefined : item.monthly_rent_minor / 100,
+        location: [item.area, item.city].filter(Boolean).join(", "),
+        name: item.title,
+        image_url: item.photos?.[0] && typeof item.photos[0] === "object" ? item.photos[0].url : undefined,
+        is_available: item.available,
+      }));
       const hasPaginationMetadata = !Array.isArray(response.data) &&
         ("count" in response.data || "next" in response.data || "previous" in response.data);
       setPropertiesServerPaginated(hasPaginationMetadata);
@@ -1067,9 +1084,7 @@ export default function ClientDashboard() {
   const loadPayments = useCallback(async () => {
     setIsLoadingPayments(true);
     try {
-      const [paymentResult] = await Promise.allSettled([
-        clientApi.get<ApiList<SharedRentPayment>>(PAYMENTS_API),
-      ]);
+      const [paymentResult] = await Promise.allSettled([clientApi.get<ApiList<SharedRentPayment>>(PAYMENTS_API)]);
       if (paymentResult.status === "fulfilled") {
         setPayments(listFromResponse(paymentResult.value.data).map(fromSharedPayment));
       }
@@ -1172,34 +1187,15 @@ export default function ClientDashboard() {
   }
 
   function openProperty(property: Property) {
-    window.location.assign(`/properties/${property.id}`);
+    window.location.assign(`/marketplace/${property.id}`);
   }
 
   function contactAgent(property: Property) {
-    const phone = property.agent?.phone_number ?? property.agent?.phone ?? property.agent_phone;
-    const email = property.agent?.email ?? property.agent_email;
-    if (phone) {
-      const whatsappNumber = phone.replace(/\D/g, "").replace(/^0/, "254");
-      window.open(`https://wa.me/${whatsappNumber}`, "_blank", "noopener,noreferrer");
-    } else if (email) {
-      window.location.assign(
-        `mailto:${email}?subject=${encodeURIComponent(`Room enquiry: ${property.title ?? property.name ?? "Hodi listing"}`)}`,
-      );
-    } else {
-      setPropertyError(`Contact details for ${agentName(property)} are not available.`);
-    }
+    window.location.assign(`/marketplace/${property.id}`);
   }
 
   function bookViewing(property: Property) {
-    const phone = property.agent?.phone_number ?? property.agent?.phone ?? property.agent_phone;
-    const whatsappNumber = phone?.replace(/\D/g, "").replace(/^0/, "254");
-    if (!whatsappNumber) {
-      setPropertyError(`Viewing contact for ${agentName(property)} is not available.`);
-      return;
-    }
-    const title = property.title ?? property.name ?? "this room";
-    const message = encodeURIComponent(`Hello, I’d like to book a viewing for ${title} on Hodi.`);
-    window.open(`https://wa.me/${whatsappNumber}?text=${message}`, "_blank", "noopener,noreferrer");
+    window.location.assign(`/marketplace/${property.id}`);
   }
 
   function setRentAmount(value: number) {
@@ -1370,7 +1366,7 @@ export default function ClientDashboard() {
       const elapsed = Date.now() - startedAt;
       if (elapsed >= 240_000) {
         setPaymentStage("reconciling");
-        setPaymentError("We haven’t received a final M-Pesa confirmation yet. Your payment is being reconciled; check your receipts shortly.");
+        setPaymentError("We haven’t received a final M-Pesa confirmation. You can check this attempt again without starting another payment.");
         return;
       }
       if (elapsed >= 120_000 && paymentStage !== "reconciling") {
@@ -1378,15 +1374,18 @@ export default function ClientDashboard() {
         setPaymentError("This payment is taking longer than usual. We’re safely checking its status with M-Pesa.");
       }
       try {
-        const response = await clientApi.get<PaymentRequest | { payment?: PaymentRequest }>(
-          `/api/payments/${paymentRequest.id}/status/`,
+        const response = await clientApi.get<PaymentRequest>(
+          `/api/v1/billing/mpesa/attempts/${paymentRequest.id}/`,
         );
-        const current = "payment" in response.data && response.data.payment
-          ? response.data.payment
-          : response.data as PaymentRequest;
+        const current = response.data;
         if (cancelled) return;
-        setPaymentRequest(current);
-        if (isPaymentSuccessful(current.status)) {
+        setPaymentRequest({
+          ...current,
+          amount: current.amount_cents == null ? undefined : current.amount_cents / 100,
+          reference: current.receipt ?? undefined,
+        });
+        if (current.status === "SUCCESSFUL") {
+          window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
           setPaymentStage("success");
           setPageNotice("Payment confirmed. Your rent ledger is being refreshed.");
           try {
@@ -1411,17 +1410,26 @@ export default function ClientDashboard() {
           void loadPayments();
           return;
         }
-        if (isPaymentFailed(current.status)) {
+        if (["FAILED", "EXPIRED"].includes(current.status ?? "")) {
+          window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
           setPaymentStage("failed");
           setPaymentError(current.message ?? "The payment was not completed. Please try again.");
           return;
         }
-        if (["unknown", "reconciling", "timeout", "timedout"].includes(normalizedStatus(current.status))) {
+        if (current.status === "UNRESOLVED") {
           setPaymentStage("reconciling");
-          setPaymentError(current.message ?? "M-Pesa hasn’t returned a final result yet. We’re checking your payment safely.");
+          setPaymentError(current.message ?? "M-Pesa hasn’t returned a final result yet. You can check this attempt again without starting another payment.");
         }
-      } catch {
+      } catch (error) {
         if (cancelled) return;
+        // A restored attempt may belong to a tenant account that is no longer
+        // active. The endpoint returns 404 without revealing another tenant's data.
+        if (error instanceof ClientApiError && error.status === 404) {
+          window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
+          setPaymentStage("failed");
+          setPaymentError("This payment attempt is no longer available to this account. Contact your property manager before paying again.");
+          return;
+        }
       }
       timeoutId = window.setTimeout(poll, elapsed > 120_000 ? 10000 : 3000);
     };
@@ -1451,31 +1459,29 @@ export default function ClientDashboard() {
     }
     setIsInitiatingPayment(true);
     try {
-      const response = await clientApi.post<PaymentRequest | { payment?: PaymentRequest }>(
-        "/api/payments/initiate/",
+      const response = await clientApi.post<PaymentRequest>(
+        "/api/v1/billing/mpesa/initiate/",
         {
-          invoice_id: selectedInvoice.id,
-          amount: parsedAmount,
-          phone: normalizedPhone,
-          method: paymentMethod,
+          invoice: selectedInvoice.id,
+          amount_cents: Math.round(parsedAmount * 100),
+          phone_number: normalizedPhone,
         },
       );
-      const request = "payment" in response.data && response.data.payment
-        ? response.data.payment
-        : response.data as PaymentRequest;
+      const request = response.data;
       if (request.id === undefined || request.id === null) {
         throw new Error("The payment service did not return a payment reference.");
       }
       setPaymentRequest(request);
+      window.sessionStorage.setItem(MPESA_ATTEMPT_STORAGE_KEY, String(request.id));
       paymentStartedAt.current = Date.now();
       setPaymentStage(
-        isPaymentSuccessful(request.status)
+        request.payment_settled === true
           ? "success"
-          : ["unknown", "reconciling", "timeout", "timedout"].includes(normalizedStatus(request.status))
+          : request.status === "UNRESOLVED"
             ? "reconciling"
             : "pending",
       );
-      if (isPaymentSuccessful(request.status)) {
+      if (request.payment_settled === true) {
         void loadInvoices();
         void loadPayments();
       }
@@ -1690,6 +1696,16 @@ export default function ClientDashboard() {
         </header>
 
       <Container className="dashboard-content portal-content">
+        {paymentRequest && paymentStage === "idle" && (
+          <div className="portal-toast" role="status">
+            Payment attempt {paymentRequest.id} has no final status.
+            <Button type="button" variant="secondary" onClick={() => {
+              paymentStartedAt.current = Date.now();
+              setPaymentStage("pending");
+              setPaymentError("");
+            }}>Resume status check</Button>
+          </div>
+        )}
         {pageNotice && <div className="portal-toast" role="status"><Icon name="check" size={17} />{pageNotice}<button type="button" aria-label="Dismiss notification" onClick={() => setPageNotice("")}>×</button></div>}
         {propertyError && <div className="portal-toast portal-toast--error" role="alert">{propertyError}<button type="button" aria-label="Dismiss notification" onClick={() => setPropertyError("")}>×</button></div>}
         <section className="portal-overview" id="overview">
@@ -1842,11 +1858,9 @@ export default function ClientDashboard() {
               {Number(paymentAmount) > outstandingTotal && outstandingTotal > 0 && <p className="portal-credit-note"><Icon name="check" size={15} />KES {money(Number(paymentAmount) - outstandingTotal)} will be credited to next month.</p>}
               <div className="portal-method-select">
                 <span>Payment method</span>
-                <label className={paymentMethod === "mpesa" ? "is-selected" : ""}><input type="radio" name="method" value="mpesa" checked={paymentMethod === "mpesa"} onChange={() => setPaymentMethod("mpesa")} /><span className="portal-method-logo">M</span><span><strong>M-Pesa</strong><small>Instant · STK push</small></span><i /></label>
-                <label className={paymentMethod === "bank_transfer" ? "is-selected" : ""}><input type="radio" name="method" value="bank_transfer" checked={paymentMethod === "bank_transfer"} onChange={() => setPaymentMethod("bank_transfer")} /><Icon name="building" size={20} /><span><strong>Bank transfer</strong><small>Use your payment reference</small></span><i /></label>
+                <div className="portal-method-select is-selected"><span className="portal-method-logo">M</span><span><strong>M-Pesa</strong><small>STK push · confirmation shown after provider settlement</small></span><i /></div>
               </div>
               {paymentMethod === "mpesa" && <label className="portal-phone-field">M-Pesa phone number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="07XX XXX XXX" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} required /><small>We’ll send a secure payment request to this phone.</small></label>}
-              {paymentMethod === "bank_transfer" && <p className="portal-bank-note">Your invoice reference will be attached to this payment. Transfer instructions will be shown after you continue.</p>}
               {paymentError && <p className="dashboard-form-error" role="alert">{paymentError}</p>}
               <Button type="submit" disabled={!selectedInvoice || !Number(paymentAmount) || isInitiatingPayment} className="portal-pay-button">{isInitiatingPayment ? "Starting secure payment…" : `Pay KES ${money(paymentAmount)}`}<Icon name="arrow" size={17} /></Button>
               <p className="portal-secure-note"><Icon name="shield" size={13} />Encrypted payment · Your details stay protected</p>
@@ -2215,8 +2229,11 @@ export default function ClientDashboard() {
             <button className="dashboard-icon-button portal-payment-close" type="button" aria-label="Close payment status" onClick={() => {
               if (paymentStage !== "pending") {
                 setPaymentStage("idle");
-                setPaymentRequest(null);
                 setPaymentError("");
+                if (paymentStage !== "reconciling") {
+                  window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
+                  setPaymentRequest(null);
+                }
               }
             }} disabled={paymentStage === "pending"}><Icon name="close" size={18} /></button>
             {paymentStage === "pending" ? (
@@ -2232,8 +2249,8 @@ export default function ClientDashboard() {
               <>
                 <div className="portal-reconcile-icon"><Icon name="clock" size={28} /></div>
                 <p className="portal-modal-eyebrow">PAYMENT STATUS</p>
-                <h2 id="payment-status-title">We’re confirming your payment</h2>
-                <p>{paymentError || "Your request is still being reconciled. You will not be charged again while we check with M-Pesa."}</p>
+                <h2 id="payment-status-title">Payment status is unresolved</h2>
+                <p>{paymentError || "No final status is available yet. Check this attempt again before starting another payment."}</p>
                 <div className="portal-reconcile-reference">Reference <strong>{paymentRequest.reference ?? paymentRequest.id}</strong></div>
                 <Button type="button" variant="secondary" onClick={() => {
                   paymentStartedAt.current = Date.now();
@@ -2248,8 +2265,9 @@ export default function ClientDashboard() {
                 <p className="portal-modal-eyebrow">PAYMENT CONFIRMED</p>
                 <h2 id="payment-status-title">Asante, {clientName.split(" ")[0]}!</h2>
                 <p>Your payment of <strong>KES {money(paymentRequest.amount ?? paymentAmount)}</strong> has been received.</p>
-                <div className="portal-success-receipt"><span>Receipt reference</span><strong>{paymentRequest.reference ?? paymentRequest.id}</strong></div>
+                <div className="portal-success-receipt"><span>M-Pesa receipt</span><strong>{paymentRequest.receipt ?? paymentRequest.reference ?? "Not available"}</strong></div>
                 <Button type="button" onClick={() => {
+                  window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
                   setPaymentStage("idle");
                   setPaymentRequest(null);
                   scrollToSection("receipts");
@@ -2262,6 +2280,7 @@ export default function ClientDashboard() {
                 <h2 id="payment-status-title">Let’s try that again</h2>
                 <p>{paymentError || "The payment could not be completed. You can retry without losing your invoice."}</p>
                 <Button type="button" onClick={() => {
+                  window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
                   setPaymentStage("idle");
                   setPaymentRequest(null);
                   setPaymentError("");

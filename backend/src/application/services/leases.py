@@ -26,16 +26,22 @@ def _release_unit_if_idle(unit):
         unit.save(update_fields=('status', 'updated_at'))
 
 
+def _lock_lease_and_unit(lease):
+    unit_id = Lease.objects.values_list('unit_id', flat=True).get(pk=lease.pk)
+    unit = Unit.objects.select_for_update().get(pk=unit_id)
+    locked = Lease.objects.select_for_update().select_related('tenant', 'tenant__user').get(pk=lease.pk)
+    if locked.unit_id != unit.pk:
+        raise ValidationError({'unit': 'Lease unit changed concurrently; reload and retry.'})
+    return locked, unit
+
+
 @transaction.atomic
 def activate_lease(lease, *, actor, request=None):
-    lease = Lease.objects.select_for_update(of=('self', 'tenant', 'unit')).select_related(
-        'tenant', 'unit', 'tenant__user',
-    ).get(pk=lease.pk)
+    lease, unit = _lock_lease_and_unit(lease)
     if lease.status != Lease.Status.DRAFT:
         raise ValidationError({'status': 'Only a draft lease can be activated.'})
     lease.status = Lease.Status.ACTIVE
     _save_clean(lease, ('status', 'updated_at'))
-    unit = Unit.objects.select_for_update().get(pk=lease.unit_id)
     unit.status = Unit.Status.OCCUPIED
     unit.save(update_fields=('status', 'updated_at'))
     organization = lease.tenant.organization
@@ -61,9 +67,7 @@ def activate_lease(lease, *, actor, request=None):
 
 @transaction.atomic
 def terminate_lease(lease, *, end_date, reason, actor, request=None):
-    lease = Lease.objects.select_for_update(of=('self', 'tenant', 'unit')).select_related(
-        'tenant', 'unit', 'tenant__user',
-    ).get(pk=lease.pk)
+    lease, unit = _lock_lease_and_unit(lease)
     if lease.status != Lease.Status.ACTIVE:
         raise ValidationError({'status': 'Only an active lease can be terminated.'})
     if end_date <= lease.start_date:
@@ -84,7 +88,6 @@ def terminate_lease(lease, *, end_date, reason, actor, request=None):
         after_state={'status': lease.status, 'end_date': end_date.isoformat()},
         created_by=actor,
     )
-    unit = Unit.objects.select_for_update().get(pk=lease.unit_id)
     _release_unit_if_idle(unit)
     organization = lease.tenant.organization
     record_audit(
@@ -109,7 +112,7 @@ def terminate_lease(lease, *, end_date, reason, actor, request=None):
 
 @transaction.atomic
 def expire_lease(lease, *, actor, request=None):
-    lease = Lease.objects.select_for_update().select_related('tenant', 'unit').get(pk=lease.pk)
+    lease, unit = _lock_lease_and_unit(lease)
     if lease.status != Lease.Status.ACTIVE:
         raise ValidationError({'status': 'Only an active lease can expire.'})
     today = timezone.localdate()
@@ -117,7 +120,6 @@ def expire_lease(lease, *, actor, request=None):
         raise ValidationError({'end_date': 'The lease end date must be before today.'})
     lease.status = Lease.Status.EXPIRED
     _save_clean(lease, ('status', 'updated_at'))
-    unit = Unit.objects.select_for_update().get(pk=lease.unit_id)
     _release_unit_if_idle(unit)
     record_audit(
         action='lease.expire',

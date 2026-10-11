@@ -1,5 +1,5 @@
 type ApiRequestOptions = {
-  params?: Record<string, string | number | boolean | null | undefined>;
+  params?: Record<string, string | number | boolean | readonly (string | number | boolean)[] | null | undefined>;
   responseType?: "json" | "blob";
   /** Skip attaching Authorization (e.g. public auth endpoints). */
   skipAuth?: boolean;
@@ -81,7 +81,13 @@ function buildUrl(path: string, params?: ApiRequestOptions["params"]): string {
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined || value === null || value === "") continue;
-      url.searchParams.set(key, String(value));
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item !== "") url.searchParams.append(key, String(item));
+        }
+      } else {
+        url.searchParams.set(key, String(value));
+      }
     }
   }
 

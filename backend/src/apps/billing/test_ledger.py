@@ -3,6 +3,7 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
+from unittest.mock import patch
 
 from apps.audit.models import AuditLog
 from apps.billing.models import Charge, DocumentStatus, Invoice, Payment
@@ -70,6 +71,41 @@ class LedgerApiTests(APITestCase):
     def test_unauthenticated_invoice_list_is_rejected(self):
         response = self.client.get('/api/v1/billing/invoices/')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_rent_invoice_generation_retry_returns_same_invoice(self):
+        self.client.force_authenticate(self.accountant)
+        first = self.client.post('/api/v1/billing/invoices/', self.invoice_payload(), format='json')
+        retry = self.client.post('/api/v1/billing/invoices/', self.invoice_payload(), format='json')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(retry.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data['id'], retry.data['id'])
+        self.assertEqual(Invoice.objects.count(), 1)
+        self.assertEqual(Charge.objects.filter(charge_type='RENT').count(), 1)
+        changed_period = self.client.patch(
+            f"/api/v1/billing/invoices/{first.data['id']}/",
+            {'period_start': '2026-10-02'},
+            format='json',
+        )
+        self.assertEqual(changed_period.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invoice_creation_rolls_back_after_charge_persistence_failure(self):
+        self.client.force_authenticate(self.accountant)
+        with patch('application.services.billing.recompute_invoice_totals', side_effect=RuntimeError('test failure')):
+            with self.assertRaises(RuntimeError):
+                self.client.post('/api/v1/billing/invoices/', self.invoice_payload(), format='json')
+        self.assertEqual(Invoice.objects.count(), 0)
+        self.assertEqual(Charge.objects.count(), 0)
+
+    def test_generation_key_cannot_be_reused_for_another_period(self):
+        self.client.force_authenticate(self.accountant)
+        payload = self.invoice_payload(generation_key='manual-cycle:october')
+        first = self.client.post('/api/v1/billing/invoices/', payload, format='json')
+        second = self.client.post('/api/v1/billing/invoices/', {
+            **payload, 'period_start': '2026-10-02', 'period_end': '2026-11-01',
+        }, format='json')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Invoice.objects.count(), 1)
 
     def test_prorated_rent_posts_allocates_and_isolates_organizations(self):
         self.client.force_authenticate(self.accountant)

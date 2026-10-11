@@ -1,6 +1,6 @@
 from datetime import date
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -64,7 +64,11 @@ def rent_charge_amount(lease, period_start, period_end):
     return amount
 
 
-def create_invoice(*, tenant, period_start, period_end, due_date, actor, lease=None, notes='', include_rent=None, request=None):
+@transaction.atomic
+def create_invoice(
+	*, tenant, period_start, period_end, due_date, actor, lease=None,
+	notes='', include_rent=None, generation_key='', request=None,
+):
     if period_end < period_start:
         raise ValidationError({'period_end': 'Period end must be on or after period start.'})
     if lease is not None and lease.tenant_id != tenant.pk:
@@ -75,36 +79,45 @@ def create_invoice(*, tenant, period_start, period_end, due_date, actor, lease=N
         include_rent = lease is not None
     if include_rent and lease is None:
         raise ValidationError({'lease': 'A lease is required to generate a rent charge.'})
-    invoice = Invoice.objects.create(
-        organization=tenant.organization,
-        tenant=tenant,
-        lease=lease,
-        period_start=period_start,
-        period_end=period_end,
-        due_date=due_date,
-        notes=notes or '',
-        currency='KES',
-    )
-    if include_rent:
-        amount = rent_charge_amount(lease, period_start, period_end)
-        if amount <= 0:
-            raise ValidationError({'lease': 'Rent charge amount must be greater than zero.'})
-        Charge.objects.create(
-            invoice=invoice,
-            organization=tenant.organization,
-            tenant=tenant,
-            charge_type='RENT',
-            description=f'Rent {period_start.isoformat()} to {period_end.isoformat()}',
-            amount_cents=amount,
-            balance_cents=amount,
-            due_date=due_date,
-            period_start=period_start,
-            lifecycle=DocumentStatus.DRAFT,
-            currency='KES',
-        )
-    recompute_invoice_totals(invoice)
-    return invoice
-
+    if include_rent and not generation_key:
+        generation_key = f'rent:{lease.pk}:{period_start.isoformat()}:{period_end.isoformat()}'
+    generation_key = (generation_key or '').strip()
+    if len(generation_key) > 160:
+        raise ValidationError({'generation_key': 'Must be 160 characters or fewer.'})
+    amount = rent_charge_amount(lease, period_start, period_end) if include_rent else None
+    if include_rent and amount <= 0:
+        raise ValidationError({'lease': 'Rent charge amount must be greater than zero.'})
+    if generation_key:
+        existing = Invoice.objects.filter(organization=tenant.organization, generation_key=generation_key).first()
+        if existing is not None:
+            if (existing.tenant_id != tenant.pk or existing.lease_id != getattr(lease, 'pk', None)
+                    or existing.period_start != period_start or existing.period_end != period_end):
+                raise ValidationError({'generation_key': 'This key was already used for a different billing event.'})
+            return existing
+    try:
+        with transaction.atomic():
+            invoice = Invoice.objects.create(
+                organization=tenant.organization, tenant=tenant, lease=lease,
+                period_start=period_start, period_end=period_end, due_date=due_date,
+                notes=notes or '', currency='KES', generation_key=generation_key,
+            )
+            if include_rent:
+                Charge.objects.create(
+                    invoice=invoice, organization=tenant.organization, tenant=tenant,
+                    charge_type='RENT', description=f'Rent {period_start.isoformat()} to {period_end.isoformat()}',
+                    amount_cents=amount, balance_cents=amount, due_date=due_date,
+                    period_start=period_start, lifecycle=DocumentStatus.DRAFT, currency='KES',
+                )
+            recompute_invoice_totals(invoice)
+        return invoice
+    except IntegrityError:
+        existing = Invoice.objects.filter(organization=tenant.organization, generation_key=generation_key).first()
+        if existing is not None:
+            if (existing.tenant_id == tenant.pk and existing.lease_id == getattr(lease, 'pk', None)
+                    and existing.period_start == period_start and existing.period_end == period_end):
+                return existing
+            raise ValidationError({'generation_key': 'This key was already used for a different billing event.'})
+        raise
 
 @transaction.atomic
 def add_charge(*, invoice, charge_type, amount_cents, due_date, actor, period_start=None, description=''):
@@ -138,6 +151,13 @@ def update_draft_invoice(invoice, *, validated_data):
     invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if invoice.status != DocumentStatus.DRAFT:
         raise ValidationError({'status': 'Only draft invoices can be edited.'})
+    if invoice.generation_key.startswith('rent:') and any(
+        field in validated_data and validated_data[field] != getattr(invoice, field)
+        for field in ('period_start', 'period_end')
+    ):
+        raise ValidationError({
+            'period': 'Generated rent periods cannot be changed; create a separate adjustment invoice.',
+        })
     for field in ('period_start', 'period_end', 'due_date', 'notes'):
         if field in validated_data:
             setattr(invoice, field, validated_data[field])

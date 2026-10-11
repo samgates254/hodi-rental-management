@@ -14,7 +14,7 @@ from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
 
-from .models import MaintenanceIssue, MaintenanceIssueUpdate
+from .models import MaintenanceIssue, MaintenanceIssueUpdate, MaintenanceRequest, WorkOrder
 
 
 class MaintenanceIssueApiTests(TestCase):
@@ -82,6 +82,10 @@ class MaintenanceIssueApiTests(TestCase):
 		self.assertEqual(issue.tenant, self.tenant)
 		self.assertEqual(issue.status, MaintenanceIssue.Status.OPEN)
 		self.assertEqual(issue.updates.get().author, self.tenant_user)
+		self.assertIsNotNone(issue.operational_request_id)
+		self.assertEqual(issue.operational_request.title, issue.title)
+		self.assertEqual(issue.operational_request.tenant_id, issue.tenant_id)
+		self.assertTrue(WorkOrder.objects.filter(request=issue.operational_request).exists())
 
 	def test_tenant_issue_is_created_on_their_active_lease_unit(self):
 		self.lease.status = Lease.Status.ACTIVE
@@ -95,6 +99,27 @@ class MaintenanceIssueApiTests(TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 		self.assertEqual(response.data['unit'], self.unit.pk)
+
+	def test_linked_maintenance_cannot_reopen_after_resolution(self):
+		self.lease.status = Lease.Status.ACTIVE
+		self.lease.start_date = timezone.localdate()
+		self.lease.save(update_fields=('status', 'start_date', 'updated_at'))
+		self.client.force_authenticate(self.tenant_user)
+		created = self.client.post('/api/v1/maintenance/issues/', self.issue_payload(), format='json')
+		self.client.force_authenticate(self.caretaker)
+		resolved = self.client.post(
+			f"/api/v1/maintenance/issues/{created.data['id']}/updates/",
+			{'status': MaintenanceIssue.Status.RESOLVED, 'note': 'Repair verified.'},
+			format='json',
+		)
+		self.assertEqual(resolved.status_code, status.HTTP_201_CREATED)
+		reopened = self.client.post(
+			f"/api/v1/maintenance/issues/{created.data['id']}/updates/",
+			{'status': MaintenanceIssue.Status.IN_PROGRESS},
+			format='json',
+		)
+		self.assertEqual(reopened.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(created.data['operational_request_id'], MaintenanceIssue.objects.get().operational_request_id)
 
 	def test_tenant_can_submit_photos_and_videos_that_are_visible_to_caretaker(self):
 		self.lease.status = Lease.Status.ACTIVE

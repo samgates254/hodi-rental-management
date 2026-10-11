@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import MpesaAttempt
@@ -54,3 +57,29 @@ class MpesaAttemptSerializer(serializers.ModelSerializer):
         if obj.status in (MpesaAttempt.Status.CANCELLED, MpesaAttempt.Status.TIMEOUT):
             return 'M-Pesa did not complete the payment. No payment was recorded.'
         return 'M-Pesa payment attempt is processing.'
+
+
+class MpesaAttemptStatusSerializer(serializers.ModelSerializer):
+    status = serializers.SerializerMethodField()
+    receipt = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MpesaAttempt
+        fields = ('id', 'status', 'amount_cents', 'currency', 'receipt', 'created_at')
+        read_only_fields = fields
+
+    def get_status(self, obj):
+        if obj.status == MpesaAttempt.Status.SUCCESS:
+            return 'SUCCESSFUL'
+        if obj.status in (MpesaAttempt.Status.FAILED, MpesaAttempt.Status.CANCELLED):
+            return 'FAILED'
+        if obj.status == MpesaAttempt.Status.TIMEOUT:
+            return 'EXPIRED'
+        if obj.status in (MpesaAttempt.Status.INITIATED, MpesaAttempt.Status.STK_SENT) and obj.created_at < timezone.now() - timedelta(minutes=2):
+            return 'UNRESOLVED'
+        return 'PENDING'
+
+    def get_receipt(self, obj):
+        if obj.status == MpesaAttempt.Status.SUCCESS:
+            return obj.mpesa_receipt_number
+        return None

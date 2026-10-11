@@ -10,8 +10,16 @@ from rest_framework.response import Response
 from apps.organizations.models import OrganizationMembership
 from apps.leases.models import Lease
 from apps.tenants.models import Tenant
+from application.services.maintenance import create_request
 
-from .models import MaintenanceIssue, MaintenanceIssueAttachment, MaintenanceIssueUpdate
+from .models import (
+	MaintenanceComment,
+	MaintenanceIssue,
+	MaintenanceIssueAttachment,
+	MaintenanceIssueUpdate,
+	MaintenanceRequest,
+	WorkOrder,
+)
 from .serializers import (
 	MaintenanceIssueCreateSerializer,
 	MaintenanceIssueSerializer,
@@ -102,6 +110,18 @@ class MaintenanceIssueViewSet(
 		serializer.is_valid(raise_exception=True)
 		issue = serializer.save(tenant=tenant)
 		MaintenanceIssueUpdate.objects.create(issue=issue, author=request.user, status=issue.status, note='Issue created')
+		hazard = {
+			MaintenanceIssue.Priority.LOW: 1,
+			MaintenanceIssue.Priority.NORMAL: 3,
+			MaintenanceIssue.Priority.HIGH: 4,
+			MaintenanceIssue.Priority.URGENT: 5,
+		}[issue.priority]
+		operational_request = create_request(
+			unit=issue.unit, tenant=tenant, title=issue.title, description=issue.description,
+			hazard=hazard, actor=request.user, request=request,
+		)
+		issue.operational_request = operational_request
+		issue.save(update_fields=('operational_request', 'updated_at'))
 		return Response(
 			MaintenanceIssueSerializer(issue, context=self.get_serializer_context()).data,
 			status=status.HTTP_201_CREATED,
@@ -125,6 +145,22 @@ class MaintenanceIssueViewSet(
 				raise PermissionDenied('Tenants can add notes but cannot change issue status.')
 		else:
 			self.ensure_staff_access(issue.organization_id)
+		operational_request = None
+		if issue.operational_request_id:
+			operational_request = MaintenanceRequest.objects.select_for_update().get(pk=issue.operational_request_id)
+			if new_status == MaintenanceIssue.Status.OPEN and operational_request.status != MaintenanceRequest.Status.OPEN:
+				raise serializers.ValidationError({'status': 'A maintenance request cannot move back to open.'})
+			if new_status == MaintenanceIssue.Status.IN_PROGRESS and operational_request.status in (
+				MaintenanceRequest.Status.COMPLETED,
+				MaintenanceRequest.Status.CLOSED,
+				MaintenanceRequest.Status.CANCELLED,
+			):
+				raise serializers.ValidationError({'status': 'A finished maintenance request cannot be reopened.'})
+			if new_status == MaintenanceIssue.Status.RESOLVED and operational_request.status in (
+				MaintenanceRequest.Status.CLOSED,
+				MaintenanceRequest.Status.CANCELLED,
+			):
+				raise serializers.ValidationError({'status': 'A closed or cancelled maintenance request cannot be resolved again.'})
 
 		if new_status is not None:
 			issue.status = new_status
@@ -139,6 +175,20 @@ class MaintenanceIssueViewSet(
 			status=new_status,
 			note=note,
 		)
+		if operational_request is not None:
+			if new_status == MaintenanceIssue.Status.IN_PROGRESS:
+				operational_request.status = MaintenanceRequest.Status.IN_PROGRESS
+				operational_request.save(update_fields=('status', 'updated_at'))
+				WorkOrder.objects.filter(request=operational_request).update(status=WorkOrder.Status.IN_PROGRESS)
+			elif new_status == MaintenanceIssue.Status.RESOLVED:
+				operational_request.status = MaintenanceRequest.Status.COMPLETED
+				operational_request.completed_at = timezone.now()
+				operational_request.save(update_fields=('status', 'completed_at', 'updated_at'))
+				WorkOrder.objects.filter(request=operational_request).update(
+					status=WorkOrder.Status.COMPLETED, completed_at=operational_request.completed_at,
+				)
+			if note:
+				MaintenanceComment.objects.create(request=operational_request, author=request.user, body=note)
 		return Response(
 			MaintenanceIssueUpdateSerializer(update).data,
 			status=status.HTTP_201_CREATED,

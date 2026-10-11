@@ -117,6 +117,7 @@ class InvoiceViewSet(
             due_date=serializer.validated_data['due_date'],
             notes=serializer.validated_data.get('notes', ''),
             include_rent=serializer.validated_data.get('include_rent'),
+            generation_key=serializer.validated_data.get('generation_key', ''),
             actor=request.user,
             request=request,
         )

@@ -21,6 +21,8 @@ Authentication: DRF token. The payer is the active `Tenant` linked to the signed
 
 `202 Accepted` with `status: STK_SENT` means Daraja accepted the prompt. `payment_settled: false`. The tenant has not paid yet.
 
+`GET /api/v1/billing/mpesa/attempts/<uuid>/` returns only an attempt linked to the authenticated tenant. Its stable public status is `PENDING`, `SUCCESSFUL`, `FAILED`, `EXPIRED`, or `UNRESOLVED`; provider references and phone numbers are not returned. An old initiated/STK-sent attempt is `UNRESOLVED`, not presumed successful or failed.
+
 ## Callback
 
 `POST /api/v1/billing/mpesa/callback/`
@@ -30,7 +32,15 @@ Authentication: DRF token. The payer is the active `Tenant` linked to the signed
 Daraja callbacks are **not signed**. HODI does not pretend they are. Gate:
 
 1. HTTPS `MPESA_CALLBACK_URL` (the URL configured on the STK request).
-2. Optional `MPESA_CALLBACK_AUTH_TOKEN`. When set, the request must use the path token or header `X-Hodi-Mpesa-Callback-Secret`. Put the token in the path of `MPESA_CALLBACK_URL`, not the query string. Safaricom cannot send custom headers.
+2. Required `MPESA_CALLBACK_AUTH_TOKEN`. The callback path must contain this bearer token because Safaricom does not send HODI custom headers. The optional header is supported for controlled provider proxies. The token limits unsolicited callback traffic; it is not a cryptographic signature or proof that the request came from Safaricom. Production settings and callback handling fail closed when it is absent.
+
+For every terminal callback, HODI queries Daraja STK Query using the stored checkout reference and requires both stored request references to match. `ResponseCode` is treated as query-operation acceptance; only a present `ResultCode` tied to the same checkout and merchant references is treated as the transaction outcome. A callback/query outcome conflict, timeout, missing field, or mismatched reference leaves the attempt open and records a discrepancy. A query-confirmed failure may close the attempt; a query-confirmed success is settled only when the callback supplies valid amount, phone, date, and receipt metadata. STK Query does not provide HODI's receipt metadata, so reconciliation never fabricates a payment or receipt.
+
+The callback token is a bearer credential used to limit unsolicited requests, not proof of sender identity. It remains in the URL path because Daraja does not send custom headers. Rotate it by generating a new high-entropy token, updating `MPESA_CALLBACK_AUTH_TOKEN` and the HTTPS callback path together, updating the callback URL in the Daraja application, and deploying the matching configuration. Treat the old token as compromised if it may have been logged. The repository has no reverse-proxy or access-log configuration: deployment owners must redact the callback path segment from proxy access logs, APM traces, exception reports and support tooling. Do not log callback request paths in application messages.
+
+### Reconciliation command
+
+Schedule `python manage.py reconcile_mpesa_attempts` from the backend project at a modest interval (for example every 5 minutes). The command queries only stale, open attempts with stored provider references, processes at most 100 per run, and uses exponential retry spacing with a maximum of five queries. Preview eligibility with `python manage.py reconcile_mpesa_attempts --dry-run`. The command never settles a successful query result because STK Query does not return the M-Pesa receipt needed by HODI's payment identity; it marks that attempt `SUCCESS_NEEDS_RECEIPT`. Review unresolved/exhausted attempts with `python manage.py reconcile_mpesa_attempts --review-required`, then compare the checkout with the Daraja portal/account statement and record any controlled correction through the approved accounting process. Do not manually edit payment rows.
 
 The attempt identified by `CheckoutRequestID` is the source of truth for organization, tenant, amount, phone, and invoice. Callback body fields named `tenant` / `organization` are ignored.
 
@@ -62,7 +72,7 @@ Failure of those checks records the attempt as `FAILED` and creates no `Payment`
 
 ### Unknown checkout
 
-If Daraja accepted STK and HODI crashed before saving `checkout_request_id`, the callback will not match. HODI acknowledges the callback, writes `mpesa.stk.unmatched` audit, and **does not** create a `Payment`. Recovery via STK Query is a later phase.
+If Daraja accepted STK and HODI crashed before saving `checkout_request_id`, the callback will not match. HODI acknowledges the callback, writes `mpesa.stk.unmatched` audit, and **does not** create a `Payment`. The attempt requires operator review; it cannot be queried by checkout until the missing provider reference is recovered from authoritative records.
 
 ### Settlement
 
@@ -89,7 +99,7 @@ Duplicate callbacks (same checkout or same receipt) produce no additional `Payme
 | `MPESA_SHORTCODE` | empty | Paybill / business shortcode. |
 | `MPESA_PASSKEY` | empty | STK Lipa Na M-Pesa passkey. |
 | `MPESA_CALLBACK_URL` | empty | HTTPS URL Daraja calls. Include the auth token in the path when used. |
-| `MPESA_CALLBACK_AUTH_TOKEN` | empty | Optional shared secret for the callback path/header. |
+| `MPESA_CALLBACK_AUTH_TOKEN` | empty in development; required in production | Random callback bearer token, at least 32 characters in production. |
 | `MPESA_TIMEOUT_SECONDS` | `30` | HTTP timeout. |
 | `MPESA_TRANSACTION_TYPE` | `CustomerPayBillOnline` | STK `TransactionType`. |
 
@@ -113,10 +123,9 @@ Duplicate callbacks (same checkout or same receipt) produce no additional `Payme
 
 ## Not implemented yet
 
-- STK Query (needed to recover unmatched callbacks)
+- Automatic ledger settlement for query-confirmed success without callback receipt metadata
 - Transaction Status API
 - Paystack
-- Frontend Pay Rent UI
 - Production deployment and live credentials
 
 ## Tests

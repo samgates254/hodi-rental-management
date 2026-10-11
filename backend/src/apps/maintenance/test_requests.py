@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 from apps.accounts.models import AccountProfile
 from apps.audit.models import AuditLog
 from apps.leases.models import Lease
-from apps.maintenance.models import MaintenanceRequest, TechnicianProfile
+from apps.maintenance.models import MaintenanceIssue, MaintenanceRequest, TechnicianProfile, WorkOrder
 from apps.notifications.models import Notification
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
@@ -85,6 +85,9 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(created.data['unit'], self.unit.pk)
         self.assertEqual(created.data['status'], 'OPEN')
         request_id = created.data['id']
+        legacy_issue = MaintenanceIssue.objects.get(operational_request_id=request_id)
+        self.assertEqual(legacy_issue.tenant_id, self.tenant.pk)
+        self.assertTrue(WorkOrder.objects.filter(request_id=request_id).exists())
 
         self.client.force_authenticate(self.accountant)
         denied = self.client.get('/api/v1/maintenance/requests/')
@@ -101,6 +104,8 @@ class MaintenanceRequestApiTests(APITestCase):
         }, format='json')
         self.assertEqual(assigned.status_code, status.HTTP_200_OK)
         self.assertEqual(assigned.data['status'], 'IN_PROGRESS')
+        legacy_issue.refresh_from_db()
+        self.assertEqual(legacy_issue.status, MaintenanceIssue.Status.IN_PROGRESS)
         self.assertEqual(assigned.data['work_order']['assignee'], self.technician.pk)
         self.assertTrue(Notification.objects.filter(user=self.technician, type='MAINTENANCE_ASSIGNED').exists())
 
@@ -110,6 +115,8 @@ class MaintenanceRequestApiTests(APITestCase):
         completed = self.client.post(f'/api/v1/maintenance/requests/{request_id}/complete/', {}, format='json')
         self.assertEqual(completed.status_code, status.HTTP_200_OK)
         self.assertEqual(completed.data['status'], 'COMPLETED')
+        legacy_issue.refresh_from_db()
+        self.assertEqual(legacy_issue.status, MaintenanceIssue.Status.RESOLVED)
         edited = self.client.patch(
             f'/api/v1/maintenance/requests/{request_id}/',
             {'title': 'Changed'},
@@ -145,3 +152,77 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['assignments'][0]['technician_id'], str(self.technician.pk))
         self.assertEqual(response.data['unmatched_job_ids'], [])
+
+    def test_match_preview_excludes_unverified_and_profileless_technicians(self):
+        unverified = get_user_model().objects.create_user(username='unverified-tech', password='password')
+        OrganizationMembership.objects.create(
+            organization=self.organization, user=unverified, role=OrganizationMembership.Role.TECHNICIAN,
+        )
+        TechnicianProfile.objects.create(
+            user=unverified, trade='PLUMBER', skills=['PLUMBER'], verified=False, available=True,
+            rating_milli=5000, acceptance_milli=1000,
+        )
+        profileless = get_user_model().objects.create_user(username='profileless-tech', password='password')
+        OrganizationMembership.objects.create(
+            organization=self.organization, user=profileless, role=OrganizationMembership.Role.TECHNICIAN,
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.post('/api/v1/maintenance/match/', {
+            'organization': self.organization.pk,
+            'jobs': [{'job_id': 'qualified-job', 'required_skills': ['PLUMBER'], 'distance_m': 100}],
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['assignments'][0]['technician_id'], str(self.technician.pk))
+
+    def test_unverified_technician_cannot_be_assigned(self):
+        self.client.force_authenticate(self.tenant_user)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'title': 'Electrical fault', 'description': 'No lights', 'hazard': 2,
+        }, format='json')
+        profile = TechnicianProfile.objects.get(user=self.technician)
+        profile.verified = False
+        profile.save(update_fields=('verified', 'updated_at'))
+        self.client.force_authenticate(self.caretaker)
+        response = self.client.post(
+            f"/api/v1/maintenance/requests/{created.data['id']}/assign/",
+            {'user_id': self.technician.pk}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(WorkOrder.objects.get(request_id=created.data['id']).status, WorkOrder.Status.PENDING)
+
+    def test_edit_updates_linked_legacy_issue_and_records_history(self):
+        self.client.force_authenticate(self.tenant_user)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'title': 'Leaking tap', 'description': 'Kitchen sink leak', 'hazard': 2,
+        }, format='json')
+        request_id = created.data['id']
+        issue = MaintenanceIssue.objects.get(operational_request_id=request_id)
+        self.client.force_authenticate(self.caretaker)
+        updated = self.client.patch(f'/api/v1/maintenance/requests/{request_id}/', {
+            'title': 'Urgent kitchen leak', 'description': 'Water is reaching the cabinet.', 'hazard': 4,
+        }, format='json')
+        self.assertEqual(updated.status_code, status.HTTP_200_OK)
+        issue.refresh_from_db()
+        self.assertEqual(issue.title, updated.data['title'])
+        self.assertEqual(issue.description, updated.data['description'])
+        self.assertEqual(issue.priority, MaintenanceIssue.Priority.HIGH)
+        self.assertTrue(issue.updates.filter(note__startswith='Request details updated:').exists())
+        self.assertTrue(AuditLog.objects.filter(
+            action='maintenance.update', object_id=str(request_id),
+        ).exists())
+
+    def test_edit_does_not_rewrite_unlinked_historical_issue(self):
+        self.client.force_authenticate(self.tenant_user)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'title': 'Old wiring', 'description': 'Switch sparks', 'hazard': 3,
+        }, format='json')
+        issue = MaintenanceIssue.objects.get(operational_request_id=created.data['id'])
+        issue.operational_request = None
+        issue.save(update_fields=('operational_request', 'updated_at'))
+        self.client.force_authenticate(self.caretaker)
+        updated = self.client.patch(f"/api/v1/maintenance/requests/{created.data['id']}/", {
+            'title': 'Repaired wiring note',
+        }, format='json')
+        self.assertEqual(updated.status_code, status.HTTP_200_OK)
+        issue.refresh_from_db()
+        self.assertEqual(issue.title, 'Old wiring')

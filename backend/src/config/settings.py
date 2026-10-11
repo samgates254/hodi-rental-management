@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
@@ -231,6 +232,12 @@ MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', '').strip()
 if MPESA_CALLBACK_URL and not MPESA_CALLBACK_URL.lower().startswith('https://'):
     raise ImproperlyConfigured('MPESA_CALLBACK_URL must use HTTPS.')
 MPESA_CALLBACK_AUTH_TOKEN = os.environ.get('MPESA_CALLBACK_AUTH_TOKEN', '').strip()
+if DJANGO_ENV == 'production' and len(MPESA_CALLBACK_AUTH_TOKEN) < 32:
+    raise ImproperlyConfigured('MPESA_CALLBACK_AUTH_TOKEN must be configured with at least 32 characters in production.')
+if DJANGO_ENV == 'production' and (
+    not MPESA_CALLBACK_URL or MPESA_CALLBACK_AUTH_TOKEN not in urlsplit(MPESA_CALLBACK_URL).path.split('/')
+):
+    raise ImproperlyConfigured('MPESA_CALLBACK_URL must include MPESA_CALLBACK_AUTH_TOKEN as a path segment in production.')
 try:
     MPESA_TIMEOUT_SECONDS = int(os.environ.get('MPESA_TIMEOUT_SECONDS', '30'))
 except ValueError as error:

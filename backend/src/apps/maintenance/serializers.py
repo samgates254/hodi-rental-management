@@ -44,12 +44,13 @@ class MaintenanceIssueSerializer(serializers.ModelSerializer):
 	unit_name = serializers.CharField(source='unit.name', read_only=True)
 	property_name = serializers.CharField(source='unit.building.property.name', read_only=True)
 	organization = serializers.IntegerField(source='tenant.organization_id', read_only=True)
+	operational_request_id = serializers.IntegerField(read_only=True, allow_null=True)
 
 	class Meta:
 		model = MaintenanceIssue
 		fields = (
 			'id', 'organization', 'tenant', 'tenant_name', 'unit', 'unit_name',
-			'property_name', 'title',
+			'property_name', 'operational_request_id', 'title',
 			'category', 'priority', 'description', 'status', 'resolved_at',
 			'created_at', 'updated_at', 'updates', 'attachments',
 		)

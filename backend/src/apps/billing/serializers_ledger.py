@@ -54,6 +54,7 @@ class InvoiceWriteSerializer(serializers.Serializer):
     due_date = serializers.DateField()
     notes = serializers.CharField(required=False, allow_blank=True)
     include_rent = serializers.BooleanField(required=False)
+    generation_key = serializers.CharField(required=False, allow_blank=False, max_length=160)
 
 
 class InvoiceUpdateSerializer(serializers.Serializer):
