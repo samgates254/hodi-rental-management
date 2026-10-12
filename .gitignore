@@ -4,6 +4,7 @@ __pycache__/
 backend/db.sqlite3
 backend/.env
 /staticfiles/
+/backend/staticfiles/
 .pytest_cache/
 .coverage
 
