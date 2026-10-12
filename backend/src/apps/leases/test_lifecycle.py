@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -80,3 +81,64 @@ class LeaseLifecycleTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.unit.refresh_from_db()
         self.assertEqual(self.unit.status, Unit.Status.AVAILABLE)
+
+    def test_create_cannot_activate_lease_outside_lifecycle_action(self):
+        response = self.client.post(
+            reverse('leases:lease-list'),
+            {
+                'tenant': self.tenant.pk,
+                'unit': self.unit.pk,
+                'reference': 'L-2',
+                'start_date': '2026-02-01',
+                'monthly_rent_minor': 100000,
+                'status': Lease.Status.ACTIVE,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('status', response.data)
+        self.assertFalse(Lease.objects.filter(reference='L-2').exists())
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.status, Unit.Status.AVAILABLE)
+        self.assertFalse(AuditLog.objects.filter(action='lease.activate').exists())
+
+    def test_patch_cannot_activate_terminate_or_expire_lease(self):
+        detail_url = reverse('leases:lease-detail', args=(self.lease.pk,))
+        activation = self.client.patch(
+            detail_url, {'status': Lease.Status.ACTIVE}, format='json',
+        )
+        self.assertEqual(activation.status_code, status.HTTP_400_BAD_REQUEST)
+        self.lease.refresh_from_db()
+        self.assertEqual(self.lease.status, Lease.Status.DRAFT)
+
+        activated = self.client.post(f'/api/v1/leases/{self.lease.pk}/activate/')
+        self.assertEqual(activated.status_code, status.HTTP_200_OK)
+        for requested_status in (Lease.Status.TERMINATED, Lease.Status.EXPIRED):
+            with self.subTest(requested_status=requested_status):
+                response = self.client.patch(
+                    detail_url, {'status': requested_status}, format='json',
+                )
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.lease.refresh_from_db()
+                self.assertEqual(self.lease.status, Lease.Status.ACTIVE)
+
+    def test_create_explicit_draft_and_lifecycle_activation_work(self):
+        second_unit = Unit.objects.create(building=self.unit.building, name='A-2')
+        response = self.client.post(
+            reverse('leases:lease-list'),
+            {
+                'tenant': self.tenant.pk,
+                'unit': second_unit.pk,
+                'reference': 'L-2',
+                'start_date': '2026-02-01',
+                'monthly_rent_minor': 100000,
+                'status': Lease.Status.DRAFT,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        lease_id = response.data['id']
+        activated = self.client.post(f'/api/v1/leases/{lease_id}/activate/')
+        self.assertEqual(activated.status_code, status.HTTP_200_OK)
+        self.assertEqual(activated.data['status'], Lease.Status.ACTIVE)

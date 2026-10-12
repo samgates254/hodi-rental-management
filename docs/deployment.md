@@ -22,7 +22,11 @@ The pre-deploy command runs against the connected database before the new instan
 
 Create a Render PostgreSQL database in the API service's region. Link its **internal connection string** to the web service as `DATABASE_URL` using Render's database environment-variable integration; do not paste or print the URL in source control, logs, or this document. The app uses `dj-database-url` with a 600-second persistent connection age and connection health checks when `DATABASE_URL` is present.
 
-If `DATABASE_URL` is absent, local configuration remains unchanged: `DB_ENGINE`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT` form the fallback, with SQLite as the default for local development and tests. On Render, configure `DATABASE_URL` and use PostgreSQL; do not use SQLite for deployed customer data.
+Production settings explicitly reject any configured database backend other than Django's PostgreSQL backend. This also rejects production startup when `DATABASE_URL` is absent and the fallback would select SQLite. The `DB_ENGINE`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT` fallback remains available; it can be used with a PostgreSQL `DB_ENGINE` where an operator-managed connection is appropriate. SQLite remains the default for local development and tests only. For Render, configure the linked PostgreSQL `DATABASE_URL`.
+
+Before switching production traffic to a release, provision the PostgreSQL database, configure a reachable PostgreSQL connection and credentials, and run the reviewed migrations against that database from the pre-deploy step. Confirm the API health check returns HTTP 200 before routing customer traffic. Do not use SQLite as a production fallback.
+
+The compatible `/api/v1/health/` endpoint checks database connectivity with Django's connection API. HTTP 200 with `{"status":"ok"}` means the application can connect to its database. HTTP 503 with a generic database-unavailable response means the application answered the health request but its database connection check failed; inspect application startup and database-provider availability through secured operator tooling. A timeout, connection refusal, or proxy error means the application did not return a health response and should be investigated as an application startup, process, or routing failure. The response intentionally contains no exception, SQL, URL, or credential details.
 
 ### Required API environment variables
 
@@ -70,7 +74,7 @@ The following settings have safe code defaults but should be explicitly reviewed
 | `EMAIL_VERIFICATION_TOKEN_MAX_AGE` | `86400` seconds. |
 | `PASSWORD_RESET_TIMEOUT` | `3600` seconds. |
 
-Production settings require a callback URL and long callback token even while the environment is sandbox. The provider consumer credentials, shortcode, and passkey can remain empty; the M-Pesa initiation flow then fails closed. Do not initiate payments during deployment checks. The callback token is a bearer value in a URL path, not proof of callback origin; redact that path from logs and do not enable a live integration until callback routing, verification, and log handling have been checked. See [Daraja deployment guidance](./payments/daraja-sandbox-setup.md) and the [M-Pesa API contract](./api/mpesa.md).
+Production settings require a callback URL and long callback token even while the environment is sandbox. The provider consumer credentials, shortcode, and passkey can remain empty; the M-Pesa initiation flow then fails closed. Do not initiate payments during deployment checks. Application callback logs avoid request paths and callback contents. The configured Gunicorn command does not enable its access log, but hosting/platform request logs are outside this repository and have not been checked; the token in the callback path may still be recorded there. Verify platform log redaction before enabling live integration. See [Daraja deployment guidance](./payments/daraja-sandbox-setup.md) and the [M-Pesa API contract](./api/mpesa.md).
 
 ## Database migration and recovery
 
@@ -100,10 +104,12 @@ Set `API_PROXY_TARGET` as a **build-time** environment variable to the deployed 
 
 ## First-deploy checks
 
-1. Confirm the API health check returns HTTP 200 at `https://<api-service>.onrender.com/api/v1/health/`.
+1. After PostgreSQL is provisioned and migrations complete, confirm the API health check returns HTTP 200 at `https://<api-service>.onrender.com/api/v1/health/` before switching traffic.
 2. Confirm the frontend's `/pricing` page can load the public plans through its configured API route.
 3. Confirm `/static/` assets load and admin styles render after `collectstatic`.
 4. Check Django logs for configuration errors without printing environment values or secret-bearing URLs.
 5. Verify HTTPS redirects, secure cookies, HSTS, trusted hosts, CSRF and CORS with the actual Render domains.
 6. Confirm database backups and media persistence before onboarding customers.
 7. Keep M-Pesa sandbox-only until the live Safaricom application, credentials, callback verification, token handling and redacted logging have each been independently approved.
+
+These instructions document deployment requirements; they do not mean production hosting, backup restoration, or live external connectivity has been tested.

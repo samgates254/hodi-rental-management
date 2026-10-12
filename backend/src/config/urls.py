@@ -1,9 +1,19 @@
 from django.contrib import admin
+from django.db import connection
 from django.http import JsonResponse
 from django.urls import include, path
 
 
 def health_check(request):
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+    except Exception:
+        return JsonResponse(
+            {'status': 'error', 'database': 'unavailable'},
+            status=503,
+        )
     return JsonResponse({'status': 'ok'})
 
 
@@ -21,4 +31,5 @@ urlpatterns = [
     path('api/v1/audit/', include('apps.audit.urls')),
     path('api/v1/marketplace/', include('apps.marketplace.urls')),
     path('api/v1/subscriptions/', include('apps.subscriptions.urls')),
+    path('api/v1/utilities/', include('apps.utilities.urls')),
 ]

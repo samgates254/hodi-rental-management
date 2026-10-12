@@ -1083,6 +1083,20 @@
   white-space: nowrap;
 }
 
+.portal-payment-status.is-reversed {
+  background: var(--hodi-warning-soft);
+  color: var(--hodi-warning);
+}
+
+.portal-reversal-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--portal-muted);
+  font-size: 10px;
+  max-width: 220px;
+  white-space: normal;
+}
+
 .status-paid,
 .status-completed,
 .is-success {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
@@ -130,13 +131,13 @@ export function Header() {
             </a>
           ))}
           <div className="mt-3 flex flex-col gap-2 border-t border-border pt-4">
-            <a
+            <Link
               href="/#final-cta"
               onClick={close}
               className="inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface text-sm font-medium text-charcoal"
             >
               Log in
-            </a>
+            </Link>
             <a
               href={demoMailto}
               onClick={close}

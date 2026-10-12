@@ -9,13 +9,17 @@ import {
 } from "react";
 import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
+import { PropertyBanner } from "@/components/ui/PropertyBanner";
 import AuditLogPanel from "@/components/ops/AuditLogPanel";
 import BillingWorkspace from "@/components/ops/BillingWorkspace";
 import MaintenanceRequestsPanel from "@/components/ops/MaintenanceRequestsPanel";
 import MarketplaceManager from "@/components/marketplace/MarketplaceManager";
+import CommerceWorkspace from "@/components/marketplace/CommerceWorkspace";
 import NotificationBell from "@/components/ops/NotificationBell";
 import SubscriptionPanel from "@/components/SubscriptionPanel";
+import UtilitiesWorkspace from "@/components/utilities/UtilitiesWorkspace";
 import ThemeToggle from "@/components/theme/ThemeToggle";
+import { AUTH_API_PATHS } from "@/lib/clientApi";
 import { ORGANIZATION_STAFF_ROLES, staffLoginKindForRole } from "@/lib/organizationRoles";
 import "./landlord-dashboard.css";
 import "@/components/ops/ops.css";
@@ -383,6 +387,7 @@ function LoginForm({
 export default function LandlordDashboard() {
   const [token, setToken] = useState("");
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
+  const [hasLoadedDashboard, setHasLoadedDashboard] = useState(false);
   const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -427,6 +432,7 @@ export default function LandlordDashboard() {
         leases: listFromResponse(leases),
       };
       setData(nextData);
+      setHasLoadedDashboard(true);
       setSelectedOrganizationId(current =>
         nextData.organizations.some(org => String(org.id) === current)
           ? current
@@ -448,13 +454,17 @@ export default function LandlordDashboard() {
     if (new URLSearchParams(window.location.search).get("preview") === "1") {
       setPreviewMode(true);
       setData(PREVIEW_DATA);
+      setHasLoadedDashboard(true);
       setMemberships([{ organization_id: 1, organization_name: "Hodi Demo Properties", role: "OWNER" }]);
       setSelectedOrganizationId(String(PREVIEW_DATA.organizations[0].id));
       setToken("preview");
       return;
     }
     const savedToken = sessionStorage.getItem(TOKEN_KEY);
-    if (!savedToken) return;
+    if (!savedToken) {
+      window.location.replace("/signin?type=landlord");
+      return;
+    }
     setAccountType(sessionStorage.getItem("hodi_account_type") ?? "");
     try {
       const savedMemberships: unknown = JSON.parse(sessionStorage.getItem("hodi_memberships") ?? "[]");
@@ -476,6 +486,7 @@ export default function LandlordDashboard() {
   const canManageTeam = isOwner;
   const canWritePortfolio = isOwner || isManager;
   const canReadBilling = isOwner || isManager || isAccountant;
+  const canReadUtilities = isOwner || isManager || isAccountant;
   const canWriteLedger = (isOwner || isAccountant) && !previewMode;
   const canWriteRentLog = (isOwner || isManager || isAccountant) && !previewMode;
   const canMaintenance = isOwner || isManager;
@@ -559,7 +570,7 @@ export default function LandlordDashboard() {
         token: string;
         account_type?: string;
         memberships?: OrganizationMembership[];
-      }>("/accounts/login/", undefined, {
+      }>(AUTH_API_PATHS.login, undefined, {
         method: "POST",
         body: JSON.stringify({ username, password }),
       });
@@ -827,6 +838,22 @@ export default function LandlordDashboard() {
     }
   }
 
+  async function inviteAccountant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!organization) return;
+    const email = String(new FormData(event.currentTarget).get("accountant_email") ?? "").trim();
+    setIsSaving(true); setTeamError("");
+    try {
+      await apiRequest("/organizations/accountant-invitations/", token, {
+        method: "POST", body: JSON.stringify({ organization: organization.id, email }),
+      });
+      event.currentTarget.reset();
+      setNotice(`Accountant invitation sent to ${email}. They can accept it in the Accountant workspace.`);
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "The accountant invitation could not be sent.");
+    } finally { setIsSaving(false); }
+  }
+
   useEffect(() => {
     if (!notice) return;
     const timeout = window.setTimeout(() => setNotice(""), 4000);
@@ -856,8 +883,10 @@ export default function LandlordDashboard() {
           {showPortfolio && <a href="#leases"><Icon name="lease" />Leases</a>}
           {canWritePortfolio && <a href="#marketplace"><Icon name="building" />Listings</a>}
           <Link href="/marketplace">Marketplace</Link>
+          {canManageTeam && <Link href="/accountants">Accountants</Link>}
           {canReadBilling && <a href="#billing"><Icon name="lease" />Billing</a>}
           {canReadBilling && <a href="#subscription"><Icon name="lease" />Subscription</a>}
+          {canReadUtilities && <a href="#utilities"><Icon name="building" />Utilities</a>}
           {canMaintenance && <a href="#maintenance-requests"><Icon name="building" />Maintenance</a>}
           {canManageTeam && <a href="#team"><Icon name="people" />Team</a>}
           {canAudit && !previewMode && <a href="#audit"><Icon name="overview" />Audit</a>}
@@ -947,18 +976,30 @@ export default function LandlordDashboard() {
           </section>
         ) : (
           <>
-            <section id="overview" className="landlord-welcome">
-              <div>
-                <p className="landlord-eyebrow">{isAccountant ? "ACCOUNTS" : "YOUR PORTFOLIO"}</p>
-                <h2>{isAccountant ? "Billing workspace" : "Property overview"}</h2>
-                <p>{isAccountant
-                  ? "Invoices, the rent log, ledger allocation, delinquency, and the audit trail for this organization."
-                  : "A clear view of your properties, homes, tenants, and active leases."}</p>
+            {isAccountant ? (
+              <section id="overview" className="landlord-welcome">
+                <div>
+                  <p className="landlord-eyebrow">ACCOUNTS</p>
+                  <h2>Billing workspace</h2>
+                  <p>Invoices, the rent log, ledger allocation, delinquency, and the audit trail for this organization.</p>
+                </div>
+                {isLoading && <span className="landlord-loading-label">Syncing with Hodi…</span>}
+              </section>
+            ) : (
+              <div id="overview" className="landlord-overview-banner-wrap">
+                <PropertyBanner
+                  eyebrow="Your portfolio"
+                  title="A clear view of the places you manage."
+                  description="Properties, homes, tenants and active leases, held together in one operating space."
+                  imageSrc="/images/hodi/apartment-building.jpg"
+                  imageSizes="(max-width: 900px) 100vw, 75vw"
+                  className="landlord-overview-banner"
+                />
+                {isLoading && <span className="landlord-banner-sync" role="status">Syncing with HODI…</span>}
               </div>
-              {isLoading && <span className="landlord-loading-label">Syncing with Hodi…</span>}
-            </section>
+            )}
 
-            {showPortfolio && <section className="landlord-metrics" aria-label="Portfolio summary">
+            {showPortfolio && hasLoadedDashboard && <section className="landlord-metrics" aria-label="Portfolio summary" aria-busy={isLoading}>
               <article className="landlord-metric-card">
                 <span>Properties</span>
                 <strong>{organizationData.properties.length}</strong>
@@ -980,6 +1021,11 @@ export default function LandlordDashboard() {
                 <small>{activeLeases.length} active lease{activeLeases.length === 1 ? "" : "s"}</small>
               </article>
             </section>}
+            {showPortfolio && isLoading && !hasLoadedDashboard && (
+              <section className="landlord-metrics landlord-metrics--loading" aria-label="Loading portfolio summary" aria-busy="true">
+                {Array.from({ length: 4 }, (_, index) => <div className="landlord-metric-skeleton" key={index} aria-hidden="true" />)}
+              </section>
+            )}
 
             {showPortfolio && <>
             <section id="properties" className="landlord-section">
@@ -1096,6 +1142,12 @@ export default function LandlordDashboard() {
                 )}
               </div>
               {teamError && <div className="landlord-alert" role="alert">{teamError}</div>}
+              {!previewMode && <form className="landlord-inline-form" onSubmit={inviteAccountant}>
+                <h3>Invite an accountant</h3>
+                <p className="landlord-form-note">The invited user must sign in to accept access to this organisation.</p>
+                <div className="landlord-form-grid"><label>Account email<input name="accountant_email" required type="email" autoComplete="email" /></label></div>
+                <div className="landlord-form-actions"><button className="landlord-button landlord-button--primary" disabled={isSaving}>{isSaving ? "Sending…" : "Send invitation"}</button><Link className="landlord-button landlord-button--quiet" href="/accountants">Accountant workspace</Link></div>
+              </form>}
               {teamFormOpen && !previewMode && (
                 <form className="landlord-inline-form" onSubmit={createTeamMember}>
                   <h3>Add an organization team member</h3>
@@ -1110,7 +1162,7 @@ export default function LandlordDashboard() {
                     <label>Phone number <span className="landlord-optional">(optional)</span><input name="phone_number" type="tel" maxLength={30} autoComplete="tel" /></label>
                     <label>Role
                       <select name="role" defaultValue="CARETAKER">
-                        {ORGANIZATION_STAFF_ROLES.map(item => (
+                        {ORGANIZATION_STAFF_ROLES.filter(item => item.value !== "ACCOUNTANT").map(item => (
                           <option key={item.value} value={item.value}>{item.label}</option>
                         ))}
                       </select>
@@ -1127,7 +1179,7 @@ export default function LandlordDashboard() {
               {isLoadingTeam ? (
                 <div className="landlord-empty-state">Loading team members…</div>
               ) : teamMembers.length ? (
-                <div className="landlord-table-wrap">
+                <div className="landlord-table-wrap" role="region" aria-label="Organization team" tabIndex={0}>
                   <table className="landlord-table">
                     <thead><tr><th>Team member</th><th>Login</th><th>Role</th><th>Status</th></tr></thead>
                     <tbody>
@@ -1187,7 +1239,7 @@ export default function LandlordDashboard() {
                 </form>
               )}
               {organizationData.tenants.length ? (
-                <div className="landlord-table-wrap">
+                <div className="landlord-table-wrap" role="region" aria-label="Organization tenants" tabIndex={0}>
                   <table className="landlord-table">
                     <thead><tr><th>Tenant</th><th>Contact</th><th>Lease</th><th>Status</th></tr></thead>
                     <tbody>
@@ -1282,7 +1334,7 @@ export default function LandlordDashboard() {
                 </form>
               )}
               {organizationData.leases.length ? (
-                <div className="landlord-table-wrap">
+                <div className="landlord-table-wrap" role="region" aria-label="Lease records" tabIndex={0}>
                   <table className="landlord-table">
                     <thead><tr><th>Lease</th><th>Tenant</th><th>Unit</th><th>Monthly rent</th><th>Dates</th><th>Status</th>{canWritePortfolio && !previewMode && <th>Actions</th>}</tr></thead>
                     <tbody>
@@ -1388,7 +1440,7 @@ export default function LandlordDashboard() {
                 </form>
               )}
               {organizationData.units.length ? (
-                <div className="landlord-table-wrap">
+                <div className="landlord-table-wrap" role="region" aria-label="Unit records" tabIndex={0}>
                   <table className="landlord-table">
                     <thead><tr><th>Unit</th><th>Property / building</th><th>Bedrooms</th><th>Rent status</th><th>Availability</th></tr></thead>
                     <tbody>
@@ -1425,6 +1477,7 @@ export default function LandlordDashboard() {
                 properties={organizationData.properties}
               />
             )}
+            {canWritePortfolio && !previewMode && <CommerceWorkspace key={`commerce-${selectedOrganizationId}`} organizationId={selectedOrganizationId} />}
 
             {canReadBilling && !previewMode && (
               <BillingWorkspace
@@ -1432,6 +1485,16 @@ export default function LandlordDashboard() {
                 organizationId={selectedOrganizationId}
                 canWriteLedger={canWriteLedger}
                 canWriteRentLog={canWriteRentLog}
+              />
+            )}
+            {canReadUtilities && !previewMode && (
+              <UtilitiesWorkspace
+                key={`utilities-${selectedOrganizationId}`}
+                organizationId={selectedOrganizationId}
+                canWrite={canWritePortfolio}
+                properties={organizationData.properties}
+                buildings={organizationData.buildings}
+                units={organizationData.units}
               />
             )}
             {canReadBilling && !previewMode && (

@@ -13,7 +13,7 @@
   --color-text-secondary: var(--hodi-muted);
   --color-border: var(--hodi-border);
   --font-sans: var(--font-dm-sans);
-  --font-display: var(--font-fraunces);
+  --font-display: var(--font-dm-sans);
   --shadow-soft: var(--hodi-shadow);
 }
 
@@ -99,6 +99,25 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  a,
+  button,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:not(:disabled),
+  a {
+    transition-duration: 160ms;
+  }
+
+  input,
+  select,
+  textarea {
+    accent-color: var(--hodi-brand);
+  }
+
   ::selection {
     background: color-mix(in srgb, var(--hodi-brand) 26%, var(--hodi-surface));
     color: var(--hodi-text);
@@ -179,6 +198,16 @@
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
+  .auth-input::placeholder {
+    color: var(--hodi-muted);
+    opacity: 0.82;
+  }
+
+  table th,
+  table td {
+    vertical-align: top;
+  }
+
   .auth-input:focus {
     border-color: var(--hodi-brand);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--hodi-brand) 20%, transparent);
@@ -250,6 +279,419 @@
   @media (prefers-reduced-motion: reduce) {
     .theme-toggle {
       transition: none;
+    }
+  }
+}
+
+@layer components {
+  .hodi-home-hero {
+    position: relative;
+    overflow: hidden;
+    background: var(--hodi-canvas);
+  }
+
+  .hodi-home-hero-inner {
+    display: grid;
+    align-items: center;
+    gap: 2rem;
+    padding-block: 2.5rem 2rem;
+  }
+
+  .hodi-home-hero-copy {
+    position: relative;
+    z-index: 1;
+    max-width: 39rem;
+    padding-block: 1.5rem;
+    animation: hodi-rise-in 520ms cubic-bezier(.2,.7,.2,1) both;
+  }
+
+  .hodi-home-hero-eyebrow,
+  .hodi-property-banner-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: .65rem;
+    margin: 0;
+    color: var(--hodi-brand);
+    font-size: .72rem;
+    font-weight: 750;
+    letter-spacing: .13em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .hodi-home-hero-eyebrow > span {
+    width: 1.5rem;
+    height: 2px;
+    background: var(--hodi-brand);
+  }
+
+  .hodi-home-hero-copy h1 {
+    max-width: 11ch;
+    margin: 1.25rem 0 0;
+    color: var(--hodi-text);
+    font-size: clamp(2.7rem, 5.2vw, 5.15rem);
+    font-weight: 650;
+    letter-spacing: -.065em;
+    line-height: .99;
+    text-wrap: balance;
+  }
+
+  .hodi-home-hero-description {
+    max-width: 34rem;
+    margin: 1.4rem 0 0;
+    color: var(--hodi-muted);
+    font-size: clamp(1rem, 1.35vw, 1.2rem);
+    line-height: 1.7;
+    text-wrap: pretty;
+  }
+
+  .hodi-home-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    margin-top: 1.8rem;
+  }
+
+  .hodi-home-hero-footnote {
+    margin: 1.35rem 0 0;
+    color: var(--hodi-muted);
+    font-size: .8rem;
+    line-height: 1.5;
+  }
+
+  .hodi-home-hero-visual {
+    position: relative;
+    min-height: 23rem;
+    aspect-ratio: 1.08 / 1;
+    margin: 0;
+    overflow: hidden;
+    background: #d7e2df;
+    box-shadow: var(--hodi-shadow);
+    animation: hodi-image-in 620ms cubic-bezier(.2,.7,.2,1) both;
+  }
+
+  .hodi-home-hero-image {
+    object-fit: cover;
+    object-position: 58% center;
+    transition: transform 700ms cubic-bezier(.2,.7,.2,1);
+  }
+
+  .hodi-home-hero-visual:hover .hodi-home-hero-image {
+    transform: scale(1.025);
+  }
+
+  .hodi-home-hero-image-shade {
+    position: absolute;
+    inset: 35% 0 0;
+    background: linear-gradient(180deg, transparent, rgb(9 24 28 / .62));
+  }
+
+  .hodi-home-hero-caption {
+    position: absolute;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    left: 1.5rem;
+    display: grid;
+    gap: .45rem;
+    color: #fff;
+  }
+
+  .hodi-home-hero-caption span,
+  .hodi-home-hero-index,
+  .hodi-property-banner-mark {
+    font-size: .64rem;
+    font-weight: 750;
+    letter-spacing: .13em;
+  }
+
+  .hodi-home-hero-caption span {
+    color: rgb(255 255 255 / .82);
+  }
+
+  .hodi-home-hero-caption strong {
+    font-size: clamp(1.2rem, 2vw, 1.75rem);
+    font-weight: 550;
+    letter-spacing: -.035em;
+  }
+
+  .hodi-home-hero-index {
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+    padding: .65rem .75rem;
+    background: rgb(14 32 31 / .72);
+    color: #fff;
+    backdrop-filter: blur(8px);
+  }
+
+  .hodi-home-hero-rule {
+    height: 4px;
+    background: var(--hodi-border);
+  }
+
+  .hodi-home-hero-rule span {
+    display: block;
+    width: min(27vw, 22rem);
+    height: 100%;
+    background: var(--hodi-brand);
+  }
+
+  .hodi-property-banner {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    min-height: 15rem;
+    align-items: flex-end;
+    overflow: hidden;
+    padding: clamp(1.25rem, 3vw, 2.25rem);
+    background: #18352e;
+    color: #fff;
+  }
+
+  .hodi-property-banner.technician-overview-banner {
+    min-height: 17rem;
+    border-radius: 12px;
+  }
+
+  .hodi-property-banner-image,
+  .hodi-property-banner-shade {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .hodi-property-banner-image {
+    object-fit: cover;
+    object-position: center 48%;
+    transition: transform 500ms ease;
+  }
+
+  .hodi-property-banner:hover .hodi-property-banner-image {
+    transform: scale(1.02);
+  }
+
+  .hodi-property-banner-shade {
+    background: linear-gradient(90deg, rgb(9 27 25 / .85), rgb(9 27 25 / .38) 58%, rgb(9 27 25 / .12)), linear-gradient(0deg, rgb(9 27 25 / .35), transparent 70%);
+  }
+
+  .hodi-property-banner-copy {
+    max-width: 42rem;
+  }
+
+  .hodi-property-banner-eyebrow {
+    color: #b7e9d7;
+  }
+
+  .hodi-property-banner-copy h2 {
+    max-width: 19ch;
+    margin: .7rem 0 0;
+    color: #fff;
+    font-size: clamp(1.75rem, 3.2vw, 2.65rem);
+    font-weight: 600;
+    letter-spacing: -.05em;
+    line-height: 1.05;
+    text-wrap: balance;
+  }
+
+  .hodi-property-banner-copy p {
+    max-width: 42rem;
+    margin: .7rem 0 0;
+    color: rgb(255 255 255 / .84);
+    font-size: .95rem;
+    line-height: 1.6;
+  }
+
+  .hodi-property-banner-mark {
+    position: absolute;
+    right: 1.25rem;
+    top: 1.25rem;
+    color: rgb(255 255 255 / .78);
+  }
+
+  .auth-story {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    min-height: 31rem;
+    align-items: flex-end;
+    overflow: hidden;
+    padding: clamp(1.5rem, 4vw, 3rem);
+    border-radius: 1rem;
+    background: #18352e;
+    color: #fff;
+  }
+
+  .auth-story-image,
+  .auth-story-shade {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .auth-story-image {
+    object-fit: cover;
+    object-position: center;
+  }
+
+  .auth-story-shade {
+    background: linear-gradient(180deg, rgb(9 27 25 / .05) 10%, rgb(9 27 25 / .86) 100%);
+  }
+
+  .auth-story-copy {
+    max-width: 32rem;
+  }
+
+  .auth-story-copy h1 {
+    margin: 1rem 0 0;
+    color: #fff;
+    font-size: clamp(2.25rem, 4vw, 3.6rem);
+    font-weight: 600;
+    letter-spacing: -.06em;
+    line-height: 1.01;
+    text-wrap: balance;
+  }
+
+  .auth-story-copy > p:not(.auth-story-eyebrow) {
+    margin-top: 1rem;
+    color: rgb(255 255 255 / .84);
+    font-size: 1rem;
+    line-height: 1.7;
+  }
+
+  .auth-story-eyebrow {
+    color: #b7e9d7;
+    font-size: .7rem;
+    font-weight: 750;
+    letter-spacing: .15em;
+  }
+
+  .auth-story-copy a {
+    color: #fff;
+    text-decoration-color: rgb(255 255 255 / .62);
+  }
+
+  @keyframes hodi-rise-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes hodi-image-in {
+    from { opacity: .65; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (min-width: 900px) {
+    .hodi-home-hero-inner {
+      grid-template-columns: minmax(0, .86fr) minmax(0, 1.14fr);
+      gap: clamp(2.5rem, 5vw, 5rem);
+      padding-block: clamp(3.75rem, 7vw, 6.25rem);
+    }
+
+    .hodi-home-hero-visual {
+      min-height: 35rem;
+      aspect-ratio: .98 / 1;
+    }
+  }
+
+  @media (max-width: 899px) {
+    .hodi-home-hero-inner {
+      padding-inline: 1.25rem;
+    }
+
+    .hodi-home-hero-copy h1 {
+      max-width: 13ch;
+    }
+
+    .hodi-home-hero-visual {
+      min-height: 18rem;
+      aspect-ratio: 1.35 / 1;
+    }
+
+    .auth-story {
+      min-height: 25rem;
+    }
+  }
+
+  @media (max-width: 599px) {
+    .hodi-home-hero-inner {
+      gap: 1.25rem;
+      padding-block: 1.75rem 1.5rem;
+    }
+
+    .hodi-home-hero-copy {
+      padding-block: .5rem;
+    }
+
+    .hodi-home-hero-copy h1 {
+      margin-top: 1rem;
+      font-size: clamp(2.45rem, 12vw, 3.45rem);
+    }
+
+    .hodi-home-hero-description {
+      margin-top: 1rem;
+      font-size: 1rem;
+    }
+
+    .hodi-home-hero-actions {
+      display: grid;
+      grid-template-columns: 1fr;
+      margin-top: 1.4rem;
+    }
+
+    .hodi-home-hero-actions a {
+      width: 100%;
+    }
+
+    .hodi-home-hero-footnote {
+      margin-top: 1rem;
+    }
+
+    .hodi-home-hero-visual {
+      min-height: 15rem;
+      aspect-ratio: 1.2 / 1;
+    }
+
+    .hodi-home-hero-caption {
+      right: 1rem;
+      bottom: 1rem;
+      left: 1rem;
+    }
+
+    .hodi-home-hero-index {
+      top: .75rem;
+      right: .75rem;
+    }
+
+    .hodi-property-banner {
+      min-height: 13rem;
+      padding: 1.1rem;
+    }
+
+    .hodi-property-banner-mark {
+      top: .8rem;
+      right: .8rem;
+      font-size: .55rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hodi-home-hero-copy,
+    .hodi-home-hero-visual {
+      animation: none;
+    }
+
+    .hodi-home-hero-image,
+    .hodi-property-banner-image {
+      transition: none;
+    }
+
+    .hodi-home-hero-visual:hover .hodi-home-hero-image,
+    .hodi-property-banner:hover .hodi-property-banner-image {
+      transform: none;
     }
   }
 }

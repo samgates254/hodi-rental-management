@@ -1,7 +1,7 @@
 from datetime import date
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -13,6 +13,8 @@ from apps.billing.models import (
     LedgerPosting,
     Payment,
     PaymentAllocation,
+    PaymentReversal,
+    PaymentReversalAllocation,
 )
 from apps.leases.models import RentSchedule
 from application.services.audit import record_audit
@@ -404,6 +406,149 @@ def allocate_payment(payment, *, policy_id, policy_version, actor, request=None)
         },
     )
     return payment
+
+
+@transaction.atomic
+def reverse_payment(payment, *, reason, actor, request=None):
+    """Fully reverse a posted rental payment, retaining all original rows.
+
+    M-Pesa reversal claims are only recorded for authorised review. The local
+    integration verifies STK settlement, not provider-side reversal events.
+    """
+    reason = (reason or '').strip()
+    if not reason:
+        raise ValidationError({'reason': 'A non-empty reversal reason is required.'})
+
+    payment = Payment.objects.select_for_update().select_related(
+        'organization', 'tenant', 'tenant__user',
+    ).get(pk=payment.pk)
+    existing = PaymentReversal.objects.filter(payment=payment).first()
+    if existing is not None:
+        if existing.reason == reason:
+            return existing
+        raise ValidationError({'status': 'A reversal request already exists for this payment.'})
+    if payment.status == Payment.Status.VOIDED:
+        raise ValidationError({'status': 'A voided payment cannot be reversed.'})
+    if payment.status == Payment.Status.REVERSED:
+        raise ValidationError({'status': 'The payment is already reversed.'})
+    if payment.status != Payment.Status.ALLOCATED:
+        raise ValidationError({'status': 'Only a posted, allocated payment can be reversed.'})
+
+    allocations = list(
+        PaymentAllocation.objects.select_for_update()
+        .filter(payment=payment)
+        .select_related('charge')
+        .order_by('charge_id', 'pk')
+    )
+    postings = list(LedgerPosting.objects.select_for_update().filter(payment=payment).order_by('pk'))
+    allocated_total = sum(row.amount_cents for row in allocations)
+    if allocated_total != payment.allocated_cents:
+        raise ValidationError({'status': 'Payment allocation history is inconsistent; review is required.'})
+    if payment.allocated_cents + payment.overpayment_cents != payment.amount_cents:
+        raise ValidationError({'status': 'Payment amount history is inconsistent; review is required.'})
+    debits = sum(row.amount_cents for row in postings if row.direction == 'DEBIT')
+    credits = sum(row.amount_cents for row in postings if row.direction == 'CREDIT')
+    if not postings or debits != credits or debits != payment.amount_cents:
+        raise ValidationError({'status': 'Payment ledger history is inconsistent; review is required.'})
+
+    # A provider transaction must not be represented as reversed based only on
+    # an operator-entered reference or unverified callback claim.
+    if payment.method == Payment.Method.MPESA:
+        reversal = PaymentReversal.objects.create(
+            payment=payment,
+            authorized_by=actor,
+            reason=reason,
+            amount_cents=payment.amount_cents,
+            status=PaymentReversal.Status.REVIEW_REQUIRED,
+        )
+        record_audit(
+            action='payment.reversal_review_required',
+            object_type='PaymentReversal',
+            object_id=reversal.pk,
+            actor=actor,
+            organization=payment.organization,
+            metadata={
+                'payment_id': str(payment.pk),
+                'amount_cents': reversal.amount_cents,
+                'reason': reason,
+                'status': reversal.status,
+                'provider_evidence_required': True,
+            },
+            request=request,
+        )
+        return reversal
+
+    if any(row.charge.lifecycle != DocumentStatus.POSTED for row in allocations):
+        raise ValidationError({'status': 'A payment allocation no longer references a posted charge.'})
+
+    reversal = PaymentReversal.objects.create(
+        payment=payment,
+        authorized_by=actor,
+        reason=reason,
+        amount_cents=payment.amount_cents,
+        status=PaymentReversal.Status.REVERSED,
+    )
+    touched_charges = {row.charge_id: row.charge for row in allocations}
+    for allocation in allocations:
+        PaymentReversalAllocation.objects.create(
+            reversal=reversal,
+            original_allocation=allocation,
+            charge_id=allocation.charge_id,
+            amount_cents=allocation.amount_cents,
+        )
+    for posting in postings:
+        LedgerPosting.objects.create(
+            payment=payment,
+            reversal=reversal,
+            account=posting.account,
+            direction='CREDIT' if posting.direction == 'DEBIT' else 'DEBIT',
+            amount_cents=posting.amount_cents,
+        )
+
+    payment.status = Payment.Status.REVERSED
+    payment.save(update_fields=('status', 'updated_at'))
+    touched_invoice_ids = set()
+    for charge in touched_charges.values():
+        active_allocations = PaymentAllocation.objects.filter(
+            charge=charge,
+            payment__status=Payment.Status.ALLOCATED,
+        ).aggregate(total=Sum('amount_cents'))['total'] or 0
+        if active_allocations > charge.amount_cents:
+            raise ValidationError({'status': 'Active allocations exceed the charge amount; review is required.'})
+        charge.balance_cents = charge.amount_cents - active_allocations
+        charge.save(update_fields=('balance_cents', 'updated_at'))
+        touched_invoice_ids.add(charge.invoice_id)
+    for invoice in Invoice.objects.filter(pk__in=touched_invoice_ids).order_by('pk'):
+        recompute_invoice_totals(invoice)
+
+    record_audit(
+        action='payment.reverse',
+        object_type='PaymentReversal',
+        object_id=reversal.pk,
+        actor=actor,
+        organization=payment.organization,
+        metadata={
+            'payment_id': str(payment.pk),
+            'amount_cents': reversal.amount_cents,
+            'allocated_cents': payment.allocated_cents,
+            'unallocated_cents': payment.overpayment_cents,
+            'allocation_count': len(allocations),
+            'posting_count': len(postings),
+            'reason': reason,
+            'status': reversal.status,
+        },
+        request=request,
+    )
+    if payment.tenant.user_id:
+        notify_user(
+            user=payment.tenant.user,
+            type='PAYMENT_REVERSED',
+            title='Payment reversed',
+            body=f'A payment of {payment.amount_cents} cents was reversed.',
+            organization=payment.organization,
+            payload={'payment_id': str(payment.pk), 'reversal_id': str(reversal.pk)},
+        )
+    return reversal
 
 
 def assess_tenant_delinquency(*, tenant, as_of, grace_days):

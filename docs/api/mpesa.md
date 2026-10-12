@@ -36,11 +36,13 @@ Daraja callbacks are **not signed**. HODI does not pretend they are. Gate:
 
 For every terminal callback, HODI queries Daraja STK Query using the stored checkout reference and requires both stored request references to match. `ResponseCode` is treated as query-operation acceptance; only a present `ResultCode` tied to the same checkout and merchant references is treated as the transaction outcome. A callback/query outcome conflict, timeout, missing field, or mismatched reference leaves the attempt open and records a discrepancy. A query-confirmed failure may close the attempt; a query-confirmed success is settled only when the callback supplies valid amount, phone, date, and receipt metadata. STK Query does not provide HODI's receipt metadata, so reconciliation never fabricates a payment or receipt.
 
-The callback token is a bearer credential used to limit unsolicited requests, not proof of sender identity. It remains in the URL path because Daraja does not send custom headers. Rotate it by generating a new high-entropy token, updating `MPESA_CALLBACK_AUTH_TOKEN` and the HTTPS callback path together, updating the callback URL in the Daraja application, and deploying the matching configuration. Treat the old token as compromised if it may have been logged. The repository has no reverse-proxy or access-log configuration: deployment owners must redact the callback path segment from proxy access logs, APM traces, exception reports and support tooling. Do not log callback request paths in application messages.
+The callback token is a bearer credential used to limit unsolicited requests, not proof of sender identity. It remains in the URL path because Daraja does not send custom headers. Rotate it by generating a new high-entropy token, updating `MPESA_CALLBACK_AUTH_TOKEN` and the HTTPS callback path together, updating the callback URL in the Daraja application, and deploying the matching configuration. Treat the old token as compromised if it may have been logged. The repository's callback application log messages do not include request paths, bodies, phone numbers, or receipts. It has no reverse-proxy or hosting access-log configuration: deployment owners must verify redaction of the callback path segment in platform access logs, APM traces, exception reports and support tooling. Do not assume hosting access logs are redacted.
 
 ### Reconciliation command
 
-Schedule `python manage.py reconcile_mpesa_attempts` from the backend project at a modest interval (for example every 5 minutes). The command queries only stale, open attempts with stored provider references, processes at most 100 per run, and uses exponential retry spacing with a maximum of five queries. Preview eligibility with `python manage.py reconcile_mpesa_attempts --dry-run`. The command never settles a successful query result because STK Query does not return the M-Pesa receipt needed by HODI's payment identity; it marks that attempt `SUCCESS_NEEDS_RECEIPT`. Review unresolved/exhausted attempts with `python manage.py reconcile_mpesa_attempts --review-required`, then compare the checkout with the Daraja portal/account statement and record any controlled correction through the approved accounting process. Do not manually edit payment rows.
+Schedule `python manage.py reconcile_mpesa_attempts` from the backend project at a modest interval (for example every 5 minutes). The command queries only stale, open attempts with stored provider references, processes at most 100 per run, and uses exponential retry spacing with a maximum of five queries. Preview eligibility with `python manage.py reconcile_mpesa_attempts --dry-run`. A matching STK Query `ResultCode=0` proves the query outcome but does not return the receipt needed by HODI's payment identity; it marks the attempt `SUCCESS_NEEDS_RECEIPT` and creates no payment. Review unresolved/exhausted attempts with `python manage.py reconcile_mpesa_attempts --review-required`.
+
+An authorized organization owner or accountant can resolve an attempt in `SUCCESS_NEEDS_RECEIPT` using `POST /api/v1/billing/mpesa/attempts/<attempt-id>/resolve/`. The reviewer must independently inspect the Safaricom portal/statement or bank statement and submit its source and evidence reference, receipt, amount, checkout and merchant request IDs, account reference when present, phone number and transaction date. HODI compares these transaction details with the locked attempt and requires the append-only successful STK Query audit. A customer cannot review their own attempt. The endpoint records the reviewer and evidence reference, then posts through the normal rental payment and allocation services. Identical retries return the original payment; conflicting evidence and receipts already used by another attempt/payment are rejected. This is a human evidence check: the endpoint cannot fetch or independently authenticate a Safaricom portal/statement entry. Never settle based on a customer-reported receipt alone and never manually edit payment rows.
 
 The attempt identified by `CheckoutRequestID` is the source of truth for organization, tenant, amount, phone, and invoice. Callback body fields named `tenant` / `organization` are ignored.
 
@@ -68,7 +70,7 @@ Before creating a `Payment`:
 - `MpesaReceiptNumber` is present
 - payload structure is valid
 
-Failure of those checks records the attempt as `FAILED` and creates no `Payment`.
+Failure of those checks leaves the attempt unresolved, records a discrepancy, and creates no `Payment`.
 
 ### Unknown checkout
 
@@ -85,7 +87,7 @@ On a valid success callback, inside `transaction.atomic()`:
 
 Allocation uses the existing tenant-wide posted charges. An optional invoice on the attempt is context; it does not introduce a second allocation policy. Overpayment still posts to account `2020`, never `2030`.
 
-Duplicate callbacks (same checkout or same receipt) produce no additional `Payment`, allocation, or ledger rows.
+Duplicate callbacks (same checkout or same receipt) produce no additional `Payment`, allocation, or ledger rows. A late callback after operator resolution is accepted only as a duplicate when its validated receipt matches the stored receipt; conflicting callback metadata is recorded as a discrepancy and does not post another payment.
 
 `allocate_payment()` already writes `payment.record` / `payment.allocate` audit and `PAYMENT_RECEIVED` notification.
 

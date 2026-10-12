@@ -2,13 +2,16 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Logo } from "@/components/layout/Logo";
 import {
   AUTH_TOKEN_KEY,
   ClientApiError,
+  clientApi,
   dashboardPathForAccountType,
   login as apiLogin,
   register as apiRegister,
+  setStoredAuthToken,
   type AuthResponse,
 } from "@/lib/clientApi";
 import TenantLinkGate from "@/components/ops/TenantLinkGate";
@@ -179,6 +182,12 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
       const auth = await apiLogin({ username, password });
       const memberships = membershipsFromAuth(auth);
+      if (!auth.token) throw new Error("This account could not be signed in.");
+      if (memberships.some(item => item.role === "ACCOUNTANT") && !memberships.some(item => item.role === "OWNER" || item.role === "PROPERTY_MANAGER")) {
+        rememberSession(auth, { first_name: auth.first_name?.trim() || username, last_name: auth.last_name, email: auth.email || username, phone_number: auth.phone_number }, memberships);
+        window.location.assign("/accountants");
+        return;
+      }
       const hasCaretakerMembership = memberships.some(
         membership => staffLoginKindForRole(membership.role) === "caretaker",
       );
@@ -193,7 +202,17 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         : userKind === "technician"
           ? hasTechnicianMembership ? "technician" : null
         : userKindFromAccountType(auth.account_type) ?? (hasLandlordMembership ? "landlord" : null);
-      if (!auth.token || !actualKind) {
+      if (!actualKind) {
+        setStoredAuthToken(auth.token);
+        try {
+          const { data: invitations } = await clientApi.get<Array<{ status: string; can_accept: boolean }>>("/api/v1/organizations/accountant-invitations/");
+          if (invitations.some(invitation => invitation.status === "PENDING" && invitation.can_accept)) {
+            rememberSession(auth, { first_name: auth.first_name?.trim() || username, last_name: auth.last_name, email: auth.email || username, phone_number: auth.phone_number }, memberships);
+            window.location.assign("/accountants");
+            return;
+          }
+        } catch { /* The normal dashboard error below remains the useful sign-in message. */ }
+        setStoredAuthToken(null);
         throw new Error(userKind === "caretaker"
           ? "This account does not have an active caretaker membership."
           : userKind === "technician"
@@ -245,11 +264,20 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
           ? "gap-5 py-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-12 lg:py-5"
           : "gap-12 py-12 lg:grid-cols-[1fr_440px]"
         }`}>
-          <section key={userKind} className="hidden max-w-lg self-start pt-16 lg:block auth-role-enter">
-            <p className="text-xs font-bold tracking-[0.18em] text-brand">
+          <section key={userKind} className="auth-story hidden self-stretch lg:flex auth-role-enter">
+            <Image
+              src="/images/living.jpg"
+              alt=""
+              fill
+              sizes="(max-width: 1024px) 100vw, 52vw"
+              className="auth-story-image"
+            />
+            <div className="auth-story-shade" aria-hidden="true" />
+            <div className="auth-story-copy">
+            <p className="auth-story-eyebrow">
               PROPERTY OPERATIONS, CONNECTED
             </p>
-            <h1 className={`${isSignup ? "mt-3 text-4xl" : "mt-5 text-5xl"} font-display font-semibold leading-tight tracking-tight`}>
+            <h1>
               {userKind === "landlord"
                 ? "Run your portfolio with clarity."
                 : userKind === "caretaker"
@@ -258,7 +286,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                     ? "Keep your assigned repair work moving."
                   : "Feel at home with Hodi."}
             </h1>
-            <p className={`${isSignup ? "mt-3" : "mt-5"} text-base leading-7 text-text-secondary`}>
+            <p>
               {userKind === "landlord"
                 ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
                 : userKind === "caretaker"
@@ -267,7 +295,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                     ? "Review only the work orders assigned to you and submit repair outcomes for verification."
                   : "Keep your home, rent, and maintenance updates connected in one dependable place."}
             </p>
-            <div className={`${isSignup ? "mt-5" : "mt-8"} flex gap-3 text-sm`}>
+            <div className="mt-6 flex flex-wrap gap-3 text-sm">
               <Link className="font-semibold text-brand underline-offset-4 hover:underline" href="/signin?type=landlord">
                 Landlord access
               </Link>
@@ -275,6 +303,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
               <Link className="font-semibold text-brand underline-offset-4 hover:underline" href="/signin?type=tenant">
                 Client access
               </Link>
+            </div>
             </div>
           </section>
 

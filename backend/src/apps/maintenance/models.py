@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -276,6 +278,7 @@ class WorkOrderAssignment(models.Model):
 
 class RepairQuotation(models.Model):
 	class Status(models.TextChoices):
+		DRAFT = 'DRAFT', 'Draft'
 		PENDING = 'PENDING', 'Pending'
 		APPROVED = 'APPROVED', 'Approved'
 		REJECTED = 'REJECTED', 'Rejected'
@@ -311,6 +314,89 @@ class RepairQuotation(models.Model):
 		]
 
 
+class RepairQuotationLine(models.Model):
+	class Category(models.TextChoices):
+		MATERIAL = 'MATERIAL', 'Material'
+		LABOUR = 'LABOUR', 'Labour'
+		TRANSPORT = 'TRANSPORT', 'Transport'
+		OTHER = 'OTHER', 'Other'
+
+	quotation = models.ForeignKey(RepairQuotation, on_delete=models.PROTECT, related_name='lines')
+	category = models.CharField(max_length=12, choices=Category.choices)
+	description = models.CharField(max_length=240)
+	quantity = models.DecimalField(max_digits=12, decimal_places=3)
+	unit = models.CharField(max_length=30)
+	unit_price_cents = models.PositiveBigIntegerField()
+	line_total_cents = models.PositiveBigIntegerField()
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ('pk',)
+		constraints = [
+			models.CheckConstraint(condition=models.Q(quantity__gt=0), name='repair_quote_line_qty_positive'),
+			models.CheckConstraint(condition=models.Q(unit_price_cents__gte=0), name='repair_quote_line_price_nonnegative'),
+			models.CheckConstraint(condition=models.Q(line_total_cents__gte=0), name='repair_quote_line_total_nonnegative'),
+		]
+
+
+class JobMaterialPurchase(models.Model):
+	class Status(models.TextChoices):
+		RECORDED = 'RECORDED', 'Purchase recorded'
+		PARTIALLY_RECEIVED = 'PARTIALLY_RECEIVED', 'Partially received'
+		RECEIVED = 'RECEIVED', 'Received'
+
+	organization = models.ForeignKey('organizations.Organization', on_delete=models.PROTECT, related_name='job_material_purchases')
+	maintenance_request = models.ForeignKey(MaintenanceRequest, on_delete=models.PROTECT, related_name='material_purchases')
+	quotation = models.ForeignKey(RepairQuotation, on_delete=models.PROTECT, related_name='material_purchases')
+	quotation_line = models.ForeignKey(RepairQuotationLine, on_delete=models.PROTECT, related_name='purchases')
+	supplier_name = models.CharField(max_length=200)
+	supplier_profile = models.ForeignKey('marketplace.SupplierProfile', on_delete=models.PROTECT, null=True, blank=True, related_name='material_purchases')
+	supplier_reference = models.CharField(max_length=200, blank=True)
+	description = models.CharField(max_length=240)
+	quantity = models.DecimalField(max_digits=12, decimal_places=3)
+	unit = models.CharField(max_length=30)
+	unit_price_cents = models.PositiveBigIntegerField()
+	purchase_total_cents = models.PositiveBigIntegerField()
+	purchase_date = models.DateField()
+	status = models.CharField(max_length=24, choices=Status.choices, default=Status.RECORDED)
+	idempotency_key = models.UUIDField(default=uuid.uuid4)
+	overrun_reason = models.TextField(blank=True)
+	overrun_authorized_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='authorized_material_purchase_overruns',
+	)
+	overrun_authorized_at = models.DateTimeField(null=True, blank=True)
+	created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='job_material_purchases_created')
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ('created_at', 'pk')
+		constraints = [
+			models.UniqueConstraint(fields=('organization', 'idempotency_key'), name='job_material_purchase_idempotency_uniq'),
+			models.CheckConstraint(condition=models.Q(quantity__gt=0), name='job_material_purchase_qty_positive'),
+			models.CheckConstraint(condition=models.Q(unit_price_cents__gte=0), name='job_material_purchase_price_nonnegative'),
+			models.CheckConstraint(condition=models.Q(purchase_total_cents__gte=0), name='job_material_purchase_total_nonnegative'),
+		]
+
+
+class JobMaterialReceipt(models.Model):
+	purchase = models.ForeignKey(JobMaterialPurchase, on_delete=models.PROTECT, related_name='receipts')
+	quantity = models.DecimalField(max_digits=12, decimal_places=3)
+	evidence_reference = models.CharField(max_length=500)
+	notes = models.CharField(max_length=500, blank=True)
+	idempotency_key = models.UUIDField(default=uuid.uuid4)
+	acknowledged_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='job_material_receipts_acknowledged')
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ('created_at', 'pk')
+		constraints = [
+			models.UniqueConstraint(fields=('purchase', 'idempotency_key'), name='job_material_receipt_idempotency_uniq'),
+			models.CheckConstraint(condition=models.Q(quantity__gt=0), name='job_material_receipt_qty_positive'),
+		]
+
+
 class RepairCompletion(models.Model):
 	class Status(models.TextChoices):
 		SUBMITTED = 'SUBMITTED', 'Submitted'
@@ -341,6 +427,12 @@ class RepairCompletion(models.Model):
 	)
 	verified_at = models.DateTimeField(null=True, blank=True)
 	verification_notes = models.TextField(blank=True)
+	cost_overrun_reason = models.TextField(blank=True)
+	cost_overrun_authorized_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='authorized_repair_cost_overruns',
+	)
+	cost_overrun_authorized_at = models.DateTimeField(null=True, blank=True)
 	follow_up_required = models.BooleanField(default=False)
 	follow_up_reason = models.CharField(max_length=500, blank=True)
 
@@ -353,12 +445,88 @@ class RepairCompletion(models.Model):
 		]
 
 
+class RepairCompletionEvidence(models.Model):
+	class Category(models.TextChoices):
+		BEFORE_PHOTO = 'BEFORE_PHOTO', 'Before-work evidence'
+		AFTER_PHOTO = 'AFTER_PHOTO', 'After-work photograph'
+		WORK_DOCUMENT = 'WORK_DOCUMENT', 'Work document'
+		MATERIAL_RECEIPT = 'MATERIAL_RECEIPT', 'Material receipt evidence'
+		OTHER = 'OTHER', 'Other completion evidence'
+
+	completion = models.ForeignKey(RepairCompletion, on_delete=models.PROTECT, related_name='evidence')
+	maintenance_request = models.ForeignKey(MaintenanceRequest, on_delete=models.PROTECT, related_name='completion_evidence')
+	organization = models.ForeignKey('organizations.Organization', on_delete=models.PROTECT, related_name='repair_completion_evidence')
+	category = models.CharField(max_length=24, choices=Category.choices)
+	caption = models.CharField(max_length=240, blank=True)
+	evidence_reference = models.CharField(max_length=500)
+	recorded_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='repair_completion_evidence_recorded',
+	)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ('created_at', 'pk')
+		constraints = [
+			models.UniqueConstraint(fields=('completion', 'evidence_reference'), name='repair_completion_evidence_ref_uniq'),
+		]
+
+
+class TurnoverAssessment(models.Model):
+	class Status(models.TextChoices):
+		REQUESTED = 'REQUESTED', 'Inspection requested'
+		FAILED = 'FAILED', 'Not ready'
+		READY = 'READY', 'Ready for next tenancy'
+
+	organization = models.ForeignKey('organizations.Organization', on_delete=models.PROTECT, related_name='turnover_assessments')
+	property = models.ForeignKey('properties.Property', on_delete=models.PROTECT, related_name='turnover_assessments')
+	building = models.ForeignKey('properties.Building', on_delete=models.PROTECT, related_name='turnover_assessments')
+	unit = models.ForeignKey(Unit, on_delete=models.PROTECT, related_name='turnover_assessments')
+	maintenance_request = models.ForeignKey(MaintenanceRequest, on_delete=models.PROTECT, related_name='turnover_assessments')
+	revision_of = models.ForeignKey('self', on_delete=models.PROTECT, null=True, blank=True, related_name='reassessments')
+	status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
+	outstanding_issues = models.TextField(blank=True)
+	requested_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='turnover_assessments_requested',
+	)
+	requested_at = models.DateTimeField(auto_now_add=True)
+	assessed_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='turnover_assessments_performed',
+	)
+	assessed_at = models.DateTimeField(null=True, blank=True)
+	idempotency_key = models.UUIDField(default=uuid.uuid4)
+
+	class Meta:
+		ordering = ('-requested_at', '-pk')
+		constraints = [
+			models.UniqueConstraint(fields=('organization', 'idempotency_key'), name='turnover_assessment_idempotency_uniq'),
+		]
+
+
+class TurnoverChecklistItem(models.Model):
+	assessment = models.ForeignKey(TurnoverAssessment, on_delete=models.PROTECT, related_name='checklist_items')
+	item_key = models.SlugField(max_length=50)
+	label = models.CharField(max_length=160)
+	passed = models.BooleanField()
+	notes = models.CharField(max_length=500, blank=True)
+
+	class Meta:
+		ordering = ('pk',)
+		constraints = [
+			models.UniqueConstraint(fields=('assessment', 'item_key'), name='turnover_checklist_item_key_uniq'),
+		]
+
+
 class RepairMaterialUsed(models.Model):
 	completion = models.ForeignKey(RepairCompletion, on_delete=models.PROTECT, related_name='materials')
 	description = models.CharField(max_length=200)
 	quantity = models.DecimalField(max_digits=12, decimal_places=3)
 	unit = models.CharField(max_length=30)
 	unit_cost_cents = models.PositiveBigIntegerField(default=0)
+	purchase = models.ForeignKey(
+		JobMaterialPurchase, on_delete=models.PROTECT, null=True, blank=True,
+		related_name='material_uses',
+	)
 
 	class Meta:
 		constraints = [

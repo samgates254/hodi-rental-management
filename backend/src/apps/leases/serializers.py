@@ -20,6 +20,13 @@ class LeaseSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'created_at', 'updated_at')
 
     def validate(self, attrs):
+        requested_status = attrs.get('status')
+        current_status = getattr(self.instance, 'status', Lease.Status.DRAFT)
+        if requested_status is not None and requested_status != current_status:
+            if self.instance is not None or requested_status != Lease.Status.DRAFT:
+                raise serializers.ValidationError({
+                    'status': 'Use the lease lifecycle actions to change lease status.'
+                })
         tenant = attrs.get('tenant', getattr(self.instance, 'tenant', None))
         unit = attrs.get('unit', getattr(self.instance, 'unit', None))
         if tenant and unit and tenant.organization_id != unit.organization_id:

@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
     return backendOrigin
       ? [{
           source: "/api/v1/:path*",
+          // Django auth/API routes are slash-terminated. With
+          // skipTrailingSlashRedirect enabled, preserve the canonical slash
+          // even if an incoming caller omitted it.
           destination: `${backendOrigin.replace(/\/+$/, "")}/api/v1/:path*/`,
         }]
       : [];

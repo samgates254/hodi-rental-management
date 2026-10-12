@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
@@ -187,6 +188,7 @@ class Payment(models.Model):
 		ALLOCATED = 'ALLOCATED', 'Allocated'
 		FAILED = 'FAILED', 'Failed'
 		VOIDED = 'VOIDED', 'Voided'
+		REVERSED = 'REVERSED', 'Reversed'
 
 	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 	organization = models.ForeignKey(
@@ -246,6 +248,48 @@ class Payment(models.Model):
 		return f'Payment {self.pk}'
 
 
+class PaymentReversal(models.Model):
+	class Status(models.TextChoices):
+		REVERSED = 'REVERSED', 'Reversed'
+		REVIEW_REQUIRED = 'REVIEW_REQUIRED', 'Provider review required'
+
+	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+	payment = models.OneToOneField(
+		Payment,
+		on_delete=models.PROTECT,
+		related_name='reversal',
+	)
+	authorized_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.PROTECT,
+		related_name='authorized_payment_reversals',
+	)
+	reason = models.TextField()
+	amount_cents = models.PositiveBigIntegerField()
+	status = models.CharField(max_length=24, choices=Status.choices)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ('created_at', 'pk')
+		constraints = [
+			models.CheckConstraint(
+				check=Q(amount_cents__gt=0),
+				name='payment_reversal_amount_positive',
+			),
+		]
+
+	def __str__(self):
+		return f'Reversal {self.pk} for payment {self.payment_id}'
+
+	def save(self, *args, **kwargs):
+		if self.pk and type(self).objects.filter(pk=self.pk).exists():
+			raise ValidationError('Payment reversals are append-only.')
+		super().save(*args, **kwargs)
+
+	def delete(self, *args, **kwargs):
+		raise ValidationError('Payment reversals are append-only.')
+
+
 class PaymentAllocation(models.Model):
 	payment = models.ForeignKey(
 		Payment,
@@ -275,10 +319,54 @@ class PaymentAllocation(models.Model):
 		return f'{self.payment_id} -> {self.charge_id}'
 
 
+class PaymentReversalAllocation(models.Model):
+	reversal = models.ForeignKey(
+		PaymentReversal,
+		on_delete=models.PROTECT,
+		related_name='allocations',
+	)
+	original_allocation = models.OneToOneField(
+		PaymentAllocation,
+		on_delete=models.PROTECT,
+		related_name='reversal_allocation',
+	)
+	charge = models.ForeignKey(
+		Charge,
+		on_delete=models.PROTECT,
+		related_name='reversal_allocations',
+	)
+	amount_cents = models.PositiveBigIntegerField()
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ('created_at', 'pk')
+		constraints = [
+			models.CheckConstraint(
+				check=Q(amount_cents__gt=0),
+				name='payment_reversal_allocation_amount_positive',
+			),
+		]
+
+	def save(self, *args, **kwargs):
+		if self.pk and type(self).objects.filter(pk=self.pk).exists():
+			raise ValidationError('Payment reversal allocations are append-only.')
+		super().save(*args, **kwargs)
+
+	def delete(self, *args, **kwargs):
+		raise ValidationError('Payment reversal allocations are append-only.')
+
+
 class LedgerPosting(models.Model):
 	payment = models.ForeignKey(
 		Payment,
 		on_delete=models.PROTECT,
+		related_name='postings',
+	)
+	reversal = models.ForeignKey(
+		PaymentReversal,
+		on_delete=models.PROTECT,
+		null=True,
+		blank=True,
 		related_name='postings',
 	)
 	account = models.CharField(max_length=8)
@@ -308,6 +396,7 @@ class MpesaAttempt(models.Model):
 		NOT_CHECKED = 'NOT_CHECKED', 'Not checked'
 		UNRESOLVED = 'UNRESOLVED', 'Unresolved'
 		SUCCESS_NEEDS_RECEIPT = 'SUCCESS_NEEDS_RECEIPT', 'Provider success needs receipt review'
+		OPERATOR_RESOLVED = 'OPERATOR_RESOLVED', 'Resolved by authorized operator review'
 		PROVIDER_FAILED = 'PROVIDER_FAILED', 'Provider confirmed failure'
 		EXHAUSTED = 'EXHAUSTED', 'Retry limit reached'
 

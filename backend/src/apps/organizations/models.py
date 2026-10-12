@@ -84,3 +84,26 @@ class OrganizationMembership(models.Model):
 
 	def __str__(self):
 		return f'{self.user} - {self.organization} ({self.role})'
+
+
+class AccountantInvitation(models.Model):
+	class Status(models.TextChoices):
+		PENDING = 'PENDING', 'Pending'
+		ACCEPTED = 'ACCEPTED', 'Accepted'
+		DECLINED = 'DECLINED', 'Declined'
+		REVOKED = 'REVOKED', 'Revoked'
+		EXPIRED = 'EXPIRED', 'Expired'
+
+	organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='accountant_invitations')
+	invited_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='accountant_invitations')
+	invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sent_accountant_invitations')
+	status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+	expires_at = models.DateTimeField()
+	accepted_at = models.DateTimeField(null=True, blank=True)
+	revoked_at = models.DateTimeField(null=True, blank=True)
+	revoked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='revoked_accountant_invitations')
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ('-created_at',)
+		constraints = [models.UniqueConstraint(fields=('organization', 'invited_user'), condition=models.Q(status='PENDING'), name='one_pending_accountant_invite')]

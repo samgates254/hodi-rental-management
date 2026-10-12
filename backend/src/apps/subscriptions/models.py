@@ -18,6 +18,9 @@ class SubscriptionPlan(models.Model):
     name = models.CharField(max_length=80)
     description = models.CharField(max_length=300, blank=True)
     price_minor = models.PositiveBigIntegerField(null=True, blank=True)
+    # Explicitly configured onboarding fee. Zero is the safe launch default
+    # until Hodi approves actual fees for a new plan version.
+    setup_fee_minor = models.PositiveBigIntegerField(default=0)
     currency = models.CharField(max_length=3, default='KES')
     interval = models.CharField(max_length=12, choices=Interval.choices, default=Interval.MONTH)
     unit_limit = models.PositiveIntegerField(null=True, blank=True)
@@ -54,7 +57,7 @@ class SubscriptionPlan(models.Model):
     def save(self, *args, **kwargs):
         if self.pk:
             original = type(self).objects.get(pk=self.pk)
-            immutable = ('code', 'version', 'name', 'description', 'price_minor', 'currency', 'interval', 'unit_limit', 'entitlements', 'is_custom_pricing')
+            immutable = ('code', 'version', 'name', 'description', 'price_minor', 'setup_fee_minor', 'currency', 'interval', 'unit_limit', 'entitlements', 'is_custom_pricing')
             if any(getattr(original, field) != getattr(self, field) for field in immutable):
                 raise ValidationError('Plan terms are versioned. Create a new plan version to change commercial terms.')
         self.full_clean()
@@ -82,6 +85,12 @@ class OrganizationSubscription(models.Model):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.FREE)
     unit_limit_override = models.PositiveIntegerField(null=True, blank=True)
     pending_unit_limit_override = models.PositiveIntegerField(null=True, blank=True)
+    # Existing subscriptions are grandfathered. New subscriptions can incur
+    # the configured one-time fee on their first paid invoice only.
+    setup_fee_paid = models.BooleanField(default=False)
+    # Tracks whether the one-time obligation has already been snapshotted on
+    # an invoice (or was grandfathered), independently of its settlement.
+    setup_fee_invoiced = models.BooleanField(default=False)
     current_period_start = models.DateField(null=True, blank=True)
     current_period_end = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -123,6 +132,8 @@ class SubscriptionInvoice(models.Model):
     subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.PROTECT, related_name='invoices')
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name='invoices')
     amount_minor = models.PositiveBigIntegerField()
+    monthly_fee_minor = models.PositiveBigIntegerField(default=0)
+    setup_fee_minor = models.PositiveBigIntegerField(default=0)
     currency = models.CharField(max_length=3)
     period_start = models.DateField()
     period_end = models.DateField()
@@ -136,6 +147,10 @@ class SubscriptionInvoice(models.Model):
         ordering = ('-issued_at',)
         constraints = [
             models.CheckConstraint(condition=Q(amount_minor__gt=0), name='subscription_invoice_amount_positive'),
+            models.CheckConstraint(
+                condition=Q(amount_minor=models.F('monthly_fee_minor') + models.F('setup_fee_minor')),
+                name='subscription_invoice_total_matches_items',
+            ),
             models.CheckConstraint(condition=Q(period_end__gt=models.F('period_start')), name='subscription_invoice_period_valid'),
         ]
 

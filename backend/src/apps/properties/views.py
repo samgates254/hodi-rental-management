@@ -1,6 +1,6 @@
 from django.db import transaction
 from rest_framework import viewsets
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from application.services.audit import record_audit
 from common.permissions import (
@@ -128,7 +128,19 @@ class UnitViewSet(OrganizationScopedViewSet):
 			serializer.instance.building,
 		)
 		self.ensure_allowed(building.property.organization_id)
+		unit = serializer.instance
+		if building.pk != unit.building_id and unit.leases.exists():
+			raise ValidationError({
+				'building': 'A unit with lease history cannot be moved to another building.'
+			})
 		new_status = serializer.validated_data.get('status', serializer.instance.status)
+		if (
+			new_status in (Unit.Status.AVAILABLE, Unit.Status.INACTIVE)
+			and unit.leases.filter(status='ACTIVE').exists()
+		):
+			raise ValidationError({
+				'status': 'A unit with an active lease cannot be made available or inactive.'
+			})
 		existing_organization_id = (
 			serializer.instance.building.property.organization_id
 		)

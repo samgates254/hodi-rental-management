@@ -94,7 +94,9 @@
 .landlord-main {
   width: calc(100% - 248px);
   max-width: 1600px;
+  min-width: 0;
   margin-left: 248px;
+  overflow-x: clip;
   padding: 0 42px 30px;
 }
 
@@ -225,6 +227,29 @@
   padding: 34px 0 22px;
 }
 
+.landlord-overview-banner-wrap {
+  position: relative;
+  margin: 28px 0 20px;
+}
+
+.landlord-overview-banner {
+  min-height: 17rem;
+  border-radius: 12px;
+}
+
+.landlord-banner-sync {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  padding: 7px 10px;
+  border: 1px solid rgb(255 255 255 / .24);
+  background: rgb(12 32 29 / .72);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 650;
+  backdrop-filter: blur(8px);
+}
+
 .landlord-welcome h2,
 .landlord-section-heading h2 {
   margin: 5px 0 0;
@@ -251,19 +276,40 @@
   gap: 14px;
 }
 
+.landlord-metrics--loading {
+  min-height: 137px;
+}
+
+.landlord-metric-skeleton {
+  min-height: 137px;
+  border: 1px solid var(--landlord-line);
+  border-radius: 12px;
+  background: var(--hodi-surface-raised);
+}
+
 .landlord-metric-card {
   min-height: 137px;
   display: flex;
   flex-direction: column;
-  padding: 18px;
+  padding: 19px 20px;
   border: 1px solid var(--landlord-line);
   border-radius: 12px;
   background: var(--landlord-paper);
+  box-shadow: 0 1px 2px rgb(23 32 51 / .025);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.landlord-metric-card:hover,
+.landlord-property-card:hover {
+  border-color: color-mix(in srgb, var(--hodi-brand) 35%, var(--landlord-line));
+  box-shadow: var(--hodi-shadow);
+  transform: translateY(-2px);
 }
 
 .landlord-metric-card > span {
   color: var(--landlord-muted);
   font-size: 12px;
+  letter-spacing: .01em;
   font-weight: 600;
 }
 
@@ -294,6 +340,10 @@
   scroll-margin-top: 22px;
 }
 
+.landlord-section:target {
+  scroll-margin-top: 28px;
+}
+
 .landlord-subscription-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -312,6 +362,7 @@
 
 .landlord-subscription-card h3 { margin: 7px 0 8px; font-size: 20px; }
 .landlord-subscription-card p { line-height: 1.55; }
+.landlord-subscription-price { margin: 12px 0; color: var(--hodi-text); font-size: 20px; font-weight: 750; letter-spacing: -0.03em; }
 .landlord-subscription-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .landlord-subscription-status { flex: none; padding: 5px 9px; border-radius: 999px; background: var(--hodi-brand-soft); color: var(--hodi-brand); font-size: 11px; font-weight: 750; }
 .landlord-subscription-status.status-past_due, .landlord-subscription-status.status-expired { background: var(--hodi-warning-soft); color: var(--hodi-warning); }
@@ -328,6 +379,10 @@
 .landlord-subscription-invoice > div { display: grid; gap: 3px; min-width: 0; }
 .landlord-subscription-invoice > div span { color: var(--hodi-muted); font-size: 12px; overflow-wrap: anywhere; }
 .landlord-subscription-invoice > div b { font-size: 13px; }
+.landlord-subscription-invoice-details { gap: 5px !important; }
+.landlord-subscription-invoice-details .landlord-subscription-invoice-total { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--hodi-border); font-size: 14px; }
+.landlord-subscription-invoice-details > b:last-of-type { color: var(--hodi-text); }
+.landlord-subscription-invoice-details .landlord-subscription-status { justify-self: start; margin-top: 3px; }
 .landlord-subscription-invoice form { display: flex; flex-wrap: wrap; gap: 8px; }
 .landlord-subscription-notice { border-color: var(--hodi-info); }
 
@@ -425,7 +480,7 @@
 
 .landlord-property-meta span {
   color: var(--landlord-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .landlord-status {
@@ -445,7 +500,12 @@
 }
 
 .landlord-table-wrap {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
   border: 1px solid var(--landlord-line);
   border-radius: 12px;
   background: var(--landlord-paper);
@@ -458,21 +518,26 @@
   white-space: nowrap;
 }
 
+.landlord-table-wrap:focus-visible {
+  outline: 2px solid var(--hodi-focus);
+  outline-offset: 3px;
+}
+
 .landlord-table th {
-  padding: 13px 16px;
+  padding: 14px 16px;
   background: var(--hodi-surface-raised);
   color: var(--hodi-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: .55px;
   text-transform: uppercase;
 }
 
 .landlord-table td {
-  padding: 14px 16px;
+  padding: 15px 16px;
   border-top: 1px solid var(--hodi-border);
   color: var(--hodi-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .landlord-table td strong {
@@ -576,7 +641,7 @@
   display: grid;
   gap: 6px;
   color: var(--hodi-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -584,14 +649,16 @@
   display: grid;
   gap: 6px;
   color: var(--hodi-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 
 .landlord-form input,
 .landlord-form select,
+.landlord-form textarea,
 .landlord-form-grid input,
-.landlord-form-grid select {
+.landlord-form-grid select,
+.landlord-form-grid textarea {
   height: 40px;
   padding: 0 11px;
   border: 1px solid var(--landlord-line);
@@ -604,10 +671,20 @@
 
 .landlord-form input:focus,
 .landlord-form select:focus,
+.landlord-form textarea:focus,
 .landlord-form-grid input:focus,
-.landlord-form-grid select:focus {
+.landlord-form-grid select:focus,
+.landlord-form-grid textarea:focus {
   border-color: var(--landlord-teal);
   outline: 2px solid color-mix(in srgb, var(--hodi-focus) 28%, transparent);
+}
+
+.landlord-form textarea,
+.landlord-form-grid textarea {
+  min-height: 92px;
+  height: auto;
+  padding: 10px 11px;
+  resize: vertical;
 }
 
 .landlord-form-wide {
@@ -764,10 +841,13 @@
 
 @media (max-width: 760px) {
   .landlord-sidebar {
-    position: static;
-    width: auto;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    width: 100%;
     min-height: auto;
-    flex: 0 0 auto;
+    gap: 10px;
+    overflow: hidden;
     padding: 13px 15px;
   }
 
@@ -776,9 +856,33 @@
   }
 
   .landlord-sidebar-label,
-  .landlord-nav,
   .landlord-sidebar-bottom {
     display: none;
+  }
+
+  .landlord-nav {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: 0 0 3px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .landlord-nav a {
+    min-height: 38px;
+    flex: 0 0 auto;
+    padding: 0 11px;
+    border: 1px solid rgb(255 255 255 / .14);
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  .landlord-nav a.is-active {
+    border-color: color-mix(in srgb, var(--landlord-teal) 55%, transparent);
   }
 
   .landlord-main {
@@ -787,8 +891,22 @@
     padding: 0 16px 24px;
   }
 
+  .landlord-section,
+  .landlord-section:target {
+    scroll-margin-top: 114px;
+  }
+
   .landlord-topbar {
     min-height: 82px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    padding-block: 14px;
+  }
+
+  .landlord-topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .landlord-topbar h1 {
@@ -818,12 +936,24 @@
     padding-top: 26px;
   }
 
+  .landlord-overview-banner-wrap {
+    margin-top: 18px;
+  }
+
+  .landlord-overview-banner {
+    min-height: 14rem;
+  }
+
   .landlord-welcome h2 {
     font-size: 23px;
   }
 
   .landlord-metrics {
     gap: 9px;
+  }
+
+  .landlord-metric-skeleton {
+    min-height: 120px;
   }
 
   .landlord-metric-card {
@@ -849,6 +979,7 @@
 
   .landlord-section-heading {
     align-items: start;
+    flex-wrap: wrap;
   }
 
   .landlord-section-heading h2 {
@@ -872,6 +1003,18 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .landlord-metric-card,
+  .landlord-property-card {
+    transition: none;
+  }
+
+  .landlord-metric-card:hover,
+  .landlord-property-card:hover {
+    transform: none;
+  }
+}
+
 @media (max-width: 430px) {
   .landlord-form-grid {
     grid-template-columns: 1fr;
@@ -883,7 +1026,7 @@
 
   .landlord-metric-card > span {
     min-height: 28px;
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .landlord-topbar .landlord-eyebrow {

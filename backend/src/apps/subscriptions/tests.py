@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.urls import reverse
@@ -5,9 +7,10 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.billing.models import Invoice as RentInvoice
+from apps.billing.models import DocumentStatus, Invoice as RentInvoice
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
+from apps.tenants.models import Tenant
 from apps.audit.models import AuditLog
 from .models import OrganizationSubscription, SubscriptionInvoice, SubscriptionPayment, SubscriptionPaymentAttempt, SubscriptionPlan
 
@@ -42,6 +45,7 @@ class SubscriptionApiTests(APITestCase):
         self.assertEqual(plans['free']['price_minor'], 0)
         self.assertEqual(plans['free']['unit_limit'], 5)
         self.assertEqual(plans['starter']['price_minor'], 99_900)
+        self.assertEqual(plans['starter']['setup_fee_minor'], 0)
         self.assertEqual(plans['growth']['unit_limit'], 75)
         self.assertEqual(plans['professional']['unit_limit'], 200)
         self.assertTrue(plans['enterprise']['is_custom_pricing'])
@@ -105,6 +109,10 @@ class SubscriptionApiTests(APITestCase):
         self.assertEqual(response.data['amount_minor'], 99_900)
         self.assertEqual(response.data['plan_name'], 'Starter')
         self.assertEqual(response.data['currency'], 'KES')
+        self.assertEqual(response.data['monthly_fee_minor'], 99_900)
+        self.assertEqual(response.data['setup_fee_minor'], 0)
+        self.assertEqual(response.data['amount_paid_minor'], 0)
+        self.assertEqual(response.data['outstanding_minor'], 99_900)
         self.assertEqual(response.data['period_start'], timezone.localdate().isoformat())
         self.assertGreater(response.data['period_end'], response.data['period_start'])
         self.assertEqual(response.data['status'], SubscriptionInvoice.Status.ISSUED)
@@ -117,7 +125,106 @@ class SubscriptionApiTests(APITestCase):
         )
         self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_first_paid_invoice_snapshots_one_time_setup_fee_and_later_months_do_not_repeat_it(self):
+        SubscriptionPlan.objects.filter(code='starter').update(setup_fee_minor=15_000)
+        self.client.force_authenticate(self.owner)
+        first = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data['monthly_fee_minor'], 99_900)
+        self.assertEqual(first.data['setup_fee_minor'], 15_000)
+        self.assertEqual(first.data['amount_minor'], 114_900)
+        self.assertEqual(first.data['outstanding_minor'], 114_900)
+        self.assertEqual(first.data['amount_paid_minor'], 0)
+
+        report = self.client.post(
+            reverse('subscriptions:report-payment', args=(first.data['id'],)),
+            {'reference': 'SETUP-FEE-VERIFIED-1'}, format='json',
+        )
+        self.client.force_authenticate(self.admin)
+        confirmed = self.client.post(
+            reverse('subscriptions:admin-payment-review', args=(report.data['id'], 'confirm')),
+            {'reason': 'Matched to the verified subscription receipt'}, format='json',
+        )
+        self.assertEqual(confirmed.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data['amount_minor'], 114_900)
+        self.assertEqual(SubscriptionPayment.objects.get().amount_minor, 114_900)
+        self.subscription.refresh_from_db()
+        self.assertTrue(self.subscription.setup_fee_paid)
+        self.assertTrue(self.subscription.setup_fee_invoiced)
+        self.client.force_authenticate(self.owner)
+        invoice_response = self.client.get(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk},
+        )
+        invoice_view = invoice_response.data['invoices'][0]
+        self.assertEqual(invoice_view['amount_paid_minor'], 114_900)
+        self.assertEqual(invoice_view['outstanding_minor'], 0)
+
+        # A renewal after the current period does not repeat the fee.
+        OrganizationSubscription.objects.filter(pk=self.subscription.pk).update(
+            current_period_end=timezone.localdate() - timedelta(days=1),
+        )
+        self.client.force_authenticate(self.owner)
+        renewal = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(renewal.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(renewal.data['monthly_fee_minor'], 99_900)
+        self.assertEqual(renewal.data['setup_fee_minor'], 0)
+        self.assertEqual(renewal.data['amount_minor'], 99_900)
+
+    def test_setup_fee_is_not_repeated_or_repriced_by_duplicate_or_failed_requests(self):
+        SubscriptionPlan.objects.filter(code='starter').update(setup_fee_minor=12_500)
+        self.client.force_authenticate(self.owner)
+        issued = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(issued.data['setup_fee_minor'], 12_500)
+        duplicate = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(SubscriptionInvoice.objects.filter(organization=self.organization).count(), 1)
+
+        report = self.client.post(
+            reverse('subscriptions:report-payment', args=(issued.data['id'],)),
+            {'reference': 'SETUP-FEE-REJECT-1'}, format='json',
+        )
+        self.client.force_authenticate(self.admin)
+        rejected = self.client.post(
+            reverse('subscriptions:admin-payment-review', args=(report.data['id'], 'reject')),
+            {'reason': 'The reference could not be independently verified'}, format='json',
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_200_OK)
+        self.subscription.refresh_from_db()
+        self.assertFalse(self.subscription.setup_fee_paid)
+        self.assertTrue(self.subscription.setup_fee_invoiced)
+        self.assertEqual(SubscriptionPayment.objects.count(), 0)
+        invoice = SubscriptionInvoice.objects.get(pk=issued.data['id'])
+        self.assertEqual(invoice.setup_fee_minor, 12_500)
+        self.assertEqual(invoice.amount_minor, 112_400)
+
+    def test_existing_subscriptions_are_grandfathered_from_new_setup_fees(self):
+        SubscriptionPlan.objects.filter(code='starter').update(setup_fee_minor=50_000)
+        self.subscription.setup_fee_invoiced = True
+        self.subscription.save(update_fields=('setup_fee_invoiced',))
+        self.client.force_authenticate(self.owner)
+        issued = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(issued.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(issued.data['setup_fee_minor'], 0)
+        self.assertEqual(issued.data['amount_minor'], 99_900)
+
     def test_payment_report_never_activates_plan_until_staff_verification(self):
+        SubscriptionPlan.objects.filter(code='starter').update(setup_fee_minor=10_000)
         self.client.force_authenticate(self.owner)
         created = self.client.post(
             reverse('subscriptions:organization-subscription'),
@@ -133,6 +240,8 @@ class SubscriptionApiTests(APITestCase):
         self.subscription.refresh_from_db()
         self.assertEqual(self.subscription.status, OrganizationSubscription.Status.FREE)
         self.assertEqual(self.subscription.plan.code, 'free')
+        self.assertFalse(self.subscription.setup_fee_paid)
+        self.assertTrue(self.subscription.setup_fee_invoiced)
         self.assertEqual(RentInvoice.objects.count(), 0)
         self.assertEqual(SubscriptionPayment.objects.count(), 0)
         self.client.force_authenticate(self.admin)
@@ -233,7 +342,7 @@ class SubscriptionApiTests(APITestCase):
 
     def test_plan_terms_are_immutable_and_must_be_versioned(self):
         plan = SubscriptionPlan.objects.get(code='starter')
-        plan.price_minor += 1
+        plan.setup_fee_minor = 1
         with self.assertRaises(DjangoValidationError):
             plan.save()
 
@@ -275,6 +384,7 @@ class SubscriptionApiTests(APITestCase):
         self.assertEqual(subscription.effective_unit_limit, 350)
 
     def test_reversed_payment_is_removed_from_net_collected_revenue(self):
+        SubscriptionPlan.objects.filter(code='starter').update(setup_fee_minor=15_000)
         self.client.force_authenticate(self.owner)
         issued = self.client.post(
             reverse('subscriptions:organization-subscription'),
@@ -297,9 +407,143 @@ class SubscriptionApiTests(APITestCase):
         )
         self.assertEqual(reversal.status_code, status.HTTP_200_OK)
         summary = self.client.get(reverse('subscriptions:admin-revenue')).data
-        self.assertEqual(summary['collected_minor'], 99_900)
-        self.assertEqual(summary['reversed_minor'], 99_900)
+        self.assertEqual(summary['collected_minor'], 114_900)
+        self.assertEqual(summary['reversed_minor'], 114_900)
         self.assertEqual(summary['net_collected_minor'], 0)
+        self.assertEqual(summary['setup_fees_collected_minor'], 0)
+        self.assertEqual(summary['setup_fees_reversed_minor'], 15_000)
+        self.assertEqual(summary['monthly_fees_reversed_minor'], 99_900)
+
+    def test_reversing_setup_fee_reopens_invoice_without_reissuing_fee(self):
+        SubscriptionPlan.objects.filter(code='starter').update(setup_fee_minor=15_000)
+        self.client.force_authenticate(self.owner)
+        issued = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(issued.status_code, status.HTTP_201_CREATED)
+        invoice = SubscriptionInvoice.objects.get(pk=issued.data['id'])
+        original_snapshot = (invoice.amount_minor, invoice.monthly_fee_minor, invoice.setup_fee_minor)
+        self.subscription.refresh_from_db()
+        self.assertTrue(self.subscription.setup_fee_invoiced)
+        self.assertFalse(self.subscription.setup_fee_paid)
+
+        report = self.client.post(
+            reverse('subscriptions:report-payment', args=(invoice.pk,)),
+            {'reference': 'REVERSIBLE-SETUP-FEE'}, format='json',
+        )
+        self.client.force_authenticate(self.admin)
+        confirmed = self.client.post(
+            reverse('subscriptions:admin-payment-review', args=(report.data['id'], 'confirm')),
+            {'reason': 'Matched independently to the provider statement'}, format='json',
+        )
+        self.assertEqual(confirmed.status_code, status.HTTP_200_OK)
+        payment = SubscriptionPayment.objects.get(invoice=invoice)
+        self.subscription.refresh_from_db()
+        self.assertTrue(self.subscription.setup_fee_paid)
+
+        reversal_url = reverse('subscriptions:admin-payment-reversal', args=(payment.pk,))
+        reversal = self.client.post(
+            reversal_url, {'reason': 'Provider evidence confirmed the reversal'}, format='json',
+        )
+        self.assertEqual(reversal.status_code, status.HTTP_200_OK)
+        self.subscription.refresh_from_db()
+        self.assertFalse(self.subscription.setup_fee_paid)
+        self.assertTrue(self.subscription.setup_fee_invoiced)
+        self.assertEqual(self.subscription.status, OrganizationSubscription.Status.PAST_DUE)
+
+        self.client.force_authenticate(self.owner)
+        subscription_response = self.client.get(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk},
+        )
+        invoice_view = next(row for row in subscription_response.data['invoices'] if row['id'] == str(invoice.pk))
+        self.assertEqual(invoice_view['amount_minor'], sum(original_snapshot[1:]))
+        self.assertEqual(invoice_view['amount_paid_minor'], 0)
+        self.assertEqual(invoice_view['outstanding_minor'], original_snapshot[0])
+        self.assertEqual(invoice_view['settlement_status'], SubscriptionPayment.Status.REVERSED)
+
+        self.client.force_authenticate(self.admin)
+        duplicate = self.client.post(
+            reversal_url, {'reason': 'Duplicate reversal request'}, format='json',
+        )
+        self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual((invoice.amount_minor, invoice.monthly_fee_minor, invoice.setup_fee_minor), original_snapshot)
+        self.assertEqual(payment.status, SubscriptionPayment.Status.REVERSED)
+        self.assertTrue(AuditLog.objects.filter(
+            action='subscription.payment_reversed', object_id=str(payment.pk),
+            metadata__amount_minor=payment.amount_minor,
+        ).exists())
+
+        OrganizationSubscription.objects.filter(pk=self.subscription.pk).update(
+            current_period_end=timezone.localdate() - timedelta(days=1),
+        )
+        self.client.force_authenticate(self.owner)
+        renewal = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(renewal.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(renewal.data['setup_fee_minor'], 0)
+        self.assertEqual(renewal.data['amount_minor'], 99_900)
+        invoice.refresh_from_db()
+        self.assertEqual((invoice.amount_minor, invoice.monthly_fee_minor, invoice.setup_fee_minor), original_snapshot)
+
+    def test_grandfathered_setup_obligation_survives_unrelated_reversal_and_rental_invoice_is_untouched(self):
+        SubscriptionPlan.objects.filter(code='starter').update(setup_fee_minor=20_000)
+        self.subscription.setup_fee_invoiced = True
+        self.subscription.save(update_fields=('setup_fee_invoiced',))
+        tenant_user = get_user_model().objects.create_user(username='subscription-rent-tenant', password='test-password')
+        tenant = Tenant.objects.create(
+            organization=self.organization, user=tenant_user, first_name='Rental', last_name='Tenant',
+            phone_number='+254700000099',
+        )
+        rent_invoice = RentInvoice.objects.create(
+            organization=self.organization, tenant=tenant,
+            period_start=timezone.localdate(), period_end=timezone.localdate(),
+            due_date=timezone.localdate(), status=DocumentStatus.POSTED,
+            total_cents=8_000, balance_cents=8_000,
+        )
+
+        self.client.force_authenticate(self.owner)
+        issued = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(issued.data['setup_fee_minor'], 0)
+        report = self.client.post(
+            reverse('subscriptions:report-payment', args=(issued.data['id'],)),
+            {'reference': 'GRANDFATHERED-MONTHLY-ONLY'}, format='json',
+        )
+        self.client.force_authenticate(self.admin)
+        confirmed = self.client.post(
+            reverse('subscriptions:admin-payment-review', args=(report.data['id'], 'confirm')),
+            {'reason': 'Verified monthly subscription payment'}, format='json',
+        )
+        self.assertEqual(confirmed.status_code, status.HTTP_200_OK)
+        payment = SubscriptionPayment.objects.get()
+        reversed_response = self.client.post(
+            reverse('subscriptions:admin-payment-reversal', args=(payment.pk,)),
+            {'reason': 'Verified reversal of unrelated monthly payment'}, format='json',
+        )
+        self.assertEqual(reversed_response.status_code, status.HTTP_200_OK)
+        self.subscription.refresh_from_db()
+        self.assertTrue(self.subscription.setup_fee_invoiced)
+        self.assertFalse(self.subscription.setup_fee_paid)
+        rent_invoice.refresh_from_db()
+        self.assertEqual((rent_invoice.total_cents, rent_invoice.balance_cents), (8_000, 8_000))
+
+        self.subscription.current_period_end = timezone.localdate() - timedelta(days=1)
+        self.subscription.save(update_fields=('current_period_end',))
+        self.client.force_authenticate(self.owner)
+        renewal = self.client.post(
+            reverse('subscriptions:organization-subscription'),
+            {'organization': self.organization.pk, 'plan': 'starter'}, format='json',
+        )
+        self.assertEqual(renewal.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(renewal.data['setup_fee_minor'], 0)
 
     def test_login_response_exposes_only_own_staff_authorization_flag(self):
         response = self.client.post('/api/v1/accounts/login/', {
@@ -311,4 +555,3 @@ class SubscriptionApiTests(APITestCase):
             'username': self.owner.username, 'password': 'test-password',
         }, format='json')
         self.assertFalse(ordinary.data['is_staff'])
-

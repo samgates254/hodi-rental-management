@@ -72,7 +72,16 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
       <main id="main" className="bg-bg">
         <Container className="py-8 md:py-12">
           <Link href="/marketplace" className="text-sm font-semibold text-teal">Back to marketplace</Link>
-          {loading && <p className="mt-8 text-text-secondary">Loading listing…</p>}
+          {loading && (
+            <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]" role="status" aria-label="Loading listing" aria-busy="true">
+              <div className="aspect-[16/10] rounded-2xl border border-border bg-surface" />
+              <div className="space-y-3">
+                <div className="h-8 w-2/3 rounded-lg bg-surface" />
+                <div className="h-4 w-1/2 rounded bg-surface" />
+                <p className="text-sm text-text-secondary">Loading listing details…</p>
+              </div>
+            </div>
+          )}
           {!loading && error && (
             <div className="mt-8 rounded-2xl border border-border bg-surface p-6" role="alert">
               <h1 className="text-2xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>Listing unavailable</h1>

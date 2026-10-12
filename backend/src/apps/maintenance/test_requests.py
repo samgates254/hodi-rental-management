@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from rest_framework import status
@@ -7,14 +8,18 @@ from django.utils import timezone
 
 from apps.accounts.models import AccountProfile
 from apps.audit.models import AuditLog
+from apps.billing.models import Charge, Invoice, LedgerPosting, Payment, PaymentAllocation, PaymentReversal
 from apps.leases.models import Lease
 from apps.maintenance.models import (
-    MaintenanceIssue, MaintenanceRequest, RepairCompletion, TechnicianProfile,
-    WorkOrder, WorkOrderAssignment,
+    JobMaterialPurchase, JobMaterialReceipt, MaintenanceIssue, MaintenanceRequest,
+    RepairCompletion, RepairCompletionEvidence, TechnicianProfile, RepairQuotation,
+    RepairQuotationLine, TurnoverAssessment, TurnoverChecklistItem, WorkOrder, WorkOrderAssignment,
 )
+from apps.marketplace.models import SupplierProfile
 from apps.notifications.models import Notification
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
+from apps.subscriptions.models import SubscriptionInvoice, SubscriptionPayment
 from apps.tenants.models import Tenant
 
 
@@ -296,6 +301,11 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(submitted.status_code, status.HTTP_201_CREATED)
         completion_id = submitted.data['id']
 
+        self.client.force_authenticate(self.technician)
+        self_approval = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
+            'completion_id': completion_id, 'approved': True, 'notes': 'Self approval attempt.',
+        }, format='json')
+        self.assertEqual(self_approval.status_code, status.HTTP_403_FORBIDDEN)
         self.client.force_authenticate(self.owner)
         rejected = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
             'completion_id': completion_id, 'approved': False, 'notes': 'Please test after replacing the washer.',
@@ -324,6 +334,11 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(request_row.status, MaintenanceRequest.Status.CLOSED)
         self.assertEqual(request_row.work_order.assignments.count(), 1)
         self.assertEqual(request_row.work_order.completions.count(), 2)
+        conflicting_verify = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
+            'completion_id': resubmitted.data['id'], 'approved': False, 'notes': 'Conflicting late rejection.',
+        }, format='json')
+        self.assertEqual(conflicting_verify.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(AuditLog.objects.filter(action='maintenance.completion_verified').count(), 1)
         self.assertTrue(AuditLog.objects.filter(action='maintenance.quote_submitted').exists())
         self.assertTrue(AuditLog.objects.filter(action='maintenance.quote_approved').exists())
         self.assertTrue(AuditLog.objects.filter(action='maintenance.verification_rejected').exists())
@@ -336,6 +351,716 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertIsNone(tenant_view.data['completion']['actual_total_cents'])
         self.assertEqual(tenant_view.data['quotations'][0]['status'], 'APPROVED')
         self.assertEqual(tenant_view.data['triage_notes'], '')
+
+    def _assigned_quote_request(self):
+        self.client.force_authenticate(self.tenant_user)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'title': 'Broken tap', 'description': 'The kitchen tap leaks.', 'hazard': 2,
+        }, format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        request_id = created.data['id']
+        self.client.force_authenticate(self.caretaker)
+        assigned = self.client.post(f'/api/v1/maintenance/requests/{request_id}/assign/', {
+            'user_id': self.technician.pk,
+        }, format='json')
+        self.assertEqual(assigned.status_code, status.HTTP_200_OK)
+        self.client.force_authenticate(self.technician)
+        return request_id
+
+    def _approved_material_request(self):
+        self.client.force_authenticate(self.tenant_user)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'title': 'Repair kitchen tap', 'description': 'The tap valve is worn.', 'hazard': 2,
+        }, format='json')
+        request_id = created.data['id']
+        self.client.force_authenticate(self.caretaker)
+        triaged = self.client.post(f'/api/v1/maintenance/requests/{request_id}/triage/', {
+            'category': 'PLUMBING', 'hazard': 2, 'vulnerability': 1,
+            'notes': 'Replace valve.', 'requires_approval': True,
+        }, format='json')
+        self.assertEqual(triaged.status_code, status.HTTP_200_OK, triaged.data)
+        assigned = self.client.post(f'/api/v1/maintenance/requests/{request_id}/assign/', {
+            'user_id': self.technician.pk,
+        }, format='json')
+        self.assertEqual(assigned.status_code, status.HTTP_200_OK, assigned.data)
+        self.client.force_authenticate(self.technician)
+        quote = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Replace valve and install.',
+            'lines': [
+                {'category': 'MATERIAL', 'description': 'Tap valve', 'quantity': '5', 'unit': 'item', 'unit_price_cents': 100},
+                {'category': 'LABOUR', 'description': 'Plumbing labour', 'quantity': '1', 'unit': 'job', 'unit_price_cents': 500},
+            ],
+        }, format='json')
+        self.assertEqual(quote.status_code, status.HTTP_201_CREATED, quote.data)
+        self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote.data["id"]}/submit/', {}, format='json',
+        )
+        self.client.force_authenticate(self.owner)
+        approved = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote.data["id"]}/decision/',
+            {'approved': True, 'notes': 'Approved exact scope.'}, format='json',
+        )
+        self.assertEqual(approved.status_code, status.HTTP_200_OK, approved.data)
+        line_id = next(line['id'] for line in approved.data['lines'] if line['category'] == 'MATERIAL')
+        return request_id, approved.data, line_id
+
+    def _purchase_payload(self, quote, line_id, *, key=None, quantity='2', unit_price_cents=150, overrun_reason=''):
+        return {
+            'quotation_id': quote['id'], 'quotation_line_id': line_id,
+            'supplier_name': 'Rongai Hardware', 'supplier_reference': 'RH-2401',
+            'quantity': quantity, 'unit_price_cents': unit_price_cents,
+            'purchase_date': '2026-10-12', 'idempotency_key': str(key or uuid4()),
+            'overrun_reason': overrun_reason,
+        }
+
+    def _financial_table_counts(self):
+        return (
+            Invoice.objects.count(), Charge.objects.count(), Payment.objects.count(),
+            PaymentAllocation.objects.count(), PaymentReversal.objects.count(), LedgerPosting.objects.count(),
+            SubscriptionInvoice.objects.count(), SubscriptionPayment.objects.count(),
+        )
+
+    def _request_turnover(self, request_id, *, key=None):
+        self.client.force_authenticate(self.caretaker)
+        return self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/turnover-assessments/',
+            {'idempotency_key': str(key or uuid4())}, format='json',
+        )
+
+    def _create_and_start_repair(self):
+        self.client.force_authenticate(self.caretaker)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'unit': self.unit.pk, 'title': 'Prepare vacant unit',
+            'description': 'Repair and inspect before reletting.', 'hazard': 2,
+        }, format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        request_id = created.data['id']
+        assigned = self.client.post(f'/api/v1/maintenance/requests/{request_id}/assign/', {
+            'user_id': self.technician.pk,
+        }, format='json')
+        self.assertEqual(assigned.status_code, status.HTTP_200_OK, assigned.data)
+        self.client.force_authenticate(self.technician)
+        accepted = self.client.post(f'/api/v1/maintenance/requests/{request_id}/accept/', {}, format='json')
+        self.assertEqual(accepted.status_code, status.HTTP_200_OK, accepted.data)
+        started = self.client.post(f'/api/v1/maintenance/requests/{request_id}/start/', {}, format='json')
+        self.assertEqual(started.status_code, status.HTTP_200_OK, started.data)
+        return request_id
+
+    def _submit_and_verify_repair(self, request_id):
+        self.client.force_authenticate(self.technician)
+        started = self.client.post(f'/api/v1/maintenance/requests/{request_id}/start/', {}, format='json')
+        self.assertEqual(started.status_code, status.HTTP_200_OK, started.data)
+        submitted = self.client.post(f'/api/v1/maintenance/requests/{request_id}/complete/', {
+            'diagnosis': 'Fixture inspection complete', 'failure_category': 'OTHER',
+            'resolution_summary': 'Repair completed for verification.', 'outcome': 'FIXED',
+            'labour_cost_cents': 100, 'materials_cost_cents': 0, 'other_cost_cents': 0,
+        }, format='json')
+        self.assertEqual(submitted.status_code, status.HTTP_201_CREATED, submitted.data)
+        self.client.force_authenticate(self.owner)
+        verified = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
+            'completion_id': submitted.data['id'], 'approved': True, 'notes': 'Reviewed repair evidence and outcome.',
+        }, format='json')
+        self.assertEqual(verified.status_code, status.HTTP_200_OK, verified.data)
+        return submitted.data['id']
+
+    def _vacate_fixture_lease(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(f'/api/v1/leases/{self.lease.pk}/terminate/', {
+            'end_date': (timezone.localdate() - timedelta(days=1)).isoformat(),
+            'reason': 'Unit vacated for turnover.',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+    def test_completion_evidence_is_private_idempotent_and_audited(self):
+        request_id = self._assigned_quote_request()
+        self.client.post(f'/api/v1/maintenance/requests/{request_id}/accept/', {}, format='json')
+        self.client.post(f'/api/v1/maintenance/requests/{request_id}/start/', {}, format='json')
+        completion = self.client.post(f'/api/v1/maintenance/requests/{request_id}/complete/', {
+            'diagnosis': 'Seal worn', 'failure_category': 'WEAR',
+            'resolution_summary': 'Seal replaced; test passed.', 'outcome': 'FIXED',
+            'labour_cost_cents': 100, 'materials_cost_cents': 0,
+        }, format='json')
+        self.assertEqual(completion.status_code, status.HTTP_201_CREATED, completion.data)
+        completion_id = completion.data['id']
+        endpoint = f'/api/v1/maintenance/requests/{request_id}/completions/{completion_id}/evidence/'
+        payload = {
+            'category': 'AFTER_PHOTO', 'caption': 'Seal after replacement.',
+            'evidence_reference': 'private-store/repairs/after-image-001',
+        }
+        finance_before = self._financial_table_counts()
+
+        created = self.client.post(endpoint, payload, format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        evidence = RepairCompletionEvidence.objects.get()
+        self.assertEqual(evidence.completion_id, completion_id)
+        self.assertEqual(evidence.maintenance_request_id, request_id)
+        self.assertEqual(evidence.organization_id, self.organization.pk)
+        self.assertEqual(evidence.recorded_by_id, self.technician.pk)
+        self.assertEqual(created.data['evidence']['evidence_reference'], payload['evidence_reference'])
+        self.assertFalse(created.data['idempotent_replay'])
+
+        repeated = self.client.post(endpoint, payload, format='json')
+        self.assertEqual(repeated.status_code, status.HTTP_200_OK)
+        self.assertTrue(repeated.data['idempotent_replay'])
+        assigned_technician_read = self.client.get(endpoint)
+        self.assertEqual(assigned_technician_read.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(assigned_technician_read.data), 1)
+        conflicting = self.client.post(endpoint, {**payload, 'caption': 'Changed caption.'}, format='json')
+        self.assertEqual(conflicting.status_code, status.HTTP_400_BAD_REQUEST)
+        public_url = self.client.post(endpoint, {**payload, 'evidence_reference': 'https://example.invalid/private.jpg'}, format='json')
+        self.assertEqual(public_url.status_code, status.HTTP_400_BAD_REQUEST)
+        wrong_completion = self.client.get(
+            f'/api/v1/maintenance/requests/{request_id}/completions/999999/evidence/',
+        )
+        self.assertEqual(wrong_completion.status_code, status.HTTP_404_NOT_FOUND)
+
+        self.client.force_authenticate(self.owner)
+        staff_read = self.client.get(endpoint)
+        self.assertEqual(staff_read.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(staff_read.data), 1)
+        self.client.force_authenticate(self.tenant_user)
+        tenant_read = self.client.get(endpoint)
+        self.assertEqual(tenant_read.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.other_tech)
+        cross_org_read = self.client.get(endpoint)
+        self.assertEqual(cross_org_read.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(AuditLog.objects.filter(action='maintenance.completion_evidence_recorded').count(), 1)
+        self.assertEqual(self._financial_table_counts(), finance_before)
+
+    def test_turnover_assessment_requires_vacancy_and_preserves_unit_status(self):
+        request_id = self._create_and_start_repair()
+        self.unit.status = Unit.Status.AVAILABLE
+        self.unit.save(update_fields=('status', 'updated_at'))
+        active_lease_with_available_unit = self._request_turnover(request_id)
+        self.assertEqual(active_lease_with_available_unit.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('active lease', str(active_lease_with_available_unit.data).lower())
+        self.unit.status = Unit.Status.OCCUPIED
+        self.unit.save(update_fields=('status', 'updated_at'))
+        blocked = self._request_turnover(request_id)
+        self.assertEqual(blocked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(TurnoverAssessment.objects.exists())
+        self.assertEqual(self.unit.status, Unit.Status.OCCUPIED)
+
+    def test_turnover_failure_reassessment_and_ready_decision_are_audited_without_changing_lease_or_unit(self):
+        request_id, _, _ = self._approved_material_request()
+        self._vacate_fixture_lease()
+        self.unit.refresh_from_db()
+        self.unit.status = Unit.Status.MAINTENANCE
+        self.unit.save(update_fields=('status', 'updated_at'))
+        finance_before = self._financial_table_counts()
+
+        initial = self._request_turnover(request_id)
+        self.assertEqual(initial.status_code, status.HTTP_201_CREATED, initial.data)
+        assessment_id = initial.data['assessment']['id']
+        self.assertEqual(initial.data['assessment']['status'], 'REQUESTED')
+        replay = self._request_turnover(request_id, key=uuid4())
+        self.assertEqual(replay.status_code, status.HTTP_400_BAD_REQUEST)
+
+        decision_url = f'/api/v1/maintenance/requests/{request_id}/turnover-assessments/{assessment_id}/assess/'
+        checklist_pass = [{'item_key': 'fixtures', 'label': 'Fixtures operating', 'passed': True, 'notes': ''}]
+        self.client.force_authenticate(self.owner)
+        unverified_job = self.client.post(decision_url, {
+            'ready': True, 'checklist_items': checklist_pass,
+        }, format='json')
+        self.assertEqual(unverified_job.status_code, status.HTTP_400_BAD_REQUEST)
+        self.client.force_authenticate(self.caretaker)
+        unauthorized_ready = self.client.post(decision_url, {
+            'ready': True, 'checklist_items': checklist_pass,
+        }, format='json')
+        self.assertEqual(unauthorized_ready.status_code, status.HTTP_403_FORBIDDEN)
+        failed = self.client.post(decision_url, {
+            'ready': False, 'outstanding_issues': 'Kitchen tap still leaks.',
+            'checklist_items': [{**checklist_pass[0], 'passed': False, 'notes': 'Leak detected.'}],
+        }, format='json')
+        self.assertEqual(failed.status_code, status.HTTP_201_CREATED, failed.data)
+        self.assertEqual(failed.data['assessment']['status'], 'FAILED')
+        self.assertEqual(TurnoverChecklistItem.objects.filter(assessment_id=assessment_id).count(), 1)
+        same_failure = self.client.post(decision_url, {
+            'ready': False, 'outstanding_issues': 'Kitchen tap still leaks.',
+            'checklist_items': [{**checklist_pass[0], 'passed': False, 'notes': 'Leak detected.'}],
+        }, format='json')
+        self.assertEqual(same_failure.status_code, status.HTTP_200_OK)
+        self.assertTrue(same_failure.data['idempotent_replay'])
+        self.client.force_authenticate(self.owner)
+        conflicting = self.client.post(decision_url, {
+            'ready': True, 'checklist_items': checklist_pass,
+        }, format='json')
+        self.assertEqual(conflicting.status_code, status.HTTP_400_BAD_REQUEST)
+
+        reassessment = self._request_turnover(request_id)
+        self.assertEqual(reassessment.status_code, status.HTTP_201_CREATED, reassessment.data)
+        new_assessment_id = reassessment.data['assessment']['id']
+        self.assertEqual(reassessment.data['assessment']['revision_of'], assessment_id)
+        self._submit_and_verify_repair(request_id)
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.status, Unit.Status.MAINTENANCE)
+
+        ready_url = f'/api/v1/maintenance/requests/{request_id}/turnover-assessments/{new_assessment_id}/assess/'
+        self.client.force_authenticate(self.owner)
+        ready = self.client.post(ready_url, {
+            'ready': True, 'checklist_items': checklist_pass,
+        }, format='json')
+        self.assertEqual(ready.status_code, status.HTTP_201_CREATED, ready.data)
+        self.assertEqual(ready.data['assessment']['status'], 'READY')
+        self.assertEqual(ready.data['assessment']['assessed_by'], self.owner.pk)
+        self.assertIsNotNone(ready.data['assessment']['assessed_at'])
+        duplicate_ready = self.client.post(ready_url, {
+            'ready': True, 'checklist_items': checklist_pass,
+        }, format='json')
+        self.assertEqual(duplicate_ready.status_code, status.HTTP_200_OK)
+        self.assertTrue(duplicate_ready.data['idempotent_replay'])
+        self.client.force_authenticate(self.caretaker)
+        caretaker_ready_replay = self.client.post(ready_url, {
+            'ready': True, 'checklist_items': checklist_pass,
+        }, format='json')
+        self.assertEqual(caretaker_ready_replay.status_code, status.HTTP_403_FORBIDDEN)
+        self.unit.refresh_from_db()
+        self.lease.refresh_from_db()
+        self.assertEqual(self.unit.status, Unit.Status.MAINTENANCE)
+        self.assertEqual(self.lease.status, Lease.Status.TERMINATED)
+        self.assertEqual(AuditLog.objects.filter(action='maintenance.turnover_inspection_requested').count(), 2)
+        self.assertEqual(AuditLog.objects.filter(action='maintenance.turnover_readiness_recorded').count(), 2)
+        self.assertEqual(self._financial_table_counts(), finance_before)
+
+        self.client.force_authenticate(self.tenant_user)
+        tenant_history = self.client.get(f'/api/v1/maintenance/requests/{request_id}/turnover-assessments/')
+        self.assertEqual(tenant_history.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_verified_ordinary_repair_does_not_create_readiness_or_make_unit_available(self):
+        request_id, _, _ = self._approved_material_request()
+        self._vacate_fixture_lease()
+        self.unit.status = Unit.Status.MAINTENANCE
+        self.unit.save(update_fields=('status', 'updated_at'))
+        self._submit_and_verify_repair(request_id)
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.status, Unit.Status.MAINTENANCE)
+        self.assertFalse(TurnoverAssessment.objects.exists())
+
+    def test_material_purchase_is_scoped_idempotent_and_distinct_from_receipt(self):
+        request_id, quote, line_id = self._approved_material_request()
+        request_key = uuid4()
+        payload = self._purchase_payload(quote, line_id, key=request_key, quantity='1.5', unit_price_cents=101)
+        supplier_profile = SupplierProfile.objects.create(organization=self.organization, created_by=self.owner, business_name='Repair Supply Co')
+        payload['supplier_profile'] = supplier_profile.pk
+        finances_before = self._financial_table_counts()
+
+        self.client.force_authenticate(self.tenant_user)
+        tenant_read = self.client.get(f'/api/v1/maintenance/requests/{request_id}/purchases/')
+        self.assertEqual(tenant_read.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.technician)
+        denied = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', payload, format='json')
+        self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.owner)
+        created = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', payload, format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        purchase = created.data['purchase']
+        self.assertEqual(purchase['purchase_total_cents'], 152)
+        self.assertEqual(purchase['status'], 'RECORDED')
+        self.assertEqual(purchase['received_quantity'], '0')
+        self.assertEqual(purchase['quotation'], quote['id'])
+        self.assertEqual(purchase['quotation_line'], line_id)
+        self.assertEqual(purchase['supplier_profile'], supplier_profile.pk)
+        self.assertEqual(created.data['idempotent_replay'], False)
+        comparison = self.client.get('/api/v1/maintenance/price-history/', {'item': 'Tap valve', 'unit': 'item'})
+        self.assertEqual(comparison.status_code, status.HTTP_200_OK)
+        self.assertEqual(comparison.data[0]['unit_price_cents'], 101)
+        self.assertEqual(comparison.data[0]['supplier'], 'Rongai Hardware')
+
+        self.client.force_authenticate(self.technician)
+        assigned_job_materials = self.client.get(f'/api/v1/maintenance/requests/{request_id}/purchases/')
+        self.assertEqual(assigned_job_materials.status_code, status.HTTP_200_OK)
+        self.assertFalse(assigned_job_materials.data['can_record_purchase'])
+        self.assertFalse(assigned_job_materials.data['can_acknowledge_receipt'])
+        technician_purchase = assigned_job_materials.data['purchases'][0]
+        self.assertEqual(technician_purchase['description'], 'Tap valve')
+        self.assertEqual(technician_purchase['received_quantity'], '0')
+        self.assertEqual(technician_purchase['supplier_name'], '')
+        self.assertIsNone(technician_purchase['purchase_total_cents'])
+        self.assertEqual(technician_purchase['receipts'], [])
+
+        self.client.force_authenticate(self.owner)
+        repeated = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', payload, format='json')
+        self.assertEqual(repeated.status_code, status.HTTP_200_OK)
+        self.assertTrue(repeated.data['idempotent_replay'])
+        self.assertEqual(JobMaterialPurchase.objects.filter(maintenance_request_id=request_id).count(), 1)
+        conflict = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', {
+            **payload, 'quantity': '1',
+        }, format='json')
+        self.assertEqual(conflict.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.client.force_authenticate(self.owner)
+        self_ack = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase["id"]}/receipts/', {
+                'quantity': '1', 'evidence_reference': 'delivery-note-001', 'idempotency_key': str(uuid4()),
+            }, format='json',
+        )
+        self.assertEqual(self_ack.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.technician)
+        tech_ack = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase["id"]}/receipts/', {
+                'quantity': '1', 'evidence_reference': 'delivery-note-001', 'idempotency_key': str(uuid4()),
+            }, format='json',
+        )
+        self.assertEqual(tech_ack.status_code, status.HTTP_403_FORBIDDEN)
+
+        receipt_key = uuid4()
+        self.client.force_authenticate(self.caretaker)
+        receipt_payload = {
+            'quantity': '1', 'evidence_reference': 'delivery-note-001',
+            'idempotency_key': str(receipt_key),
+        }
+        received = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase["id"]}/receipts/',
+            receipt_payload, format='json',
+        )
+        self.assertEqual(received.status_code, status.HTTP_201_CREATED, received.data)
+        self.assertEqual(received.data['purchase']['status'], 'PARTIALLY_RECEIVED')
+        self.assertEqual(received.data['purchase']['received_quantity'], '1.000')
+        repeated_receipt = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase["id"]}/receipts/',
+            receipt_payload, format='json',
+        )
+        self.assertEqual(repeated_receipt.status_code, status.HTTP_200_OK)
+        self.assertTrue(repeated_receipt.data['idempotent_replay'])
+        conflict_receipt = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase["id"]}/receipts/', {
+                **receipt_payload, 'quantity': '0.5',
+            }, format='json',
+        )
+        self.assertEqual(conflict_receipt.status_code, status.HTTP_400_BAD_REQUEST)
+        over_receipt = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase["id"]}/receipts/', {
+                'quantity': '1', 'evidence_reference': 'delivery-note-002', 'idempotency_key': str(uuid4()),
+            }, format='json',
+        )
+        self.assertEqual(over_receipt.status_code, status.HTTP_400_BAD_REQUEST)
+        final_receipt = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase["id"]}/receipts/', {
+                'quantity': '0.5', 'evidence_reference': 'delivery-note-002', 'idempotency_key': str(uuid4()),
+            }, format='json',
+        )
+        self.assertEqual(final_receipt.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(final_receipt.data['purchase']['status'], 'RECEIVED')
+        self.assertIsNone(final_receipt.data['purchase']['purchase_total_cents'])
+
+        self.client.force_authenticate(self.owner)
+        purchase_list = self.client.get(f'/api/v1/maintenance/requests/{request_id}/purchases/')
+        self.assertEqual(purchase_list.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(purchase_list.data['purchases']), 1)
+        self.assertEqual(purchase_list.data['purchases'][0]['purchase_total_cents'], 152)
+        self.assertTrue(purchase_list.data['can_record_purchase'])
+        self.assertEqual(self._financial_table_counts(), finances_before)
+        self.assertTrue(AuditLog.objects.filter(action='maintenance.material_purchase_recorded').exists())
+        self.assertEqual(AuditLog.objects.filter(action='maintenance.material_receipt_acknowledged').count(), 2)
+
+    def test_purchase_validates_amounts_budget_and_current_approved_revision(self):
+        request_id, quote, line_id = self._approved_material_request()
+        self.client.force_authenticate(self.owner)
+        invalid_price = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', {
+            **self._purchase_payload(quote, line_id), 'unit_price_cents': -1,
+        }, format='json')
+        self.assertEqual(invalid_price.status_code, status.HTTP_400_BAD_REQUEST)
+        invalid_quantity = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', {
+            **self._purchase_payload(quote, line_id), 'quantity': '0',
+        }, format='json')
+        self.assertEqual(invalid_quantity.status_code, status.HTTP_400_BAD_REQUEST)
+        excess_quantity = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', {
+            **self._purchase_payload(quote, line_id), 'quantity': '5.001',
+        }, format='json')
+        self.assertEqual(excess_quantity.status_code, status.HTTP_400_BAD_REQUEST)
+
+        over_budget_payload = self._purchase_payload(quote, line_id, quantity='5', unit_price_cents=150)
+        blocked_overrun = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/', over_budget_payload, format='json',
+        )
+        self.assertEqual(blocked_overrun.status_code, status.HTTP_400_BAD_REQUEST)
+        allowed_overrun = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/', {
+                **over_budget_payload, 'overrun_reason': 'Supplier price exceeded the approved material estimate.',
+            }, format='json',
+        )
+        self.assertEqual(allowed_overrun.status_code, status.HTTP_201_CREATED, allowed_overrun.data)
+        self.assertEqual(allowed_overrun.data['purchase']['purchase_total_cents'], 750)
+        self.assertEqual(allowed_overrun.data['purchase']['overrun_authorized_by'], self.owner.pk)
+
+        self.client.force_authenticate(self.technician)
+        pending_revision = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Revision requiring approval.', 'lines': [{
+                'category': 'MATERIAL', 'description': 'Tap valve', 'quantity': '5', 'unit': 'item', 'unit_price_cents': 90,
+            }],
+        }, format='json')
+        self.assertEqual(pending_revision.status_code, status.HTTP_201_CREATED)
+        self.client.force_authenticate(self.owner)
+        stale_quote_purchase = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/',
+            self._purchase_payload(quote, line_id), format='json',
+        )
+        self.assertEqual(stale_quote_purchase.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_material_cost_summary_links_consumption_without_double_counting_and_requires_overrun_authorization(self):
+        request_id, quote, line_id = self._approved_material_request()
+        self.client.force_authenticate(self.owner)
+        purchase_response = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/',
+            self._purchase_payload(quote, line_id, quantity='2', unit_price_cents=150), format='json',
+        )
+        self.assertEqual(purchase_response.status_code, status.HTTP_201_CREATED, purchase_response.data)
+        purchase_id = purchase_response.data['purchase']['id']
+        self.client.force_authenticate(self.caretaker)
+        receipt_response = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase_id}/receipts/', {
+                'quantity': '2', 'evidence_reference': 'goods-received-note-8',
+                'idempotency_key': str(uuid4()),
+            }, format='json',
+        )
+        self.assertEqual(receipt_response.status_code, status.HTTP_201_CREATED)
+
+        self.client.force_authenticate(self.technician)
+        accepted = self.client.post(f'/api/v1/maintenance/requests/{request_id}/accept/', {}, format='json')
+        self.assertEqual(accepted.status_code, status.HTTP_200_OK)
+        started = self.client.post(f'/api/v1/maintenance/requests/{request_id}/start/', {}, format='json')
+        self.assertEqual(started.status_code, status.HTTP_200_OK)
+        completion = self.client.post(f'/api/v1/maintenance/requests/{request_id}/complete/', {
+            'diagnosis': 'Valve worn', 'failure_category': 'WEAR',
+            'resolution_summary': 'Valve replaced and checked.', 'outcome': 'FIXED',
+            'labour_cost_cents': 500, 'materials_cost_cents': 150, 'other_cost_cents': 0,
+            'materials': [{
+                'description': 'Client supplied wrong label', 'quantity': '1', 'unit': 'unknown',
+                'unit_cost_cents': 1, 'purchase_id': purchase_id,
+            }],
+        }, format='json')
+        self.assertEqual(completion.status_code, status.HTTP_201_CREATED, completion.data)
+        self.assertEqual(completion.data['materials'][0]['description'], 'Tap valve')
+        self.assertEqual(completion.data['materials'][0]['unit'], 'item')
+        self.assertEqual(completion.data['materials'][0]['unit_cost_cents'], 150)
+
+        self.client.force_authenticate(self.owner)
+        summary = self.client.get(f'/api/v1/maintenance/requests/{request_id}/cost-summary/')
+        self.assertEqual(summary.status_code, status.HTTP_200_OK)
+        self.assertEqual(summary.data['approved_total_cents'], 1000)
+        self.assertEqual(summary.data['recorded_purchase_total_cents'], 300)
+        self.assertEqual(summary.data['reported_material_consumption_cost_cents'], 150)
+        self.assertEqual(summary.data['recorded_job_cost_cents'], 800)
+        self.assertEqual(summary.data['variance_cents'], -200)
+        self.assertEqual(summary.data['supplier_payment_status'], 'NOT_TRACKED')
+        self.assertEqual(summary.data['cost_summary_status'], 'PROVISIONAL')
+        verified = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
+            'completion_id': completion.data['id'], 'approved': True, 'notes': 'Costs and work reviewed.',
+        }, format='json')
+        self.assertEqual(verified.status_code, status.HTTP_200_OK, verified.data)
+        summary = self.client.get(f'/api/v1/maintenance/requests/{request_id}/cost-summary/')
+        self.assertEqual(summary.data['cost_summary_status'], 'FINAL_RECORDED')
+        self.assertTrue(summary.data['materials_reconciled'])
+
+    def test_over_budget_completion_requires_explicit_owner_authorization(self):
+        request_id, quote, line_id = self._approved_material_request()
+        self.client.force_authenticate(self.owner)
+        purchase = self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/', {
+            **self._purchase_payload(quote, line_id, quantity='5', unit_price_cents=150),
+            'overrun_reason': 'Approved supplier price variance.',
+        }, format='json')
+        self.assertEqual(purchase.status_code, status.HTTP_201_CREATED, purchase.data)
+        purchase_id = purchase.data['purchase']['id']
+        self.client.force_authenticate(self.caretaker)
+        self.client.post(f'/api/v1/maintenance/requests/{request_id}/purchases/{purchase_id}/receipts/', {
+            'quantity': '5', 'evidence_reference': 'delivery-ref-5', 'idempotency_key': str(uuid4()),
+        }, format='json')
+        self.client.force_authenticate(self.technician)
+        self.client.post(f'/api/v1/maintenance/requests/{request_id}/accept/', {}, format='json')
+        self.client.post(f'/api/v1/maintenance/requests/{request_id}/start/', {}, format='json')
+        completion = self.client.post(f'/api/v1/maintenance/requests/{request_id}/complete/', {
+            'diagnosis': 'Valve worn', 'failure_category': 'WEAR',
+            'resolution_summary': 'Valve replaced.', 'outcome': 'FIXED',
+            'labour_cost_cents': 500, 'materials_cost_cents': 0, 'other_cost_cents': 0,
+        }, format='json')
+        self.assertEqual(completion.status_code, status.HTTP_201_CREATED)
+        self.client.force_authenticate(self.caretaker)
+        unauthorized_overrun = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
+            'completion_id': completion.data['id'], 'approved': True,
+            'authorize_cost_overrun': True, 'cost_overrun_reason': 'Not authorized by this role.',
+        }, format='json')
+        self.assertEqual(unauthorized_overrun.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.owner)
+        missing_reason = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
+            'completion_id': completion.data['id'], 'approved': True,
+        }, format='json')
+        self.assertEqual(missing_reason.status_code, status.HTTP_400_BAD_REQUEST)
+        authorized = self.client.post(f'/api/v1/maintenance/requests/{request_id}/verify/', {
+            'completion_id': completion.data['id'], 'approved': True,
+            'authorize_cost_overrun': True, 'cost_overrun_reason': 'Supplier cost and actual work were reviewed.',
+        }, format='json')
+        self.assertEqual(authorized.status_code, status.HTTP_200_OK, authorized.data)
+        self.assertEqual(authorized.data['cost_overrun_authorized_by_name'], self.owner.username)
+        self.assertEqual(authorized.data['cost_overrun_reason'], 'Supplier cost and actual work were reviewed.')
+
+    def test_itemized_quotation_uses_server_totals_rounding_and_immutable_submission(self):
+        request_id = self._assigned_quote_request()
+        payload = {
+            'explanation': 'Replace tap washer and inspect supply line.',
+            'lines': [
+                {'category': 'LABOUR', 'description': 'Plumbing labour', 'quantity': '1.25', 'unit': 'hour', 'unit_price_cents': 101},
+                {'category': 'MATERIAL', 'description': 'Washer', 'quantity': '0.335', 'unit': 'item', 'unit_price_cents': 100},
+                {'category': 'TRANSPORT', 'description': 'Travel', 'quantity': '1', 'unit': 'job', 'unit_price_cents': 50},
+            ],
+        }
+        before = (
+            RepairQuotation.objects.count(), RepairQuotationLine.objects.count(),
+            Invoice.objects.count(), Charge.objects.count(), Payment.objects.count(),
+            PaymentAllocation.objects.count(), PaymentReversal.objects.count(), LedgerPosting.objects.count(),
+            SubscriptionInvoice.objects.count(), SubscriptionPayment.objects.count(),
+        )
+        created = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', payload, format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        self.assertEqual(created.data['status'], 'DRAFT')
+        self.assertEqual(created.data['labour_estimate_cents'], 126)
+        self.assertEqual(created.data['materials_estimate_cents'], 34)
+        self.assertEqual(created.data['other_estimate_cents'], 50)
+        self.assertEqual(created.data['total_estimate_cents'], 210)
+        self.assertEqual([line['line_total_cents'] for line in created.data['lines']], [126, 34, 50])
+        self.assertEqual(RepairQuotation.objects.count(), before[0] + 1)
+        self.assertEqual(RepairQuotationLine.objects.count(), before[1] + 3)
+
+        bad_total = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            **payload, 'total_estimate_cents': 999,
+        }, format='json')
+        self.assertEqual(bad_total.status_code, status.HTTP_400_BAD_REQUEST)
+        mismatched_line_total = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Tampered line total.', 'lines': [{
+                'category': 'MATERIAL', 'description': 'Washer', 'quantity': '1', 'unit': 'item',
+                'unit_price_cents': 100, 'line_total_cents': 1,
+            }],
+        }, format='json')
+        self.assertEqual(mismatched_line_total.status_code, status.HTTP_400_BAD_REQUEST)
+        mismatched_subtotal = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            **payload, 'labour_estimate_cents': 127,
+        }, format='json')
+        self.assertEqual(mismatched_subtotal.status_code, status.HTTP_400_BAD_REQUEST)
+        bad_qty = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Invalid quantity.', 'lines': [{
+                'category': 'MATERIAL', 'description': 'Washer', 'quantity': '-1', 'unit': 'item', 'unit_price_cents': 100,
+            }],
+        }, format='json')
+        self.assertEqual(bad_qty.status_code, status.HTTP_400_BAD_REQUEST)
+        overflow = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Out of range.', 'lines': [{
+                'category': 'OTHER', 'description': 'Overflow', 'quantity': '999999999.999',
+                'unit': 'job', 'unit_price_cents': 9223372036854775807,
+            }],
+        }, format='json')
+        self.assertEqual(overflow.status_code, status.HTTP_400_BAD_REQUEST)
+
+        quote_id = created.data['id']
+        changed = self.client.patch(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote_id}/', {
+                'explanation': 'Updated estimate after inspection.',
+                'lines': [payload['lines'][0]],
+            }, format='json',
+        )
+        self.assertEqual(changed.status_code, status.HTTP_200_OK, changed.data)
+        self.assertEqual(changed.data['total_estimate_cents'], 126)
+        locked_line_values = list(RepairQuotationLine.objects.filter(quotation_id=created.data['id']).values_list(
+            'category', 'description', 'quantity', 'unit', 'unit_price_cents', 'line_total_cents',
+        ))
+        submitted = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote_id}/submit/', {}, format='json',
+        )
+        self.assertEqual(submitted.status_code, status.HTTP_200_OK)
+        repeated = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote_id}/submit/', {}, format='json',
+        )
+        self.assertEqual(repeated.status_code, status.HTTP_200_OK)
+        locked = self.client.patch(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote_id}/', payload, format='json',
+        )
+        self.assertEqual(locked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.client.force_authenticate(self.owner)
+        approved = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote_id}/decision/',
+            {'approved': True, 'notes': 'Approved for the submitted scope.'}, format='json',
+        )
+        self.assertEqual(approved.status_code, status.HTTP_200_OK)
+        approved_line_values = list(RepairQuotationLine.objects.filter(quotation_id=quote_id).values_list(
+            'category', 'description', 'quantity', 'unit', 'unit_price_cents', 'line_total_cents',
+        ))
+        self.assertEqual(approved_line_values, locked_line_values)
+        approved_edit = self.client.patch(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote_id}/', payload, format='json',
+        )
+        self.assertEqual(approved_edit.status_code, status.HTTP_400_BAD_REQUEST)
+        after = (
+            RepairQuotation.objects.count(), RepairQuotationLine.objects.count(),
+            Invoice.objects.count(), Charge.objects.count(), Payment.objects.count(),
+            PaymentAllocation.objects.count(), PaymentReversal.objects.count(), LedgerPosting.objects.count(),
+            SubscriptionInvoice.objects.count(), SubscriptionPayment.objects.count(),
+        )
+        self.assertEqual(after[2:], before[2:])
+        self.assertEqual(approved_line_values[0][1], 'Plumbing labour')
+        self.assertTrue(AuditLog.objects.filter(action='maintenance.quote_draft_created', object_id=str(quote_id)).exists())
+        self.assertTrue(AuditLog.objects.filter(action='maintenance.quote_draft_updated', object_id=str(quote_id)).exists())
+        self.assertEqual(AuditLog.objects.filter(action='maintenance.quote_submitted', object_id=str(quote_id)).count(), 1)
+
+    def test_legacy_quotation_remains_readable_without_synthetic_lines(self):
+        request_id = self._assigned_quote_request()
+        created = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'labour_estimate_cents': 1200, 'materials_estimate_cents': 300,
+            'other_estimate_cents': 50, 'explanation': 'Existing aggregate estimate.',
+        }, format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.data['total_estimate_cents'], 1550)
+        self.assertFalse(created.data['has_itemized_lines'])
+        self.assertEqual(created.data['lines'], [])
+
+    def test_rejected_itemized_quotation_resubmits_as_a_linked_revision(self):
+        request_id = self._assigned_quote_request()
+        payload = {
+            'explanation': 'Initial itemized scope.',
+            'lines': [{'category': 'MATERIAL', 'description': 'Valve', 'quantity': '1', 'unit': 'item', 'unit_price_cents': 500}],
+        }
+        first = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', payload, format='json')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{first.data["id"]}/submit/', {}, format='json',
+        )
+        self.client.force_authenticate(self.owner)
+        rejected = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{first.data["id"]}/decision/',
+            {'approved': False, 'notes': 'Provide a labour breakdown.'}, format='json',
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_200_OK)
+        self.client.force_authenticate(self.technician)
+        revised = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Revised itemized scope.',
+            'lines': [
+                {'category': 'MATERIAL', 'description': 'Valve', 'quantity': '1', 'unit': 'item', 'unit_price_cents': 500},
+                {'category': 'LABOUR', 'description': 'Installation', 'quantity': '1', 'unit': 'job', 'unit_price_cents': 800},
+            ],
+        }, format='json')
+        self.assertEqual(revised.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(revised.data['revision_of'], first.data['id'])
+        self.assertEqual(revised.data['status'], 'DRAFT')
+
+    def test_quotation_lines_and_decisions_remain_organisation_scoped(self):
+        request_id = self._assigned_quote_request()
+        created = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Pipe repair.', 'lines': [{
+                'category': 'LABOUR', 'description': 'Labour', 'quantity': '1', 'unit': 'job', 'unit_price_cents': 1000,
+            }],
+        }, format='json')
+        quote_id = created.data['id']
+        self.client.force_authenticate(self.tenant_user)
+        tenant_write = self.client.post(f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+            'explanation': 'Tenant should not submit a quotation.', 'lines': [{
+                'category': 'MATERIAL', 'description': 'Part', 'quantity': '1', 'unit': 'item', 'unit_price_cents': 100,
+            }],
+        }, format='json')
+        self.assertEqual(tenant_write.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.other_tech)
+        response = self.client.patch(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/{quote_id}/', {
+                'explanation': 'Attempted cross-organisation edit.', 'lines': created.data['lines'],
+            }, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_technician_matching_enforces_trade_in_assignment_path(self):
         self.client.force_authenticate(self.tenant_user)

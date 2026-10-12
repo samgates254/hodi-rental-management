@@ -16,6 +16,7 @@ from application.services.billing import (
     create_invoice,
     post_invoice,
     record_payment,
+    reverse_payment,
     update_draft_invoice,
     void_invoice,
 )
@@ -34,6 +35,7 @@ from .serializers_ledger import (
     InvoiceWriteSerializer,
     PaymentSerializer,
     PaymentWriteSerializer,
+    PaymentReversalRequestSerializer,
 )
 
 
@@ -227,6 +229,31 @@ class PaymentViewSet(
             request=request,
         )
         return Response(PaymentSerializer(payment).data)
+
+    @action(detail=True, methods=('post',), url_path='reverse')
+    def reverse(self, request, pk=None):
+        payment = self.get_object()
+        _ensure_billing_write(request.user, payment.organization_id)
+        serializer = PaymentReversalRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        requested_amount = serializer.validated_data.get('amount_cents')
+        if requested_amount is not None and requested_amount != payment.amount_cents:
+            raise ValidationError({
+                'amount_cents': 'Partial reversals are not supported; amount must equal the full payment.'
+            })
+        reversal = reverse_payment(
+            payment,
+            reason=serializer.validated_data['reason'],
+            actor=request.user,
+            request=request,
+        )
+        payment.refresh_from_db()
+        response_status = (
+            status.HTTP_202_ACCEPTED
+            if reversal.status == 'REVIEW_REQUIRED'
+            else status.HTTP_200_OK
+        )
+        return Response(PaymentSerializer(payment).data, status=response_status)
 
 
 class DelinquencyView(APIView):

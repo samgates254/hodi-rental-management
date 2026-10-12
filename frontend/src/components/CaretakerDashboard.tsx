@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { PropertyBanner } from "@/components/ui/PropertyBanner";
 import { Logo } from "@/components/layout/Logo";
 import { clientApi } from "@/lib/clientApi";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
@@ -339,13 +340,16 @@ export default function CaretakerDashboard() {
 
         {pageError && <div className="caretaker-alert" role="alert">{pageError}</div>}
 
-        <section className="caretaker-intro" id="overview">
-          <div>
-            <span className="caretaker-eyebrow">TODAY AT A GLANCE</span>
-            <h2>Property operations</h2>
-            <p>Handle maintenance requests and keep an eye on residents’ rent status.</p>
-          </div>
-        </section>
+        <div id="overview" className="caretaker-intro">
+          <PropertyBanner
+            eyebrow="Today at a glance"
+            title="Keep the day’s work moving."
+            description="Review maintenance requests, track progress and keep the property team informed."
+            imageSrc="/images/operations.jpg"
+            imageSizes="(max-width: 900px) 100vw, 75vw"
+            className="caretaker-overview-banner"
+          />
+        </div>
 
         <section className="caretaker-summary" aria-label="Workspace summary">
           <article><span>Open issues</span><strong>{activeIssues.length}</strong><small>Need follow-up</small></article>

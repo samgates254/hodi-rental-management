@@ -88,7 +88,7 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_owner_can_manage_non_owner_memberships(self):
+    def test_owner_cannot_grant_accountant_via_generic_membership_api(self):
         self.client.force_authenticate(self.owner)
         membership_url = reverse(
             'organizations:membership-detail',
@@ -111,7 +111,7 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
         )
         delete_response = self.client.delete(membership_url)
 
-        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
@@ -195,7 +195,7 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
                 self.assertEqual(property_response.status_code, status.HTTP_403_FORBIDDEN)
                 self.client.force_authenticate(self.owner)
 
-    def test_owner_can_create_accountant_account(self):
+    def test_owner_cannot_grant_accountant_access_without_invitation_acceptance(self):
         self.client.force_authenticate(self.owner)
         password = 'Accountant-strong-password-243!'
         response = self.client.post(
@@ -213,21 +213,8 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
             },
             format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['role'], OrganizationMembership.Role.ACCOUNTANT)
-        login_response = self.client.post(
-            '/api/v1/accounts/login/',
-            {'username': 'new-accountant', 'password': password},
-            format='json',
-        )
-        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(login_response.data['memberships'][0]['role'], OrganizationMembership.Role.ACCOUNTANT)
-        listing = self.client.get(
-            reverse('organizations:staff'),
-            {'organization': self.organization.pk},
-        )
-        self.assertEqual(listing.status_code, status.HTTP_200_OK)
-        self.assertTrue(any(row['username'] == 'new-accountant' for row in listing.data))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(get_user_model().objects.filter(username='new-accountant').exists())
 
     def test_staff_endpoint_rejects_privileged_or_unsupported_roles(self):
         self.client.force_authenticate(self.owner)

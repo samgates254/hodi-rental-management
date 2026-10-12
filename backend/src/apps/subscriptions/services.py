@@ -104,7 +104,9 @@ def request_plan_change(*, organization_id, plan_code, actor, request=None):
         organization_id=organization_id,
         subscription=subscription,
         plan=plan,
-        amount_minor=plan.price_minor,
+        amount_minor=plan.price_minor + (plan.setup_fee_minor if not subscription.setup_fee_invoiced else 0),
+        monthly_fee_minor=plan.price_minor,
+        setup_fee_minor=plan.setup_fee_minor if not subscription.setup_fee_invoiced else 0,
         currency=plan.currency,
         period_start=today,
         period_end=_month_after(today),
@@ -112,11 +114,13 @@ def request_plan_change(*, organization_id, plan_code, actor, request=None):
         created_by=actor,
     )
     subscription.pending_plan = plan
-    subscription.save(update_fields=('pending_plan', 'updated_at'))
+    subscription.setup_fee_invoiced = True
+    subscription.save(update_fields=('pending_plan', 'setup_fee_invoiced', 'updated_at'))
     record_audit(
         action='subscription.plan_change_requested', object_type='SubscriptionInvoice', object_id=invoice.pk,
         actor=actor, organization=subscription.organization,
-        metadata={'from_plan': subscription.plan.code, 'to_plan': plan.code, 'amount_minor': invoice.amount_minor},
+        metadata={'from_plan': subscription.plan.code, 'to_plan': plan.code, 'amount_minor': invoice.amount_minor,
+                  'monthly_fee_minor': invoice.monthly_fee_minor, 'setup_fee_minor': invoice.setup_fee_minor},
         request=request,
     )
     return invoice
@@ -133,16 +137,21 @@ def issue_enterprise_invoice(*, organization_id, amount_minor, unit_limit, actor
     today = timezone.localdate()
     invoice = SubscriptionInvoice.objects.create(
         organization_id=organization_id, subscription=subscription, plan=plan,
-        amount_minor=amount_minor, currency=plan.currency,
+        amount_minor=amount_minor + (plan.setup_fee_minor if not subscription.setup_fee_invoiced else 0),
+        monthly_fee_minor=amount_minor,
+        setup_fee_minor=plan.setup_fee_minor if not subscription.setup_fee_invoiced else 0,
+        currency=plan.currency,
         period_start=today, period_end=_month_after(today), due_date=today, created_by=actor,
     )
     subscription.pending_plan = plan
     subscription.pending_unit_limit_override = unit_limit
-    subscription.save(update_fields=('pending_plan', 'pending_unit_limit_override', 'updated_at'))
+    subscription.setup_fee_invoiced = True
+    subscription.save(update_fields=('pending_plan', 'pending_unit_limit_override', 'setup_fee_invoiced', 'updated_at'))
     record_audit(
         action='subscription.enterprise_terms_issued', object_type='SubscriptionInvoice', object_id=invoice.pk,
         actor=actor, organization=subscription.organization,
-        metadata={'amount_minor': amount_minor, 'currency': plan.currency, 'unit_limit': unit_limit,
+        metadata={'amount_minor': invoice.amount_minor, 'monthly_fee_minor': invoice.monthly_fee_minor,
+                  'setup_fee_minor': invoice.setup_fee_minor, 'currency': plan.currency, 'unit_limit': unit_limit,
                   'reason': reason.strip()}, request=request,
     )
     return invoice
@@ -220,13 +229,16 @@ def confirm_reported_payment(*, attempt_id, actor, reason, request=None):
     subscription.plan = invoice.plan
     subscription.pending_plan = None
     subscription.status = OrganizationSubscription.Status.ACTIVE
+    # Only a verified invoice that actually contains the one-time fee settles
+    # that obligation; monthly-only settlements do not change this state.
+    subscription.setup_fee_paid = subscription.setup_fee_paid or invoice.setup_fee_minor > 0
     subscription.current_period_start = invoice.period_start
     subscription.current_period_end = invoice.period_end
     subscription.unit_limit_override = subscription.pending_unit_limit_override if invoice.plan.code == 'enterprise' else None
     subscription.pending_unit_limit_override = None
     subscription.save(update_fields=(
         'plan', 'pending_plan', 'status', 'current_period_start', 'current_period_end',
-        'unit_limit_override', 'pending_unit_limit_override', 'updated_at',
+        'unit_limit_override', 'pending_unit_limit_override', 'setup_fee_paid', 'updated_at',
     ))
     record_audit(
         action='subscription.payment_verified', object_type='SubscriptionPayment', object_id=payment.pk,
@@ -273,13 +285,19 @@ def reverse_subscription_payment(*, payment_id, actor, reason, request=None):
         reversal_reason=reason.strip(),
     )
     SubscriptionInvoice.objects.filter(pk=payment.invoice_id).update(status=SubscriptionInvoice.Status.OVERDUE)
-    OrganizationSubscription.objects.filter(organization_id=payment.organization_id).update(
-        status=OrganizationSubscription.Status.PAST_DUE,
-    )
+    subscription = lock_subscription(payment.organization_id)
+    subscription.status = OrganizationSubscription.Status.PAST_DUE
+    update_fields = ['status', 'updated_at']
+    if payment.invoice.setup_fee_minor:
+        subscription.setup_fee_paid = False
+        update_fields.append('setup_fee_paid')
+    subscription.save(update_fields=update_fields)
     record_audit(
         action='subscription.payment_reversed', object_type='SubscriptionPayment', object_id=payment.pk,
         actor=actor, organization=payment.organization,
-        metadata={'invoice_number': payment.invoice.invoice_number, 'reason': reason.strip()}, request=request,
+        metadata={'invoice_number': payment.invoice.invoice_number, 'amount_minor': payment.amount_minor,
+                  'currency': payment.currency, 'reason': reason.strip(), 'status': SubscriptionPayment.Status.REVERSED},
+        request=request,
     )
     return payment
 

@@ -88,12 +88,14 @@ class OrganizationSubscriptionView(APIView):
             'current_period_start': subscription.current_period_start,
             'current_period_end': subscription.current_period_end,
             'unit_limit_override': subscription.unit_limit_override,
+            'setup_fee_paid': subscription.setup_fee_paid,
+            'setup_fee_invoiced': subscription.setup_fee_invoiced,
             'effective_unit_limit': limit,
             'unit_count': units,
             'remaining_units': None if limit is None else max(0, limit - units),
             'effective_entitlements': subscription.effective_entitlements,
             'invoices': SubscriptionInvoiceSerializer(
-                subscription.invoices.select_related('plan').prefetch_related('payment_attempts')[:50], many=True,
+                subscription.invoices.select_related('plan', 'payment').prefetch_related('payment_attempts')[:50], many=True,
             ).data,
         })
 
@@ -161,6 +163,10 @@ class AdminRevenueView(APIView):
         successful_changes = AuditLog.objects.filter(action='subscription.payment_verified')
         collected_minor = payments.aggregate(value=Sum('amount_minor'))['value'] or 0
         reversed_minor = payments.filter(status=SubscriptionPayment.Status.REVERSED).aggregate(value=Sum('amount_minor'))['value'] or 0
+        setup_fees_collected = settled.aggregate(value=Sum('invoice__setup_fee_minor'))['value'] or 0
+        monthly_fees_collected = settled.aggregate(value=Sum('invoice__monthly_fee_minor'))['value'] or 0
+        setup_fees_reversed = payments.filter(status=SubscriptionPayment.Status.REVERSED).aggregate(value=Sum('invoice__setup_fee_minor'))['value'] or 0
+        monthly_fees_reversed = payments.filter(status=SubscriptionPayment.Status.REVERSED).aggregate(value=Sum('invoice__monthly_fee_minor'))['value'] or 0
         return Response({
             'active_subscriptions': OrganizationSubscription.objects.filter(status=OrganizationSubscription.Status.ACTIVE).count(),
             'free_organizations': OrganizationSubscription.objects.filter(status=OrganizationSubscription.Status.FREE).count(),
@@ -170,6 +176,10 @@ class AdminRevenueView(APIView):
             'collected_minor': collected_minor,
             'reversed_minor': reversed_minor,
             'net_collected_minor': collected_minor - reversed_minor,
+            'setup_fees_collected_minor': setup_fees_collected,
+            'monthly_fees_collected_minor': monthly_fees_collected,
+            'setup_fees_reversed_minor': setup_fees_reversed,
+            'monthly_fees_reversed_minor': monthly_fees_reversed,
             'outstanding_minor': invoices.filter(status__in=(SubscriptionInvoice.Status.ISSUED, SubscriptionInvoice.Status.OVERDUE)).aggregate(value=Sum('amount_minor'))['value'] or 0,
             'overdue_invoices': invoices.filter(Q(status=SubscriptionInvoice.Status.OVERDUE) | Q(status=SubscriptionInvoice.Status.ISSUED, due_date__lt=today)).count(),
             'cancelled_or_expired': OrganizationSubscription.objects.filter(status__in=(OrganizationSubscription.Status.CANCELLED, OrganizationSubscription.Status.EXPIRED)).count(),

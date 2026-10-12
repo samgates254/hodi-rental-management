@@ -345,6 +345,30 @@ def settle_stk_callback(*, payload, provider_query=None, request=None) -> Callba
                         detail='Provider outcome is not a verified success.', attempt=attempt)
 
         if attempt.status == MpesaAttempt.Status.SUCCESS:
+            try:
+                callback_receipt, _received_date = _validate_success(attempt, stk)
+            except CallbackValidationError:
+                record_audit(
+                    action='mpesa.stk.callback_discrepancy', object_type='MpesaAttempt',
+                    object_id=attempt.pk, actor=attempt.initiated_by, organization=attempt.organization,
+                    metadata={'reason': 'duplicate_callback_metadata_invalid'}, request=request,
+                )
+                return _ack(
+                    matched=True, settled=False, duplicate=False, status='UNRESOLVED',
+                    detail='Callback conflicts with the settled attempt; no payment state changed.',
+                    attempt=attempt,
+                )
+            if callback_receipt != attempt.mpesa_receipt_number:
+                record_audit(
+                    action='mpesa.stk.callback_discrepancy', object_type='MpesaAttempt',
+                    object_id=attempt.pk, actor=attempt.initiated_by, organization=attempt.organization,
+                    metadata={'reason': 'duplicate_callback_receipt_conflict'}, request=request,
+                )
+                return _ack(
+                    matched=True, settled=False, duplicate=False, status='UNRESOLVED',
+                    detail='Callback receipt conflicts with the settled attempt; no payment state changed.',
+                    attempt=attempt,
+                )
             payment = None
             if attempt.mpesa_receipt_number:
                 payment = _existing_payment(

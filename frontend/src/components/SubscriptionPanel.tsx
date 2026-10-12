@@ -8,6 +8,7 @@ type Plan = {
   name: string;
   description: string;
   price_minor: number | null;
+  setup_fee_minor: number;
   currency: string;
   interval: string;
   unit_limit: number | null;
@@ -19,6 +20,10 @@ type SubscriptionInvoice = {
   invoice_number: string;
   plan_name: string;
   amount_minor: number;
+  monthly_fee_minor: number;
+  setup_fee_minor: number;
+  amount_paid_minor: number;
+  outstanding_minor: number;
   currency: string;
   period_start: string;
   period_end: string;
@@ -26,6 +31,7 @@ type SubscriptionInvoice = {
   status: string;
   payment_reference: string | null;
   payment_review_status: string | null;
+  settlement_status: string | null;
 };
 type Subscription = {
   organization: number;
@@ -37,6 +43,8 @@ type Subscription = {
   effective_unit_limit: number | null;
   unit_count: number;
   remaining_units: number | null;
+  setup_fee_paid: boolean;
+  setup_fee_invoiced: boolean;
   effective_entitlements: Record<string, boolean>;
   invoices: SubscriptionInvoice[];
 };
@@ -112,7 +120,8 @@ export default function SubscriptionPanel({ organizationId, canManage }: { organ
         <div className="landlord-subscription-grid">
           <article className="landlord-subscription-card">
             <div className="landlord-subscription-card-heading"><div><span className="landlord-eyebrow">CURRENT PLAN</span><h3>{subscription.plan.name}</h3></div><span className={`landlord-subscription-status status-${subscription.status.toLowerCase()}`}>{subscription.status.replaceAll("_", " ")}</span></div>
-            <p>{subscription.plan.is_custom_pricing ? "Negotiated pricing" : `${money(subscription.plan.price_minor ?? 0, subscription.plan.currency)} / month`}</p>
+            <p className="landlord-subscription-price">{subscription.plan.is_custom_pricing ? "Negotiated pricing" : `${money(subscription.plan.price_minor ?? 0, subscription.plan.currency)} / month`}</p>
+            {!subscription.setup_fee_invoiced && subscription.plan.setup_fee_minor > 0 && <p className="landlord-form-note">A one-time setup fee applies to the first paid invoice: {money(subscription.plan.setup_fee_minor, subscription.plan.currency)}.</p>}
             <p className="landlord-form-note">{subscription.current_period_end ? `Current period ends ${subscription.current_period_end}.` : "No paid billing period is active."}</p>
             <div className="landlord-subscription-usage"><span>Rentable units</span><strong>{subscription.unit_count} / {subscription.effective_unit_limit ?? "Negotiated"}</strong></div>
             {subscription.remaining_units !== null && <p className="landlord-form-note">{subscription.remaining_units} unit{subscription.remaining_units === 1 ? "" : "s"} remaining on this plan.</p>}
@@ -121,7 +130,7 @@ export default function SubscriptionPanel({ organizationId, canManage }: { organ
           </article>
           <article className="landlord-subscription-card">
             <span className="landlord-eyebrow">AVAILABLE PLANS</span><h3>Choose a plan</h3>
-            <p className="landlord-form-note">Plan changes take effect only after Hodi verifies payment. Prices shown are draft launch proposals. Contact Hodi for payment instructions; this application does not initiate or verify a payment provider transaction.</p>
+            <p className="landlord-form-note">The catalogue sets the monthly and one-time setup amounts. A setup fee, when configured, appears only on the first paid invoice. Plan changes take effect only after HODI verifies payment; this application does not initiate a provider transaction.</p>
             {canManage ? <div className="landlord-subscription-upgrade">
               <label htmlFor="subscription-plan">Plan</label>
               <select id="subscription-plan" value={selectedPlan} onChange={event => setSelectedPlan(event.target.value)}>
@@ -129,7 +138,7 @@ export default function SubscriptionPanel({ organizationId, canManage }: { organ
                 {plans.filter(plan => plan.code !== "free" && (
                   plan.code !== subscription.plan.code || subscription.status !== "ACTIVE" ||
                   !subscription.current_period_end || subscription.current_period_end <= new Date().toISOString().slice(0, 10)
-                )).map(plan => <option key={plan.code} value={plan.code}>{plan.name} · {plan.is_custom_pricing ? "Contact Hodi" : `${money(plan.price_minor ?? 0, plan.currency)} / month`}</option>)}
+                )).map(plan => <option key={plan.code} value={plan.code}>{plan.name} · {plan.is_custom_pricing ? "Contact HODI" : `${money(plan.price_minor ?? 0, plan.currency)} / month${!subscription.setup_fee_invoiced && plan.setup_fee_minor > 0 ? ` + ${money(plan.setup_fee_minor, plan.currency)} one-time setup` : ""}`}</option>)}
               </select>
               {selectedPlan === "enterprise" ? <p className="landlord-form-note">Enterprise includes negotiated pricing and unit limits. Contact Hodi to configure it.</p> : <button className="landlord-button landlord-button--primary" type="button" disabled={!selectedPlan || busy || Boolean(subscription.pending_plan)} onClick={() => void changePlan()}>{busy ? "Working…" : "Request plan and issue invoice"}</button>}
             </div> : <p className="landlord-form-note">Only organization owners and property managers can request a plan change.</p>}
@@ -137,7 +146,7 @@ export default function SubscriptionPanel({ organizationId, canManage }: { organ
           <article className="landlord-subscription-card landlord-subscription-invoices">
             <span className="landlord-eyebrow">HODI BILLING</span><h3>Subscription invoices</h3>
             {subscription.invoices.length ? <div className="landlord-subscription-invoice-list">{subscription.invoices.map(invoice => <div className="landlord-subscription-invoice" key={invoice.id}>
-              <div><strong>{invoice.invoice_number}</strong><span>{invoice.plan_name} · {invoice.period_start} to {invoice.period_end} · due {invoice.due_date}</span><b>{money(invoice.amount_minor, invoice.currency)} · {invoice.status.replaceAll("_", " ")}</b>{invoice.payment_reference && <span>Reported reference: {invoice.payment_reference}</span>}</div>
+              <div className="landlord-subscription-invoice-details"><strong>{invoice.invoice_number}</strong><span>{invoice.plan_name} · {invoice.period_start} to {invoice.period_end} · due {invoice.due_date}</span><span>One-time setup · {money(invoice.setup_fee_minor, invoice.currency)}</span><span>Monthly subscription · {money(invoice.monthly_fee_minor, invoice.currency)}</span><b className="landlord-subscription-invoice-total">Invoice total · {money(invoice.amount_minor, invoice.currency)}</b><span>Amount paid · {money(invoice.amount_paid_minor, invoice.currency)}</span><b>Outstanding balance · {money(invoice.outstanding_minor, invoice.currency)}</b><span className={`landlord-subscription-status status-${invoice.status.toLowerCase()}`}>{invoice.status.replaceAll("_", " ")}</span>{invoice.settlement_status === "REVERSED" && <span className="text-error">The recorded payment was reversed. The invoice remains outstanding.</span>}{invoice.payment_reference && <span>Reported reference · {invoice.payment_reference}</span>}</div>
               {invoice.payment_review_status === "PENDING_REVIEW" && <span className="text-text-secondary">Payment report awaiting Hodi verification.</span>}
               {invoice.payment_review_status === "REJECTED" && <span className="text-error">Reported reference was not verified. Submit a new reference after checking payment details.</span>}
               {canManage && invoice.status !== "PAID" && invoice.status !== "VOID" && invoice.payment_review_status !== "PENDING_REVIEW" && <form onSubmit={event => { event.preventDefault(); void reportPayment(invoice.id); }}><label className="sr-only" htmlFor={`reference-${invoice.id}`}>Payment reference</label><input id={`reference-${invoice.id}`} value={reference} onChange={event => setReference(event.target.value)} placeholder="Payment reference" maxLength={100} required /><button className="landlord-button" disabled={busy}>Submit for verification</button></form>}

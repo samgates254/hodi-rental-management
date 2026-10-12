@@ -19,23 +19,26 @@ function unitLabel(unit: UnitRow, buildings: BuildingRow[], properties: Property
 
 function AuthThumb({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState("");
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let objectUrl = "";
     let cancelled = false;
+    setFailed(false);
+    setSrc("");
     clientApi.get<Blob>(url, { responseType: "blob" }).then(response => {
       if (cancelled) return;
       objectUrl = URL.createObjectURL(response.data);
       setSrc(objectUrl);
     }).catch(() => {
-      if (!cancelled) setSrc("");
+      if (!cancelled) setFailed(true);
     });
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [url]);
-  if (!src) return <span>Photo</span>;
-  return <img src={src} alt={alt} style={{ width: 64, height: 48, objectFit: "cover" }} />;
+  if (!src) return <span role={failed ? "img" : "status"} aria-label={failed ? `Photo unavailable: ${alt}` : `Loading photo: ${alt}`} style={{ display: "inline-grid", width: 64, height: 48, placeItems: "center", borderRadius: 6, background: "var(--hodi-surface-raised)", color: "var(--hodi-muted)", fontSize: 10 }}>{failed ? "Unavailable" : "Loading…"}</span>;
+  return <img src={src} alt={alt} width={64} height={48} loading="lazy" decoding="async" style={{ width: 64, height: 48, objectFit: "cover", borderRadius: 6 }} />;
 }
 
 export default function MarketplaceManager({

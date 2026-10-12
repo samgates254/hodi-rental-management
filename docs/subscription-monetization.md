@@ -28,6 +28,42 @@ Entitlements use a small feature map for reporting, billing, maintenance, and
 staff management. Those supported workflows remain enabled on the launch
 plans. The enforced initial restriction is rentable inventory.
 
+## One-time setup fee policy
+
+Plans have an explicit `setup_fee_minor` amount, stored in KES minor units.
+The current migrated catalogue defaults every setup fee to zero: actual
+onboarding prices have not been approved. To introduce a fee, an authorized
+operator must retire the active plan version and create a new version with
+the approved amount; plan terms cannot be edited in place. The public plan
+endpoint exposes this configured amount. There is no fee inferred by the
+frontend.
+
+A newly created organization subscription is eligible for the setup fee on
+its first paid-plan invoice only. The invoice snapshots the monthly amount,
+setup amount and total. Issuing that invoice consumes the one-time billing
+eligibility; `setup_fee_paid` tracks settlement separately and becomes true
+only after staff verifies an invoice that contains a setup fee. Rejected
+reports do not create a second invoice; the same issued invoice can receive a
+new payment reference. Retries therefore keep their original itemized amount.
+If a verified payment is later reversed, its invoice remains unchanged, the
+settlement is no longer counted as paid, and its outstanding balance reopens.
+The setup fee remains invoiced and is not added to later monthly invoices.
+The backend does not support partial subscription payments: a verified
+settlement is for the full immutable invoice amount.
+
+All subscriptions that existed when this policy was introduced are
+grandfathered. Their one-time setup-fee invoicing marker is migrated on,
+while the settlement marker is reconciled against verified setup-fee invoice
+payments. Existing invoice totals are preserved as monthly line items with a
+zero setup line. No existing customer or issued invoice is retroactively
+charged. Enterprise
+quotes follow the same first-invoice setup-fee rule, with the negotiated
+monthly amount entered by authorized HODI staff.
+
+Invoice API responses include `monthly_fee_minor`, `setup_fee_minor`,
+`amount_minor` (invoice total), `amount_paid_minor`, and `outstanding_minor`.
+Only a verified, non-reversed settlement contributes to amount paid.
+
 ## Rentable unit definition and enforcement
 
 One `properties.Unit` is one rentable unit, counted once through its

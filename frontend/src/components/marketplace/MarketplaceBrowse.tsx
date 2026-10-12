@@ -36,19 +36,26 @@ function BrowseListingCard({ listing }: { listing: PublicListing }) {
               alt={photo.caption || listing.title}
               loading="lazy"
               decoding="async"
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
               onError={() => setFailed(true)}
-              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-text-secondary">No photo yet</div>
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-text-secondary" aria-label={`No listing photo available for ${listing.title}`}>
+              <svg aria-hidden="true" viewBox="0 0 32 32" className="h-9 w-9" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="m4 14 12-9 12 9v13H4z" />
+                <path d="M12 27v-8h8v8M9 14h.01M23 14h.01" />
+              </svg>
+              <span>{photo ? "Photo unavailable" : "No listing photo"}</span>
+            </div>
           )}
         </div>
         <div className="space-y-2 p-4">
           <div className="flex items-start justify-between gap-3">
             <h2 className="text-lg leading-snug text-charcoal">{listing.title}</h2>
-            <span className="shrink-0 rounded-full bg-soft-teal px-2 py-1 text-xs font-semibold text-charcoal">Available</span>
+            <span className="shrink-0 rounded-full bg-soft-teal px-2 py-1 text-xs font-semibold text-charcoal">{listing.available ? "Available" : "Unavailable"}</span>
           </div>
-          <p className="text-sm text-text-secondary">{locationLabel(listing)}</p>
+          <p className="text-sm text-text-secondary">{[listing.property_name, listing.unit_label, locationLabel(listing)].filter(Boolean).join(" · ")}</p>
           <p className="text-base font-semibold text-charcoal">{rentLabel(listing.monthly_rent_minor)} <span className="font-normal text-text-secondary">/ month</span></p>
           <p className="text-sm text-text-secondary">
             {listing.bedrooms} bed · {listing.bathrooms} bath · {listing.furnished ? "Furnished" : "Unfurnished"}

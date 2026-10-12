@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { clientApi, getStoredAuthToken, setStoredAuthToken, type AuthResponse } from "@/lib/clientApi";
+import { AUTH_API_PATHS, clientApi, getStoredAuthToken, setStoredAuthToken, type AuthResponse } from "@/lib/clientApi";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 
 type RevenueSummary = {
@@ -68,7 +68,7 @@ export default function RevenueDashboardPage() {
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError("");
     try {
-      const response = await clientApi.post<AuthResponse>("/api/v1/accounts/login/", { username, password }, { skipAuth: true });
+      const response = await clientApi.post<AuthResponse>(AUTH_API_PATHS.login, { username, password }, { skipAuth: true });
       if (!response.data.is_staff || !response.data.token) {
         setStoredAuthToken(null);
         setError("This account is not authorized for Hodi administration.");

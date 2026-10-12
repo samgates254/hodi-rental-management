@@ -10,6 +10,13 @@ type ApiResponse<T> = { data: T };
 /** Must match LandlordDashboard / ClientDashboard session key. */
 export const AUTH_TOKEN_KEY = "hodi_api_token";
 
+/** Canonical Django authentication endpoints (the backend requires trailing slashes). */
+export const AUTH_API_PATHS = {
+  login: "/api/v1/accounts/login/",
+  signup: "/api/v1/accounts/signup/",
+  logout: "/api/v1/accounts/logout/",
+} as const;
+
 /**
  * Backend AccountProfile.AccountType values.
  * @see backend apps.accounts.models.AccountProfile
@@ -282,7 +289,7 @@ export const clientApi = {
 /** Django: POST /api/v1/accounts/login/ { username, password } */
 export async function login(payload: LoginPayload): Promise<AuthResponse> {
   const { data } = await clientApi.post<AuthResponse>(
-    "/api/v1/accounts/login/",
+    AUTH_API_PATHS.login,
     payload,
     { skipAuth: true },
   );
@@ -301,7 +308,7 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
 /** Django: POST /api/v1/accounts/signup/ */
 export async function register(payload: SignupPayload): Promise<AuthResponse> {
   const { data } = await clientApi.post<AuthResponse>(
-    "/api/v1/accounts/signup/",
+    AUTH_API_PATHS.signup,
     payload,
     { skipAuth: true },
   );
@@ -320,7 +327,7 @@ export async function register(payload: SignupPayload): Promise<AuthResponse> {
 /** Django: POST /api/v1/accounts/logout/ (Token auth) → 204 */
 export async function logout(): Promise<void> {
   try {
-    await clientApi.post<void>("/api/v1/accounts/logout/", {});
+    await clientApi.post<void>(AUTH_API_PATHS.logout, {});
   } catch (error) {
     // Always clear local session even if the token was already invalid.
     if (!(error instanceof ClientApiError) || (error.status !== 401 && error.status !== 403)) {

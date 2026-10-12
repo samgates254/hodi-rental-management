@@ -17,11 +17,15 @@ from application.services.mpesa_callback import (
     settle_stk_callback,
     validate_stk_success_callback,
 )
+from application.services.mpesa_review import resolve_mpesa_attempt_from_evidence
 from application.services.audit import record_audit
 from infrastructure.payments.mpesa import MpesaClient, MpesaError
 
 from .models import MpesaAttempt
-from .serializers_mpesa import MpesaAttemptSerializer, MpesaAttemptStatusSerializer, MpesaInitiateSerializer
+from .serializers_mpesa import (
+    MpesaAttemptSerializer, MpesaAttemptStatusSerializer, MpesaInitiateSerializer,
+    MpesaOperatorEvidenceSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,3 +170,22 @@ class MpesaAttemptStatusView(APIView):
         if attempt is None:
             raise NotFound('Payment attempt not found.')
         return Response(MpesaAttemptStatusSerializer(attempt).data)
+
+
+class MpesaOperatorResolutionView(APIView):
+    """Settle query-confirmed receipts after organization staff evidence review."""
+
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, attempt_id):
+        serializer = MpesaOperatorEvidenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payment, duplicate = resolve_mpesa_attempt_from_evidence(
+            attempt_id=attempt_id, actor=request.user,
+            evidence=serializer.validated_data, request=request,
+        )
+        return Response({
+            'attempt_id': str(attempt_id), 'payment_id': str(payment.pk),
+            'receipt': payment.external_id, 'status': payment.status,
+            'settled': True, 'duplicate': duplicate,
+        })

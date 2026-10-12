@@ -135,6 +135,15 @@
   font-size: 14px;
 }
 
+.caretaker-intro {
+  margin: 22px 0 16px;
+}
+
+.caretaker-overview-banner {
+  min-height: 14.5rem;
+  border-radius: 10px;
+}
+
 .caretaker-alert {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -161,6 +170,14 @@
   border: 1px solid var(--caretaker-line);
   border-radius: 10px;
   background: var(--caretaker-paper);
+  box-shadow: 0 1px 2px rgb(23 32 51 / .025);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.caretaker-summary article:hover {
+  border-color: color-mix(in srgb, var(--hodi-brand) 36%, var(--caretaker-line));
+  box-shadow: var(--hodi-shadow);
+  transform: translateY(-2px);
 }
 
 .caretaker-summary strong {
@@ -295,6 +312,12 @@
   border: 1px solid var(--caretaker-line);
   border-radius: 10px;
   background: var(--hodi-surface-raised);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.caretaker-issue:hover {
+  border-color: color-mix(in srgb, var(--hodi-brand) 34%, var(--caretaker-line));
+  box-shadow: var(--hodi-shadow);
 }
 
 .caretaker-issue-top {
@@ -482,6 +505,21 @@
 @media (max-width: 1100px) {
   .caretaker-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .caretaker-intro {
+    margin-top: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caretaker-summary article,
+  .caretaker-issue {
+    transition: none;
+  }
+
+  .caretaker-summary article:hover {
+    transform: none;
   }
 }
 

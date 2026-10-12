@@ -6,7 +6,6 @@ from .models import OrganizationMembership
 STAFF_ROLE_VALUES = (
     OrganizationMembership.Role.PROPERTY_MANAGER,
     OrganizationMembership.Role.CARETAKER,
-    OrganizationMembership.Role.ACCOUNTANT,
     OrganizationMembership.Role.TECHNICIAN,
 )
 

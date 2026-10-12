@@ -3,7 +3,16 @@ from rest_framework import serializers
 from apps.leases.models import Lease
 from apps.tenants.models import Tenant
 
-from .models import Charge, DocumentStatus, Invoice, LedgerPosting, Payment, PaymentAllocation
+from .models import (
+    Charge,
+    DocumentStatus,
+    Invoice,
+    LedgerPosting,
+    Payment,
+    PaymentAllocation,
+    PaymentReversal,
+    PaymentReversalAllocation,
+)
 
 
 class ChargeSerializer(serializers.ModelSerializer):
@@ -82,13 +91,36 @@ class PaymentAllocationSerializer(serializers.ModelSerializer):
 class LedgerPostingSerializer(serializers.ModelSerializer):
     class Meta:
         model = LedgerPosting
-        fields = ('id', 'account', 'direction', 'amount_cents', 'created_at')
+        fields = ('id', 'reversal', 'account', 'direction', 'amount_cents', 'created_at')
+        read_only_fields = fields
+
+
+class PaymentReversalAllocationSerializer(serializers.ModelSerializer):
+    original_allocation_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = PaymentReversalAllocation
+        fields = ('id', 'original_allocation_id', 'charge', 'amount_cents', 'created_at')
+        read_only_fields = fields
+
+
+class PaymentReversalSerializer(serializers.ModelSerializer):
+    allocations = PaymentReversalAllocationSerializer(many=True, read_only=True)
+    postings = LedgerPostingSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PaymentReversal
+        fields = (
+            'id', 'payment', 'authorized_by', 'reason', 'amount_cents', 'status',
+            'allocations', 'postings', 'created_at',
+        )
         read_only_fields = fields
 
 
 class PaymentSerializer(serializers.ModelSerializer):
     allocations = PaymentAllocationSerializer(many=True, read_only=True)
     postings = LedgerPostingSerializer(many=True, read_only=True)
+    reversal = PaymentReversalSerializer(read_only=True, allow_null=True)
 
     class Meta:
         model = Payment
@@ -96,7 +128,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             'id', 'organization', 'tenant', 'amount_cents', 'allocated_cents',
             'overpayment_cents', 'received_date', 'execution_timestamp', 'method',
             'status', 'currency', 'reference', 'external_id', 'recorded_by',
-            'policy_id', 'policy_version', 'allocations', 'postings',
+            'policy_id', 'policy_version', 'allocations', 'postings', 'reversal',
             'created_at', 'updated_at',
         )
         read_only_fields = fields
@@ -114,3 +146,10 @@ class PaymentWriteSerializer(serializers.Serializer):
 class AllocateSerializer(serializers.Serializer):
     policy_id = serializers.CharField()
     policy_version = serializers.IntegerField()
+
+
+class PaymentReversalRequestSerializer(serializers.Serializer):
+    reason = serializers.CharField(trim_whitespace=True, allow_blank=False, max_length=2000)
+    # Partial reversals are not supported. Supplying an amount makes the
+    # full-payment contract explicit and lets the endpoint reject partial asks.
+    amount_cents = serializers.IntegerField(required=False, min_value=1)

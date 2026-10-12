@@ -13,7 +13,7 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionPlan
         fields = ('id', 'code', 'version', 'name', 'description', 'price_minor', 'currency',
-                  'interval', 'unit_limit', 'entitlements', 'is_custom_pricing')
+                  'setup_fee_minor', 'interval', 'unit_limit', 'entitlements', 'is_custom_pricing')
 
 
 class PublicSubscriptionPlanSerializer(serializers.ModelSerializer):
@@ -21,18 +21,22 @@ class PublicSubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionPlan
         fields = ('code', 'name', 'description', 'price_minor', 'currency',
-                  'interval', 'unit_limit', 'entitlements', 'is_custom_pricing')
+                  'setup_fee_minor', 'interval', 'unit_limit', 'entitlements', 'is_custom_pricing')
 
 
 class SubscriptionInvoiceSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source='plan.name', read_only=True)
     payment_reference = serializers.SerializerMethodField()
     payment_review_status = serializers.SerializerMethodField()
+    amount_paid_minor = serializers.SerializerMethodField()
+    outstanding_minor = serializers.SerializerMethodField()
+    settlement_status = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
 
     class Meta:
         model = SubscriptionInvoice
-        fields = ('id', 'invoice_number', 'plan', 'plan_name', 'amount_minor', 'currency',
+        fields = ('id', 'invoice_number', 'plan', 'plan_name', 'monthly_fee_minor', 'setup_fee_minor',
+                  'amount_minor', 'amount_paid_minor', 'outstanding_minor', 'currency', 'settlement_status',
                   'period_start', 'period_end', 'issued_at', 'due_date', 'status', 'payment_reference', 'payment_review_status')
 
     def get_status(self, invoice):
@@ -47,6 +51,19 @@ class SubscriptionInvoiceSerializer(serializers.ModelSerializer):
     def get_payment_review_status(self, invoice):
         attempt = invoice.payment_attempts.order_by('-created_at').first()
         return attempt.status if attempt else None
+
+    def get_amount_paid_minor(self, invoice):
+        payment = getattr(invoice, 'payment', None)
+        if payment and payment.status == 'VERIFIED':
+            return payment.amount_minor
+        return 0
+
+    def get_outstanding_minor(self, invoice):
+        return max(0, invoice.amount_minor - self.get_amount_paid_minor(invoice))
+
+    def get_settlement_status(self, invoice):
+        payment = getattr(invoice, 'payment', None)
+        return payment.status if payment else None
 
 
 class SubscriptionPaymentAttemptSerializer(serializers.ModelSerializer):
@@ -72,7 +89,7 @@ class OrganizationSubscriptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrganizationSubscription
         fields = ('id', 'organization', 'plan', 'pending_plan', 'status', 'current_period_start',
-                  'current_period_end', 'unit_limit_override', 'effective_unit_limit', 'unit_count',
+                  'current_period_end', 'setup_fee_paid', 'setup_fee_invoiced', 'unit_limit_override', 'effective_unit_limit', 'unit_count',
                   'remaining_units', 'effective_entitlements', 'invoices', 'created_at', 'updated_at')
         read_only_fields = fields
 

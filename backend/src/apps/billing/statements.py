@@ -12,11 +12,12 @@ from rest_framework.exceptions import NotFound, ValidationError
 from apps.leases.models import Lease, RentSchedule
 from apps.tenants.models import Tenant
 
-from .models import Charge, DocumentStatus, Payment
+from .models import Charge, DocumentStatus, Payment, PaymentReversal
 
 MAX_PERIOD_DAYS = 731
 PERIODS = ('current_month', 'previous_month', 'lease')
 LIVE_PAYMENT_STATUSES = (Payment.Status.ALLOCATED, Payment.Status.PENDING)
+HISTORY_PAYMENT_STATUSES = LIVE_PAYMENT_STATUSES + (Payment.Status.REVERSED,)
 
 
 def tenant_for_statement(user):
@@ -127,10 +128,10 @@ def build_statement(user, params):
 	payments = list(
 		Payment.objects.filter(
 			tenant=tenant,
-			status__in=LIVE_PAYMENT_STATUSES,
+			status__in=HISTORY_PAYMENT_STATUSES,
 			received_date__gte=start,
 			received_date__lte=end,
-		).order_by('received_date', 'created_at')
+		).select_related('reversal').order_by('received_date', 'created_at')
 	)
 	posted = Charge.objects.filter(tenant=tenant, lifecycle=DocumentStatus.POSTED)
 	outstanding = _sum(posted, 'balance_cents')
@@ -171,6 +172,19 @@ def build_statement(user, params):
 			'credit_cents': int(payment.amount_cents),
 			'status': payment.status,
 		})
+		try:
+			reversal = payment.reversal
+		except PaymentReversal.DoesNotExist:
+			reversal = None
+		if reversal is not None:
+			lines.append({
+				'date': timezone.localtime(reversal.created_at).date().isoformat(),
+				'kind': 'payment_reversal',
+				'description': f'Payment reversal: {reversal.reason}',
+				'debit_cents': int(reversal.amount_cents) if reversal.status == 'REVERSED' else 0,
+				'credit_cents': 0,
+				'status': reversal.status,
+			})
 	lines.sort(key=lambda row: (row['date'], 0 if row['kind'] == 'charge' else 1, row['description']))
 
 	property_record = None

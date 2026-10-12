@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 
@@ -10,6 +11,21 @@ from apps.organizations.models import OrganizationMembership
 from apps.tenants.models import Tenant
 
 User = get_user_model()
+SIGNUP_IDENTIFIER_UNIQUE_INDEX = 'accounts_user_email_ci_uniq'
+SIGNUP_DUPLICATE_IDENTIFIER_ERROR = 'Unable to create an account with these details.'
+
+
+def _is_signup_identifier_integrity_error(error):
+	"""Recognize only username/email unique violations from supported backends."""
+	diagnostic = getattr(getattr(error.__cause__, 'diag', None), 'constraint_name', None)
+	if diagnostic in (SIGNUP_IDENTIFIER_UNIQUE_INDEX, 'auth_user_username_key'):
+		return True
+
+	message = str(error).lower()
+	return (
+		SIGNUP_IDENTIFIER_UNIQUE_INDEX in message
+		or 'unique constraint failed: auth_user.username' in message
+	)
 
 
 class SignupSerializer(serializers.Serializer):
@@ -38,17 +54,21 @@ class SignupSerializer(serializers.Serializer):
 	password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
 
 	def validate_username(self, username):
-		if User.objects.filter(username__iexact=username).exists():
-			raise serializers.ValidationError('A user with this username already exists.')
 		return username
 
 	def validate_email(self, email):
-		email = email.strip().lower()
-		if User.objects.filter(email__iexact=email).exists():
-			raise serializers.ValidationError('A user with this email already exists.')
-		return email
+		return email.strip().lower()
 
 	def validate(self, attrs):
+		# Keep duplicate identifier failures indistinguishable in the public
+		# response, including when both identifiers are already in use.
+		if User.objects.filter(
+			Q(username__iexact=attrs['username']) | Q(email__iexact=attrs['email'])
+		).exists():
+			raise serializers.ValidationError({
+				'non_field_errors': [SIGNUP_DUPLICATE_IDENTIFIER_ERROR],
+			})
+
 		account_type = attrs['account_type']
 		organization = attrs.get('organization')
 		organization_name = attrs.get('organization_name', '').strip()
@@ -104,7 +124,14 @@ class SignupSerializer(serializers.Serializer):
 		organization = validated_data.pop('organization', None)
 		organization_name = validated_data.pop('organization_name', '').strip()
 		professional_trade = validated_data.pop('professional_trade', '')
-		user = User.objects.create_user(is_active=True, password=password, **validated_data)
+		try:
+			user = User.objects.create_user(is_active=True, password=password, **validated_data)
+		except IntegrityError as error:
+			if not _is_signup_identifier_integrity_error(error):
+				raise
+			raise serializers.ValidationError({
+				'non_field_errors': [SIGNUP_DUPLICATE_IDENTIFIER_ERROR],
+			}) from error
 		profile = AccountProfile.objects.create(
 			user=user,
 			account_type=account_type,

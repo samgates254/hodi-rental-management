@@ -13,6 +13,25 @@ class MpesaInitiateSerializer(serializers.Serializer):
     idempotency_key = serializers.UUIDField()
 
 
+class MpesaOperatorEvidenceSerializer(serializers.Serializer):
+    class EvidenceSource:
+        choices = (
+            ('SAFARICOM_PORTAL', 'Safaricom portal'),
+            ('SAFARICOM_STATEMENT', 'Safaricom statement'),
+            ('BANK_STATEMENT', 'Bank statement'),
+        )
+
+    evidence_source = serializers.ChoiceField(choices=EvidenceSource.choices)
+    evidence_reference = serializers.CharField(min_length=3, max_length=120, trim_whitespace=True)
+    receipt = serializers.RegexField(r'^[A-Za-z0-9]{5,64}$', max_length=64, trim_whitespace=True)
+    amount_cents = serializers.IntegerField(min_value=1)
+    merchant_request_id = serializers.CharField(min_length=1, max_length=64, trim_whitespace=True)
+    checkout_request_id = serializers.CharField(min_length=1, max_length=64, trim_whitespace=True)
+    account_reference = serializers.CharField(required=False, allow_blank=True, max_length=12, trim_whitespace=True)
+    phone_number = serializers.CharField(min_length=9, max_length=15, trim_whitespace=True)
+    transaction_date = serializers.DateField()
+
+
 class MpesaAttemptSerializer(serializers.ModelSerializer):
     accepted = serializers.SerializerMethodField()
     payment_settled = serializers.SerializerMethodField()

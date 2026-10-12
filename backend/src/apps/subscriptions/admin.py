@@ -16,7 +16,7 @@ class RetainedFinancialRecordAdmin(admin.ModelAdmin):
 
 @admin.register(SubscriptionPlan)
 class SubscriptionPlanAdmin(admin.ModelAdmin):
-    list_display = ('name', 'code', 'version', 'price_minor', 'currency', 'unit_limit', 'is_active')
+    list_display = ('name', 'code', 'version', 'price_minor', 'setup_fee_minor', 'currency', 'unit_limit', 'is_active')
     list_filter = ('is_active', 'is_custom_pricing')
     search_fields = ('name', 'code')
     actions = None
@@ -25,7 +25,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         if obj is None:
             return ('created_at', 'updated_at')
-        return ('code', 'version', 'name', 'description', 'price_minor', 'currency', 'interval',
+        return ('code', 'version', 'name', 'description', 'price_minor', 'setup_fee_minor', 'currency', 'interval',
                 'unit_limit', 'entitlements', 'is_custom_pricing', 'created_at', 'updated_at')
 
     def has_delete_permission(self, request, obj=None):
@@ -42,7 +42,7 @@ class OrganizationSubscriptionAdmin(RetainedFinancialRecordAdmin):
 
 @admin.register(SubscriptionInvoice)
 class SubscriptionInvoiceAdmin(RetainedFinancialRecordAdmin):
-    list_display = ('invoice_number', 'organization', 'plan', 'amount_minor', 'currency', 'status', 'due_date')
+    list_display = ('invoice_number', 'organization', 'plan', 'setup_fee_minor', 'monthly_fee_minor', 'amount_minor', 'currency', 'status', 'due_date')
     list_filter = ('status', 'currency', 'plan')
     search_fields = ('invoice_number', 'organization__name')
     readonly_fields = tuple(field.name for field in SubscriptionInvoice._meta.fields)

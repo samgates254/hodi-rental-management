@@ -6,6 +6,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.organizations.models import Organization, OrganizationMembership
+from apps.leases.models import Lease
+from apps.tenants.models import Tenant
 from apps.properties.models import Building, Property, Unit
 from apps.subscriptions.models import OrganizationSubscription, SubscriptionPlan
 
@@ -149,6 +151,86 @@ class UnitSubscriptionCapacityApiTests(APITestCase):
         self.assertEqual(response.data['code'], 'UNIT_LIMIT_REACHED')
         unit.refresh_from_db()
         self.assertEqual(unit.building_id, self.building.pk)
+
+    def test_unit_with_lease_history_cannot_move_to_another_building(self):
+        tenant = Tenant.objects.create(
+            organization=self.organization,
+            first_name='Lease',
+            last_name='History',
+            phone_number='+254700000099',
+        )
+        unit = self.create_units(self.building, 1)[0]
+        Lease.objects.create(
+            tenant=tenant,
+            unit=unit,
+            reference='HISTORY-1',
+            start_date='2026-01-01',
+            monthly_rent_minor=50000,
+        )
+
+        response = self.client.patch(
+            self.update_url(unit), {'building': self.other_building.pk}, format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('building', response.data)
+        unit.refresh_from_db()
+        self.assertEqual(unit.building_id, self.building.pk)
+
+    def test_active_lease_prevents_available_or_inactive_status(self):
+        tenant = Tenant.objects.create(
+            organization=self.organization,
+            first_name='Active',
+            last_name='Tenant',
+            phone_number='+254700000098',
+        )
+        unit = self.create_units(self.building, 1)[0]
+        Lease.objects.create(
+            tenant=tenant,
+            unit=unit,
+            reference='ACTIVE-1',
+            start_date='2026-01-01',
+            monthly_rent_minor=50000,
+            status=Lease.Status.ACTIVE,
+        )
+        unit.status = Unit.Status.OCCUPIED
+        unit.save(update_fields=('status', 'updated_at'))
+
+        for new_status in (Unit.Status.AVAILABLE, Unit.Status.INACTIVE):
+            with self.subTest(new_status=new_status):
+                response = self.client.patch(
+                    self.update_url(unit), {'status': new_status}, format='json',
+                )
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                unit.refresh_from_db()
+                self.assertEqual(unit.status, Unit.Status.OCCUPIED)
+
+    def test_active_lease_can_remain_in_maintenance_status(self):
+        tenant = Tenant.objects.create(
+            organization=self.organization,
+            first_name='Maintenance',
+            last_name='Tenant',
+            phone_number='+254700000097',
+        )
+        unit = self.create_units(self.building, 1)[0]
+        Lease.objects.create(
+            tenant=tenant,
+            unit=unit,
+            reference='MAINTENANCE-1',
+            start_date='2026-01-01',
+            monthly_rent_minor=50000,
+            status=Lease.Status.ACTIVE,
+        )
+        unit.status = Unit.Status.OCCUPIED
+        unit.save(update_fields=('status', 'updated_at'))
+
+        response = self.client.patch(
+            self.update_url(unit), {'status': Unit.Status.MAINTENANCE}, format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        unit.refresh_from_db()
+        self.assertEqual(unit.status, Unit.Status.MAINTENANCE)
 
     def test_marking_unit_inactive_frees_capacity(self):
         units = self.create_units(self.building, 5)

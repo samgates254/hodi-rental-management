@@ -10,7 +10,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.leases.models import Lease
-from apps.marketplace.models import Listing, ListingInquiry, ListingPhoto
+from apps.audit.models import AuditLog
+from apps.marketplace.models import CommerceListing, CommerceOrder, SupplierProfile, Listing, ListingInquiry, ListingPhoto
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
@@ -397,8 +398,33 @@ class MarketplaceApiTests(APITestCase):
 			status.HTTP_403_FORBIDDEN,
 		)
 		self.assertEqual(
-			self.client.post(
-				reverse('marketplace:managed-listing-publish', kwargs={'pk': created.data['id']}),
-			).status_code,
+			self.client.post(reverse('marketplace:managed-listing-publish', kwargs={'pk': created.data['id']})).status_code,
 			status.HTTP_403_FORBIDDEN,
 		)
+
+	def test_tenant_service_request_persists_and_private_order_is_not_visible_to_property_owner(self):
+		supplier = SupplierProfile.objects.create(organization=self.other_organization, created_by=self.other,
+			business_name='Laundry Co', categories=['laundry'])
+		listing = CommerceListing.objects.create(organization=self.other_organization, supplier=supplier,
+			created_by=self.other, kind='SERVICE', category='laundry', title='Wash and fold',
+			description='Laundry service', is_published=True, availability='AVAILABLE', price_minor=50000)
+		tenant = Tenant.objects.get(user=self.tenant_user)
+		Lease.objects.create(tenant=tenant, unit=self.unit, reference='L-COMMERCE', start_date=date(2026,1,1),
+			monthly_rent_minor=4500000, status=Lease.Status.ACTIVE)
+		self.client.force_authenticate(self.tenant_user)
+		response = self.client.post(reverse('marketplace:commerce-order-list'), {'listing': listing.pk, 'quantity': '1'}, format='json')
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+		order = CommerceOrder.objects.get(pk=response.data['id'])
+		self.assertEqual(order.requested_by, self.tenant_user)
+		self.assertEqual(response.data['payment_status'], 'NOT_INTEGRATED')
+		self.client.force_authenticate(self.owner)
+		self.assertEqual(self.client.get(reverse('marketplace:commerce-order-list')).data, [])
+		forbidden = self.client.patch(reverse('marketplace:commerce-order-detail', kwargs={'pk': order.pk}), {'status': 'ACCEPTED'}, format='json')
+		self.assertEqual(forbidden.status_code, status.HTTP_404_NOT_FOUND)
+		self.client.force_authenticate(self.tenant_user)
+		self.assertEqual(len(self.client.get(reverse('marketplace:commerce-order-list')).data), 1)
+		self.client.force_authenticate(self.other)
+		accepted = self.client.patch(reverse('marketplace:commerce-order-detail', kwargs={'pk': order.pk}), {'status': 'ACCEPTED'}, format='json')
+		self.assertEqual(accepted.status_code, status.HTTP_200_OK, accepted.data)
+		self.assertEqual(CommerceOrder.objects.get(pk=order.pk).status, 'ACCEPTED')
+		self.assertEqual(AuditLog.objects.filter(object_type='CommerceOrder', object_id=str(order.pk)).count(), 2)

@@ -1,27 +1,59 @@
+import re
+from pathlib import Path
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
+from django.apps import apps as model_apps
 from django.core import mail
 from django.core.cache import cache
+from django.db import connection
 from django.test import TestCase, override_settings
-from django.utils import timezone
 from django.urls import reverse
-from unittest.mock import patch
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 from rest_framework.throttling import ScopedRateThrottle
 
 from apps.accounts.models import AccountProfile
+from apps.accounts.serializers import SignupSerializer
 from apps.tenants.models import Tenant
 
 from apps.organizations.models import Organization, OrganizationMembership
 
 
 class HealthCheckTests(TestCase):
-    def test_health_endpoint_returns_ok(self):
+    @patch('config.urls.connection.cursor')
+    def test_health_endpoint_returns_ok(self, cursor_factory):
+        cursor = cursor_factory.return_value.__enter__.return_value
         response = self.client.get('/api/v1/health/')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'status': 'ok'})
+        cursor.execute.assert_called_once_with('SELECT 1')
+        cursor.fetchone.assert_called_once_with()
+
+    @patch('config.urls.connection.cursor')
+    def test_health_check_path_remains_compatible(self, cursor_factory):
+        response = self.client.get(reverse('health-check'))
+
+        self.assertEqual(reverse('health-check'), '/api/v1/health/')
+        self.assertEqual(response.status_code, 200)
+        cursor_factory.assert_called_once_with()
+
+    @patch('config.urls.connection.cursor')
+    def test_database_failure_returns_generic_503_without_exception_details(self, cursor_factory):
+        cursor_factory.side_effect = RuntimeError(
+            'postgres://user:secret@example.invalid/db SELECT sensitive_table'
+        )
+
+        response = self.client.get('/api/v1/health/')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {'status': 'error', 'database': 'unavailable'})
+        body = response.content.decode()
+        for secret_part in ('secret', 'example.invalid', 'SELECT', 'sensitive_table'):
+            self.assertNotIn(secret_part, body)
 
 
 class AuthenticationApiTests(TestCase):
@@ -32,6 +64,63 @@ class AuthenticationApiTests(TestCase):
             username='manager',
             password='password',
         )
+
+    def test_authentication_endpoint_names_resolve_to_slash_terminated_routes(self):
+        self.assertEqual(reverse('accounts:login'), '/api/v1/accounts/login/')
+        self.assertEqual(reverse('accounts:signup'), '/api/v1/accounts/signup/')
+        self.assertEqual(reverse('accounts:logout'), '/api/v1/accounts/logout/')
+
+        response = self.client.post(
+            reverse('accounts:login'),
+            {'username': 'manager', 'password': 'password'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['token'])
+
+    def test_frontend_auth_paths_match_django_routes_and_keep_trailing_slashes(self):
+        repository_root = Path(__file__).resolve().parents[4]
+        client_api = (repository_root / 'frontend/src/lib/clientApi.ts').read_text()
+        configured_paths = dict(re.findall(
+            r"^\s*(login|signup|logout): \"([^\"]+)\",$",
+            client_api,
+            re.MULTILINE,
+        ))
+
+        for frontend_name, django_name in (
+            ('login', 'login'),
+            ('signup', 'signup'),
+            ('logout', 'logout'),
+        ):
+            with self.subTest(endpoint=frontend_name):
+                frontend_path = configured_paths[frontend_name]
+                self.assertTrue(frontend_path.endswith('/'))
+                self.assertEqual(frontend_path, reverse(f'accounts:{django_name}'))
+
+    def test_frontend_auth_requests_use_the_canonical_path_constants(self):
+        repository_root = Path(__file__).resolve().parents[4]
+        client_api = (repository_root / 'frontend/src/lib/clientApi.ts').read_text()
+
+        for function_name, endpoint_name in (
+            ('login', 'login'),
+            ('register', 'signup'),
+            ('logout', 'logout'),
+        ):
+            with self.subTest(function=function_name):
+                function_start = client_api.index(f'export async function {function_name}(')
+                following_function = client_api.find('\nexport ', function_start + 1)
+                function_body = client_api[
+                    function_start: following_function if following_function >= 0 else None
+                ]
+                self.assertIn(f'AUTH_API_PATHS.{endpoint_name}', function_body)
+
+    def test_next_api_proxy_preserves_the_django_trailing_slash(self):
+        repository_root = Path(__file__).resolve().parents[4]
+        next_config = (repository_root / 'frontend/next.config.ts').read_text()
+
+        self.assertIn('skipTrailingSlashRedirect: true', next_config)
+        self.assertIn('source: "/api/v1/:path*"', next_config)
+        self.assertIn('}/api/v1/:path*/', next_config)
 
     def test_login_returns_token_for_valid_credentials(self):
         self.user.first_name = 'Teresa'
@@ -230,9 +319,165 @@ class AuthenticationApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {'non_field_errors': ['Unable to create an account with these details.']},
+        )
         self.assertFalse(
             get_user_model().objects.filter(username='another-manager').exists(),
         )
+
+    def test_signup_duplicate_identifier_errors_are_generic_and_consistent(self):
+        self.user.email = 'manager@example.com'
+        self.user.save(update_fields=('email',))
+        initial_count = get_user_model().objects.count()
+        duplicate_inputs = (
+            ('manager', 'different@example.com', 'Username Duplicate Estate'),
+            ('different-manager', 'manager@example.com', 'Email Duplicate Estate'),
+            ('manager', 'manager@example.com', 'Both Duplicate Estate'),
+        )
+        responses = []
+
+        for username, email, organization_name in duplicate_inputs:
+            responses.append(self.client.post(
+                reverse('accounts:signup'),
+                {
+                    'username': username,
+                    'account_type': 'OWNER',
+                    'organization_name': organization_name,
+                    'email': email,
+                    'password': 'A-strong-password-123!',
+                    'password_confirm': 'A-strong-password-123!',
+                },
+                format='json',
+            ))
+
+        expected_error = {
+            'non_field_errors': ['Unable to create an account with these details.'],
+        }
+        for response in responses:
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(response.data, expected_error)
+            body = response.content.decode().lower()
+            self.assertNotIn('manager', body)
+            self.assertNotIn('example.com', body)
+
+        self.assertEqual(get_user_model().objects.count(), initial_count)
+        self.assertFalse(get_user_model().objects.filter(
+            username__in=('different-manager',),
+        ).exists())
+        self.assertFalse(Organization.objects.filter(
+            name__in=(name for _username, _email, name in duplicate_inputs),
+        ).exists())
+
+    def test_signup_rejects_case_insensitive_duplicate_email(self):
+        self.user.email = 'Manager@Example.com'
+        self.user.save(update_fields=('email',))
+
+        response = self.client.post(
+            reverse('accounts:signup'),
+            {
+                'username': 'another-manager',
+                'account_type': 'OWNER',
+                'organization_name': 'Case Duplicate Estate',
+                'email': 'manager@example.COM',
+                'password': 'A-strong-password-123!',
+                'password_confirm': 'A-strong-password-123!',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {'non_field_errors': ['Unable to create an account with these details.']},
+        )
+        self.assertFalse(get_user_model().objects.filter(username='another-manager').exists())
+
+    def test_database_email_index_allows_multiple_blank_emails(self):
+        user_model = get_user_model()
+
+        user_model.objects.create_user(
+            username='blank-email-one', email='', password='password-one',
+        )
+        user_model.objects.create_user(
+            username='blank-email-two', email='', password='password-two',
+        )
+
+        self.assertEqual(user_model.objects.filter(email='').count(), 3)
+
+    def test_signup_database_email_race_returns_generic_error_and_rolls_back_owner(self):
+        original_validate = SignupSerializer.validate
+
+        def create_racing_signup(serializer, attrs):
+            validated = original_validate(serializer, attrs)
+            get_user_model().objects.create_user(
+                username='race-winner',
+                email=validated['email'],
+                password='A-strong-password-123!',
+            )
+            return validated
+
+        with patch.object(SignupSerializer, 'validate', create_racing_signup):
+            response = self.client.post(
+                reverse('accounts:signup'),
+                {
+                    'username': 'race-loser',
+                    'account_type': 'OWNER',
+                    'organization_name': 'Racing Estate',
+                    'email': 'racing@example.com',
+                    'password': 'A-strong-password-123!',
+                    'password_confirm': 'A-strong-password-123!',
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {'non_field_errors': ['Unable to create an account with these details.']},
+        )
+        self.assertTrue(get_user_model().objects.filter(username='race-winner').exists())
+        self.assertFalse(get_user_model().objects.filter(username='race-loser').exists())
+        self.assertFalse(Organization.objects.filter(name='Racing Estate').exists())
+
+    def test_email_uniqueness_migration_detects_conflicts_without_exposing_addresses(self):
+        from importlib import import_module
+
+        migration = import_module(
+            'apps.accounts.migrations.0003_user_email_ci_nonempty_unique',
+        )
+        user_model = get_user_model()
+        index_name = connection.ops.quote_name(migration.INDEX_NAME)
+        with connection.cursor() as cursor:
+            cursor.execute(f'DROP INDEX {index_name}')
+        try:
+            user_model.objects.create_user(
+                username='email-conflict-one',
+                email='Conflict@Example.com',
+                password='password-one',
+            )
+            user_model.objects.create_user(
+                username='email-conflict-two',
+                email='conflict@example.COM',
+                password='password-two',
+            )
+            with self.assertRaises(RuntimeError) as raised:
+                migration.check_existing_emails(model_apps, schema_editor=None)
+        finally:
+            user_model.objects.filter(
+                username__in=('email-conflict-one', 'email-conflict-two'),
+            ).delete()
+            table = connection.ops.quote_name(user_model._meta.db_table)
+            email_column = connection.ops.quote_name(user_model._meta.get_field('email').column)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f'CREATE UNIQUE INDEX {index_name} ON {table} (LOWER({email_column})) '
+                    f"WHERE {email_column} <> ''"
+                )
+
+        self.assertIn('1 groups', str(raised.exception))
+        self.assertNotIn('@', str(raised.exception))
 
     def test_signup_rejects_password_mismatch(self):
         response = self.client.post(

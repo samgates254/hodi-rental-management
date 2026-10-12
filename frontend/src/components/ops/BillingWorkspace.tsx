@@ -47,6 +47,7 @@ type RentPaymentRow = {
 };
 type AllocationRow = { id: number | string; charge: string; amount_cents: number };
 type PostingRow = { id: number | string; account: string; direction: string; amount_cents: number };
+type PaymentReversal = { status: string; reason: string; amount_cents: number };
 type LedgerPayment = {
   id: string;
   organization: number | string;
@@ -60,6 +61,7 @@ type LedgerPayment = {
   reference: string;
   allocations: AllocationRow[];
   postings: PostingRow[];
+  reversal?: PaymentReversal | null;
 };
 type DelinquencyItem = {
   obligation_id: string;
@@ -588,9 +590,12 @@ export default function BillingWorkspace({
                       <td>{formatCents(payment.amount_cents)}</td>
                       <td>{formatCents(payment.allocated_cents)}</td>
                       <td>{formatCents(payment.overpayment_cents)}</td>
-                      <td>{humanize(payment.status)} · {humanize(payment.method)}</td>
                       <td>
-                        {canWriteLedger && payment.status !== "ALLOCATED" && payment.status !== "VOIDED" && (
+                        {humanize(payment.status)} · {humanize(payment.method)}
+                        {payment.reversal && <small>{humanize(payment.reversal.status)}: {payment.reversal.reason}</small>}
+                      </td>
+                      <td>
+                        {canWriteLedger && payment.status === "PENDING" && (
                           <button type="button" className="ops-button" disabled={busy} onClick={() => void allocate(payment.id)}>Allocate</button>
                         )}
                       </td>

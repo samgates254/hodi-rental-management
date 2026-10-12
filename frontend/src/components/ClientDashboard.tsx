@@ -175,6 +175,7 @@ type SharedRentPayment = {
   status: string;
   method?: string;
   created_at: string;
+  reversal?: { status: string; reason: string; amount_cents: number } | null;
 };
 type LedgerInvoice = {
   id: number | string;
@@ -210,6 +211,7 @@ type Payment = {
   status?: string;
   receipt_url?: string;
   due_date?: string;
+  reversal?: { status: string; reason: string; amount_cents: number } | null;
 };
 
 function fromSharedIssue(issue: SharedMaintenanceIssue): MaintenanceIssue {
@@ -248,6 +250,7 @@ function fromSharedPayment(payment: SharedRentPayment): Payment {
     description: "Rent payment",
     method: payment.method,
     status: payment.status === "ALLOCATED" ? "SUCCESSFUL" : payment.status,
+    reversal: payment.reversal,
   };
 }
 
@@ -1659,6 +1662,18 @@ export default function ClientDashboard() {
                   {!sidebarCollapsed && <span>{label}</span>}
                 </button>
               ))}
+              <Link href="/utilities" className="portal-nav-item" onClick={() => setMobileMenuOpen(false)}>
+                <Icon name="building" size={19} />
+                {!sidebarCollapsed && <span>Utilities</span>}
+              </Link>
+              <Link href="/living" className="portal-nav-item" onClick={() => setMobileMenuOpen(false)}>
+                <Icon name="home" size={19} />
+                {!sidebarCollapsed && <span>HODI Living</span>}
+              </Link>
+              <Link href="/marketplace" className="portal-nav-item" onClick={() => setMobileMenuOpen(false)}>
+                <Icon name="building" size={19} />
+                {!sidebarCollapsed && <span>Marketplace</span>}
+              </Link>
             </div>
           </details>
         </nav>
@@ -1934,6 +1949,14 @@ export default function ClientDashboard() {
         </section>
 
         <StatementPanel />
+
+        <section className="dashboard-section" aria-label="Tenant services">
+          <SectionHead eyebrow="Hodi Living" title="Services and utilities" titleId="tenant-services-title" description="Request household services and see utility bills recorded for your current tenancy." />
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <Link className="dashboard-link" href="/living">Open Hodi Living</Link>
+            <Link className="dashboard-link" href="/utilities">View tenancy utilities</Link>
+          </div>
+        </section>
 
         <section className="dashboard-section dashboard-rooms portal-section" id="browse-rooms" aria-labelledby="available-rooms-title">
           <SectionHead
@@ -2239,7 +2262,10 @@ export default function ClientDashboard() {
                       <td>{invoice?.month ?? invoice?.description ?? payment.description ?? "Rent payment"}</td>
                       <td>{humanizeStatus(payment.method ?? "M-Pesa")}</td>
                       <td><strong>KES {money(payment.amount)}</strong></td>
-                      <td><span className={`portal-payment-status ${isPaymentSuccessful(payment.status) ? "is-success" : isPaymentFailed(payment.status) ? "is-failed" : normalizedStatus(payment.status) === "overdue" ? "is-overdue" : "is-pending"}`}>{humanizeStatus(payment.status ?? "pending")}</span></td>
+                      <td>
+                        <span className={`portal-payment-status ${normalizedStatus(payment.status) === "reversed" ? "is-reversed" : isPaymentSuccessful(payment.status) ? "is-success" : isPaymentFailed(payment.status) ? "is-failed" : normalizedStatus(payment.status) === "overdue" ? "is-overdue" : "is-pending"}`}>{humanizeStatus(payment.status ?? "pending")}</span>
+                        {payment.reversal && <small className="portal-reversal-note">{humanizeStatus(payment.reversal.status)}: {payment.reversal.reason}</small>}
+                      </td>
                       <td><button className="portal-receipt-button" type="button" onClick={() => void downloadReceipt(payment)} disabled={!payment.receipt_url} aria-label={`Download receipt ${payment.reference ?? payment.id}`} title={payment.receipt_url ? "Download receipt" : "Receipt not available"}><Icon name="download" size={16} /></button></td>
                     </tr>;
                   }) : <tr><td colSpan={7}><div className="portal-table-empty"><Icon name="receipt" size={22} /><strong>No payments yet</strong><span>Your completed rent receipts will appear here.</span></div></td></tr>}

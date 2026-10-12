@@ -5,6 +5,7 @@
   border-radius: 16px;
   background: var(--hodi-surface);
   color: var(--hodi-text);
+  box-shadow: var(--hodi-shadow);
 }
 
 .ops-heading {
@@ -119,6 +120,14 @@
   text-transform: uppercase;
 }
 
+.ops-table tbody tr {
+  transition: background-color 140ms ease;
+}
+
+.ops-table tbody tr:hover {
+  background: color-mix(in srgb, var(--hodi-brand-soft) 48%, transparent);
+}
+
 .ops-pill {
   display: inline-flex;
   align-items: center;
@@ -216,6 +225,71 @@
   font-weight: 700;
 }
 
+.ops-lifecycle {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-lifecycle li {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 8px;
+  border-bottom: 2px solid var(--hodi-border);
+  color: var(--hodi-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.ops-lifecycle li[data-complete="true"] {
+  border-color: var(--hodi-success);
+  color: var(--hodi-text);
+}
+
+.ops-lifecycle li[data-active="true"] {
+  border-color: var(--hodi-brand);
+  color: var(--hodi-text);
+}
+
+.ops-lifecycle-marker {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  place-items: center;
+  border: 1px solid var(--hodi-border);
+  border-radius: 50%;
+  background: var(--hodi-surface);
+  color: var(--hodi-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-lifecycle li[data-complete="true"] .ops-lifecycle-marker {
+  border-color: var(--hodi-success);
+  background: var(--hodi-success-soft);
+  color: var(--hodi-success);
+}
+
+.ops-lifecycle li[data-active="true"] .ops-lifecycle-marker {
+  border-color: var(--hodi-brand);
+  background: var(--hodi-brand-soft);
+  color: var(--hodi-brand);
+}
+
+.ops-lifecycle-cancelled {
+  padding: 10px 12px;
+  border-left: 3px solid var(--hodi-error);
+  background: var(--hodi-error-soft);
+}
+
 .ops-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -224,6 +298,28 @@
   place-items: center;
   padding: 20px;
   background: rgba(25, 32, 42, 0.46);
+}
+
+@media (max-width: 640px) {
+  .ops-panel {
+    padding: 16px 13px;
+    border-radius: 12px;
+  }
+
+  .ops-lifecycle {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 8px;
+  }
+
+  .ops-lifecycle li {
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-table tbody tr {
+    transition: none;
+  }
 }
 
 .ops-dialog {

@@ -2,8 +2,75 @@ from rest_framework import serializers
 
 from apps.properties.models import Unit
 
-from .models import Listing, ListingInquiry, ListingPhoto
+from .models import (CommerceListing, CommerceOrder, CommercePhoto, SupplierProfile,
+	Listing, ListingInquiry, ListingPhoto)
 from .services import is_publicly_available
+
+
+class SupplierProfileSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = SupplierProfile
+		fields = ('id', 'organization', 'business_name', 'public_email', 'public_phone',
+			'show_public_contact', 'categories', 'verification_status', 'is_active', 'created_at')
+		read_only_fields = ('verification_status', 'created_at')
+
+	def validate_organization(self, organization):
+		from common.permissions import user_can_access_organization_resource
+		request = self.context['request']
+		if not user_can_access_organization_resource(request.user, organization.pk, 'marketplace', 'write'):
+			from rest_framework.exceptions import PermissionDenied
+			raise PermissionDenied('You cannot manage suppliers for this organization.')
+		return organization
+
+
+class CommercePhotoSerializer(serializers.ModelSerializer):
+	url = serializers.SerializerMethodField()
+	class Meta:
+		model = CommercePhoto
+		fields = ('id', 'url', 'caption', 'position')
+	def get_url(self, photo):
+		return f'/api/v1/marketplace/commerce/listings/{photo.listing_id}/photos/{photo.pk}/'
+
+
+class CommerceListingSerializer(serializers.ModelSerializer):
+	supplier_name = serializers.CharField(source='supplier.business_name', read_only=True)
+	photos = CommercePhotoSerializer(many=True, read_only=True)
+	class Meta:
+		model = CommerceListing
+		fields = ('id', 'organization', 'supplier', 'supplier_name', 'kind', 'category', 'title',
+			'description', 'specifications', 'price_minor', 'currency', 'price_unit',
+			'availability', 'is_published', 'photos', 'created_at')
+		read_only_fields = ('created_at',)
+
+	def validate(self, attrs):
+		organization = attrs.get('organization', getattr(self.instance, 'organization', None))
+		supplier = attrs.get('supplier', getattr(self.instance, 'supplier', None))
+		if organization and supplier and supplier.organization_id != organization.pk:
+			raise serializers.ValidationError({'supplier': 'Supplier must belong to the listing organization.'})
+		if supplier and not supplier.is_active:
+			raise serializers.ValidationError({'supplier': 'Listings require an active supplier profile.'})
+		price = attrs.get('price_minor', getattr(self.instance, 'price_minor', None))
+		if price is not None and price <= 0:
+			raise serializers.ValidationError({'price_minor': 'Set a positive price or leave it blank for price on request.'})
+		if organization:
+			from common.permissions import user_can_access_organization_resource
+			if not user_can_access_organization_resource(self.context['request'].user, organization.pk, 'marketplace', 'write'):
+				from rest_framework.exceptions import PermissionDenied
+				raise PermissionDenied('You cannot manage listings for this organization.')
+		return attrs
+
+
+class CommerceOrderSerializer(serializers.ModelSerializer):
+	listing_title = serializers.CharField(source='listing.title', read_only=True)
+	supplier_name = serializers.CharField(source='listing.supplier.business_name', read_only=True)
+	payment_status = serializers.SerializerMethodField()
+	class Meta:
+		model = CommerceOrder
+		fields = ('id', 'listing', 'listing_title', 'supplier_name', 'quantity', 'request_details',
+			'status', 'provider_response', 'payment_status', 'created_at', 'updated_at')
+		read_only_fields = ('status', 'provider_response', 'created_at', 'updated_at')
+	def get_payment_status(self, order):
+		return 'NOT_INTEGRATED'
 
 
 class ListingPhotoSerializer(serializers.ModelSerializer):

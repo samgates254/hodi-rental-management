@@ -72,6 +72,17 @@ RESOURCE_ROLE_ACCESS = {
             OrganizationMembership.Role.PROPERTY_MANAGER,
         ),
     },
+    'utilities': {
+        'read': (
+            OrganizationMembership.Role.OWNER,
+            OrganizationMembership.Role.PROPERTY_MANAGER,
+            OrganizationMembership.Role.ACCOUNTANT,
+        ),
+        'write': (
+            OrganizationMembership.Role.OWNER,
+            OrganizationMembership.Role.PROPERTY_MANAGER,
+        ),
+    },
 }
 
 

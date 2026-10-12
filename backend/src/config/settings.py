@@ -55,7 +55,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'apps.accounts', 'apps.organizations', 'apps.properties', 'apps.tenants',
     'apps.leases', 'apps.billing', 'apps.maintenance', 'apps.notifications', 'apps.audit',
-    'apps.marketplace', 'apps.subscriptions',
+    'apps.marketplace', 'apps.subscriptions', 'apps.utilities',
 ]
 
 MIDDLEWARE = [
@@ -89,6 +89,9 @@ if database_url:
             conn_health_checks=True,
         ),
     }
+
+if DJANGO_ENV == 'production' and DATABASES['default'].get('ENGINE') != 'django.db.backends.postgresql':
+    raise ImproperlyConfigured('Production database backend must be PostgreSQL.')
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -155,6 +158,24 @@ else:
     DEFAULT_FROM_EMAIL = os.environ.get('DJANGO_DEFAULT_FROM_EMAIL', 'accounts@localhost')
 
 EMAIL_TIMEOUT = int(os.environ.get('DJANGO_EMAIL_TIMEOUT', '10'))
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'mpesa_sensitive_redaction': {
+            '()': 'apps.billing.logging.MpesaSensitiveLogFilter',
+        },
+    },
+    'loggers': {
+        'django.request': {'filters': ['mpesa_sensitive_redaction']},
+        'apps.billing.views_mpesa': {'filters': ['mpesa_sensitive_redaction']},
+        'application.services.mpesa': {'filters': ['mpesa_sensitive_redaction']},
+        'application.services.mpesa_callback': {'filters': ['mpesa_sensitive_redaction']},
+        'application.services.mpesa_review': {'filters': ['mpesa_sensitive_redaction']},
+        'infrastructure.payments.mpesa': {'filters': ['mpesa_sensitive_redaction']},
+    },
+}
 SECURE_SSL_REDIRECT = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
@@ -187,7 +208,7 @@ STORAGES = {
     },
 }
 MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = Path(os.environ.get('DJANGO_MEDIA_ROOT', str(BASE_DIR / 'media')))
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],

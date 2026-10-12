@@ -21,21 +21,36 @@ export function Gallery({ photos, title }: { photos: ListingPhoto[]; title: stri
   }, [open, photos.length]);
 
   if (!photo) {
-    return <div className="flex aspect-[16/10] items-center justify-center rounded-2xl bg-soft-teal text-sm text-text-secondary">No photo yet</div>;
+    return (
+      <div className="flex aspect-[16/10] flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-soft-teal text-sm text-text-secondary" role="img" aria-label={`No listing photos available for ${title}`}>
+        <svg aria-hidden="true" viewBox="0 0 32 32" className="h-10 w-10" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="m4 14 12-9 12 9v13H4z" />
+          <path d="M12 27v-8h8v8M9 14h.01M23 14h.01" />
+        </svg>
+        <span>No listing photos</span>
+      </div>
+    );
   }
 
   return (
     <div>
-      <button type="button" className="group block w-full overflow-hidden rounded-2xl bg-soft-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal" onClick={() => setOpen(true)} aria-label="Open photo">
+      <button type="button" className="group block w-full overflow-hidden rounded-2xl border border-border bg-soft-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal" onClick={() => setOpen(true)} aria-label={`Open photo: ${photo.caption || title}`}>
         {failed[active] ? (
-          <div className="flex aspect-[16/10] items-center justify-center text-sm text-text-secondary">This photo could not be loaded</div>
+          <div className="flex aspect-[16/10] flex-col items-center justify-center gap-2 text-sm text-text-secondary" role="img" aria-label={`Photo unavailable for ${title}`}>
+            <svg aria-hidden="true" viewBox="0 0 32 32" className="h-10 w-10" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="m4 14 12-9 12 9v13H4z" />
+              <path d="M12 27v-8h8v8M9 14h.01M23 14h.01" />
+            </svg>
+            <span>Photo unavailable</span>
+          </div>
         ) : (
           <img
             src={photo.url}
             alt={photo.caption || title}
             decoding="async"
+            sizes="(max-width: 1024px) 100vw, 65vw"
             onError={() => setFailed(current => ({ ...current, [active]: true }))}
-            className="aspect-[16/10] w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+            className="aspect-[16/10] w-full object-cover transition duration-200 group-hover:scale-[1.01]"
           />
         )}
       </button>
@@ -61,7 +76,7 @@ export function Gallery({ photos, title }: { photos: ListingPhoto[]; title: stri
           onClick={() => setOpen(false)}
         >
           <div className="w-full max-w-5xl" onClick={event => event.stopPropagation()}>
-            <img src={photo.url} alt={photo.caption || title} className="mx-auto max-h-[78vh] w-full rounded-xl object-contain" />
+            <img src={photo.url} alt={photo.caption || title} sizes="100vw" className="mx-auto max-h-[78vh] w-full rounded-xl object-contain" />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-white">
               <button type="button" className="rounded-full px-3 py-2 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white" onClick={() => setActive(index => (index - 1 + photos.length) % photos.length)}>Previous</button>
               <span>{active + 1} / {photos.length}</span>
