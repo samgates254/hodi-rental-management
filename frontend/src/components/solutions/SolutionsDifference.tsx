@@ -21,7 +21,7 @@ const principles = [
 
 export function SolutionsDifference() {
   return (
-    <section id="difference" className="section-pad bg-charcoal text-white">
+    <section id="difference" className="section-pad bg-contrast-surface text-white">
       <Container>
         <div className="max-w-2xl">
           <SectionHeading

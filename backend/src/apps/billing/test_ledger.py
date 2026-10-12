@@ -88,6 +88,120 @@ class LedgerApiTests(APITestCase):
         )
         self.assertEqual(changed_period.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_landlord_and_tenant_see_same_invoice_total_and_separate_balance(self):
+        self.client.force_authenticate(self.accountant)
+        created = self.client.post('/api/v1/billing/invoices/', self.invoice_payload(
+            include_rent=False,
+        ), format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        invoice_id = created.data['id']
+
+        charge = self.client.post('/api/v1/billing/charges/', {
+            'invoice': invoice_id,
+            'charge_type': 'RENT',
+            'amount_cents': 5_000_000,
+            'due_date': '2026-10-05',
+            'description': 'October rent',
+        }, format='json')
+        self.assertEqual(charge.status_code, status.HTTP_201_CREATED)
+        posted = self.client.post(f'/api/v1/billing/invoices/{invoice_id}/post/')
+        self.assertEqual(posted.status_code, status.HTTP_200_OK)
+        self.assertEqual(posted.data['total_cents'], 5_000_000)
+        self.assertEqual(posted.data['paid_cents'], 0)
+        self.assertEqual(posted.data['balance_cents'], 5_000_000)
+        invoice = Invoice.objects.get(pk=invoice_id)
+        self.assertEqual(invoice.total_cents, 5_000_000)
+        self.assertEqual(invoice.charges.get().amount_cents, 5_000_000)
+        self.assertEqual(invoice.currency, 'KES')
+
+        payment = self.client.post('/api/v1/billing/ledger-payments/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': 1_613_000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'PARTIAL-16130',
+        }, format='json')
+        self.assertEqual(payment.status_code, status.HTTP_201_CREATED)
+        allocated = self.client.post(
+            f"/api/v1/billing/ledger-payments/{payment.data['id']}/allocate/",
+            {'policy_id': 'CANONICAL_PRIORITY', 'policy_version': 2},
+            format='json',
+        )
+        self.assertEqual(allocated.status_code, status.HTTP_200_OK)
+        self.assertEqual(allocated.data['allocated_cents'], 1_613_000)
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.total_cents, 5_000_000)
+        self.assertEqual(invoice.balance_cents, 3_387_000)
+        self.assertEqual(invoice.charges.get().balance_cents, 3_387_000)
+
+        landlord_list = self.client.get('/api/v1/billing/invoices/')
+        landlord_detail = self.client.get(f'/api/v1/billing/invoices/{invoice_id}/')
+        self.assertEqual(landlord_list.status_code, status.HTTP_200_OK)
+        self.assertEqual(landlord_detail.status_code, status.HTTP_200_OK)
+        landlord_invoice = next(row for row in landlord_list.data if row['id'] == invoice_id)
+
+        self.client.force_authenticate(self.tenant_user)
+        tenant_list = self.client.get('/api/v1/billing/invoices/')
+        tenant_detail = self.client.get(f'/api/v1/billing/invoices/{invoice_id}/')
+        self.assertEqual(tenant_list.status_code, status.HTTP_200_OK)
+        self.assertEqual(tenant_detail.status_code, status.HTTP_200_OK)
+        tenant_invoice = next(row for row in tenant_list.data if row['id'] == invoice_id)
+
+        for response_invoice in (landlord_invoice, landlord_detail.data, tenant_invoice, tenant_detail.data):
+            self.assertEqual(response_invoice['id'], invoice_id)
+            self.assertEqual(response_invoice['tenant'], self.tenant.pk)
+            self.assertEqual(response_invoice['organization'], self.organization.pk)
+            self.assertEqual(response_invoice['currency'], 'KES')
+            self.assertEqual(response_invoice['total_cents'], 5_000_000)
+            self.assertEqual(response_invoice['paid_cents'], 1_613_000)
+            self.assertEqual(response_invoice['balance_cents'], 3_387_000)
+
+        other_user = get_user_model().objects.create_user(username='other-tenant', password='password')
+        other_tenant = Tenant.objects.create(
+            organization=self.organization,
+            user=other_user,
+            first_name='Other',
+            last_name='Tenant',
+        )
+        other_invoice = Invoice.objects.create(
+            organization=self.organization,
+            tenant=other_tenant,
+            period_start=date(2026, 10, 1),
+            period_end=date(2026, 10, 31),
+            due_date=date(2026, 10, 5),
+            status=DocumentStatus.POSTED,
+            total_cents=2_000_000,
+            balance_cents=2_000_000,
+        )
+        hidden = self.client.get(f'/api/v1/billing/invoices/{other_invoice.pk}/')
+        self.assertEqual(hidden.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_invoice_total_sums_itemized_charges_in_minor_units(self):
+        self.client.force_authenticate(self.accountant)
+        created = self.client.post('/api/v1/billing/invoices/', self.invoice_payload(
+            include_rent=False,
+        ), format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        invoice_id = created.data['id']
+
+        for charge_type, amount_cents in (('WATER', 1_613_001), ('SERVICE_CHARGE', 25_050)):
+            response = self.client.post('/api/v1/billing/charges/', {
+                'invoice': invoice_id,
+                'charge_type': charge_type,
+                'amount_cents': amount_cents,
+                'due_date': '2026-10-05',
+            }, format='json')
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        invoice = self.client.get(f'/api/v1/billing/invoices/{invoice_id}/')
+        self.assertEqual(invoice.data['total_cents'], 1_638_051)
+        self.assertEqual(
+            sum(charge['amount_cents'] for charge in invoice.data['charges']),
+            invoice.data['total_cents'],
+        )
+        self.assertEqual(invoice.data['currency'], 'KES')
+
     def test_invoice_creation_rolls_back_after_charge_persistence_failure(self):
         self.client.force_authenticate(self.accountant)
         with patch('application.services.billing.recompute_invoice_totals', side_effect=RuntimeError('test failure')):

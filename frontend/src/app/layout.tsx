@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
+import Script from "next/script";
+import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -58,9 +60,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <Script id="hodi-theme-init" strategy="beforeInteractive">
+          {`try { var savedTheme = localStorage.getItem("hodi-theme"); document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light"; } catch (_) { document.documentElement.dataset.theme = "light"; }`}
+        </Script>
+      </head>
       <body className={`${dmSans.variable} ${fraunces.variable} antialiased`}>
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

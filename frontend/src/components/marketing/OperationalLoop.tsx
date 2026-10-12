@@ -26,13 +26,12 @@ const stages = [
 
 export function OperationalLoop() {
   return (
-    <section id="operations" className="section-pad bg-charcoal">
+    <section id="operations" className="section-pad bg-bg text-text">
       <Container>
         <SectionHeading
           eyebrow="The operational loop"
           title="Every property has a living cycle of work."
           description="Hodi is more than rent collection. It keeps the loop between residents, managers, and field work attached to the property itself."
-          light
         />
 
         <div className="mt-12">
@@ -40,20 +39,20 @@ export function OperationalLoop() {
             {stages.map((stage, index) => (
               <li
                 key={stage.title}
-                className="relative flex flex-col py-6 sm:border-r sm:px-4 sm:py-8 sm:last:border-r-0 lg:px-6"
+                className="relative flex flex-col border-b border-border py-5 last:border-b-0 first:pt-0 last:pb-0 sm:border-b-0 sm:border-r sm:px-4 sm:py-8 sm:first:pt-8 sm:last:border-r-0 sm:last:pb-8 lg:px-6"
               >
                 <div className="flex items-center gap-3 sm:flex-col sm:items-start sm:gap-3">
                   <span
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-teal bg-teal text-sm font-semibold tabular-nums text-white"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-teal bg-teal text-sm font-semibold tabular-nums text-brand-contrast"
                     aria-hidden
                   >
                     {index + 1}
                   </span>
                   <div>
-                    <h3 className="text-sm font-semibold tracking-tight text-white sm:mt-1">
+                    <h3 className="text-sm font-semibold tracking-tight text-charcoal sm:mt-1">
                       {stage.title}
                     </h3>
-                    <p className="mt-1.5 text-[0.9375rem] leading-relaxed text-white/75 text-pretty">
+                    <p className="mt-1.5 text-[0.9375rem] leading-relaxed text-text-secondary text-pretty">
                       {stage.body}
                     </p>
                   </div>
@@ -70,7 +69,7 @@ export function OperationalLoop() {
             ))}
           </ol>
 
-          <p className="pt-8 text-[0.9375rem] leading-relaxed text-white/75 text-pretty md:max-w-3xl">
+          <p className="pt-8 text-[0.9375rem] leading-relaxed text-text-secondary text-pretty md:max-w-3xl">
             Request in. Work assigned. Progress tracked. Outcome recorded. The
             next person always picks up from the same property truth — not a
             scattered message history.

@@ -1,6 +1,5 @@
 /**
- * Homepage imagery — local assets under /public/images (Unsplash License originals).
- * Local files avoid remote optimizer/network failures that show alt text as a broken image.
+ * Homepage imagery lives under /public/images and is optimized by Next locally.
  */
 export const images = {
   hero: {
@@ -18,5 +17,9 @@ export const images = {
   skyline: {
     src: "/images/skyline.jpg",
     alt: "City residential skyline at dusk",
+  },
+  propertyExterior: {
+    src: "/images/hodi/property-exterior.jpg",
+    alt: "Contemporary urban property exterior",
   },
 } as const;

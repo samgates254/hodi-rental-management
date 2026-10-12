@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function SignInPage() {
   return (
-    <div className="bg-[#f7f8f7]">
+    <div className="min-h-screen bg-bg">
       <AuthPage mode="signin" />
       <Footer />
     </div>

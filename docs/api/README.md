@@ -12,7 +12,7 @@ See [mpesa.md](mpesa.md) for M-Pesa Daraja STK initiation and callback settlemen
 
 The landlord dashboard uses the authenticated organization-scoped endpoints below. Send the DRF token as `Authorization: Token <token>` on every request; see [authentication](./authentication.md).
 
-In Next.js development, `/api/v1/` is proxied to `http://127.0.0.1:8000` by default. Set `API_PROXY_TARGET` to the backend origin when using a different host; production deployments without this setting should route `/api/v1/` to the backend at the hosting layer.
+In Next.js development, `/api/v1/` is proxied to `http://127.0.0.1:8000` by default. Set `API_PROXY_TARGET` to the backend origin when using a different host. For a production Next.js server, set `API_PROXY_TARGET` in the environment for `next build`; Next.js records that rewrite in the build output. If it is omitted in production, the frontend has no API rewrite and `/api/v1/` will return a Next.js 404 unless the hosting layer separately routes that path to Django. See [production deployment configuration](../deployment.md#nextjs-api-routing) for the exact setup.
 
 - `GET /organizations/` — organizations the signed-in user belongs to.
 - `POST /organizations/` with `{"name": "..."}` — create an organization; the creator becomes its owner.

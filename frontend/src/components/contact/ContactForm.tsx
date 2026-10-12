@@ -675,7 +675,7 @@ function PortfolioSizeSelect({
           aria-hidden
           className={cn(
             "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-teal/10 text-teal transition-transform duration-200",
-            open && "rotate-180 bg-teal text-white",
+            open && "rotate-180 bg-teal text-brand-contrast",
           )}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -724,7 +724,7 @@ function PortfolioSizeSelect({
                 {isSelected ? (
                   <span
                     aria-hidden
-                    className="flex h-5 w-5 items-center justify-center rounded-full bg-teal text-white"
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-teal text-brand-contrast"
                   >
                     <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
                       <path

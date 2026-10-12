@@ -24,10 +24,10 @@ export function Trust() {
       <Container>
         <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-14">
           <div className="relative order-2 lg:order-1 lg:col-span-5">
-            <div className="relative aspect-[4/5] overflow-hidden rounded-lg border border-border bg-soft-teal shadow-soft">
+            <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-border bg-soft-teal shadow-soft">
               <Image
-                src={images.skyline.src}
-                alt={images.skyline.alt}
+                src={images.propertyExterior.src}
+                alt={images.propertyExterior.alt}
                 fill
                 sizes="(max-width: 1024px) 100vw, 40vw"
                 className="object-cover object-center"

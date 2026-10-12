@@ -26,6 +26,7 @@ type InvoiceRow = {
   due_date: string;
   status: string;
   total_cents: number;
+  paid_cents: number;
   balance_cents: number;
   notes: string;
   charges: ChargeRow[];
@@ -432,7 +433,7 @@ export default function BillingWorkspace({
           {invoices.length > 0 && (
             <div className="ops-table-wrap">
               <table className="ops-table">
-                <thead><tr><th>Invoice</th><th>Tenant</th><th>Period</th><th>Due</th><th>Total</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+                <thead><tr><th>Invoice</th><th>Tenant</th><th>Period</th><th>Due</th><th>Invoice total</th><th>Amount paid</th><th>Balance due</th><th>Status</th><th></th></tr></thead>
                 <tbody>
                   {invoices.map(invoice => (
                     <tr key={invoice.id}>
@@ -441,6 +442,7 @@ export default function BillingWorkspace({
                       <td>{invoice.period_start} – {invoice.period_end}</td>
                       <td>{invoice.due_date}</td>
                       <td>{formatCents(invoice.total_cents)}</td>
+                      <td>{formatCents(invoice.paid_cents)}</td>
                       <td>{formatCents(invoice.balance_cents)}</td>
                       <td><span className={`ops-pill ${invoice.balance_cents > 0 && invoice.status === "POSTED" ? "is-hot" : "is-good"}`}>{humanize(invoice.status)}</span></td>
                       <td>

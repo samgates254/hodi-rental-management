@@ -19,7 +19,7 @@ export function SolutionsTenants() {
                   sizes="(max-width: 1024px) 40vw, 22vw"
                   className="object-cover"
                 />
-                <div className="absolute inset-0 bg-charcoal/20" aria-hidden />
+                <div className="absolute inset-0 bg-contrast-surface/20" aria-hidden />
                 <div className="absolute bottom-0 left-0 right-0 p-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
                     Home

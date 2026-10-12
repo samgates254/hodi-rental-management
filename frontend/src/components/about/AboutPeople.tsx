@@ -37,10 +37,10 @@ export function AboutPeople() {
                 className="object-cover"
               />
               <div
-                className="absolute inset-0 bg-charcoal/25"
+                className="absolute inset-0 bg-contrast-surface/25"
                 aria-hidden
               />
-              <div className="absolute bottom-0 left-0 right-0 bg-charcoal/70 px-5 py-4">
+              <div className="absolute bottom-0 left-0 right-0 bg-contrast-surface/70 px-5 py-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/70">
                   After the building is finished
                 </p>

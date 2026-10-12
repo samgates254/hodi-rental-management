@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { cn } from "@/lib/cn";
 import { primaryNav } from "@/lib/site";
+import ThemeToggle from "@/components/theme/ThemeToggle";
 
 const NAV = primaryNav;
 
@@ -74,6 +75,7 @@ export function Header() {
         </nav>
 
         <div className="hidden items-center gap-2 lg:flex">
+          <ThemeToggle />
           <Button href="/signin" variant="ghost" size="sm">
             Log in
           </Button>
@@ -130,6 +132,7 @@ export function Header() {
             </a>
           ))}
           <div className="mt-3 flex flex-col gap-2 border-t border-border pt-4">
+            <ThemeToggle className="w-full" />
             <a
               href="/signin"
               onClick={close}
@@ -140,7 +143,7 @@ export function Header() {
             <a
               href="/signup"
               onClick={close}
-              className="inline-flex h-11 items-center justify-center rounded-md bg-teal text-sm font-medium text-white"
+              className="inline-flex h-11 items-center justify-center rounded-md bg-teal text-brand-contrast text-sm font-medium"
             >
               Get Started
             </a>

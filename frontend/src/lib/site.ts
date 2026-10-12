@@ -1,6 +1,7 @@
 /** Shared site navigation — works from any route. */
 export const primaryNav = [
   { label: "Platform", href: "/platform" },
+  { label: "Pricing", href: "/pricing" },
   { label: "Marketplace", href: "/marketplace" },
   { label: "Solutions", href: "/solutions" },
   { label: "About", href: "/about" },
@@ -10,6 +11,7 @@ export const primaryNav = [
 export const footerProduct = [
   { label: "Home", href: "/" },
   { label: "Platform", href: "/platform" },
+  { label: "Pricing", href: "/pricing" },
   { label: "Solutions", href: "/solutions" },
   { label: "How it works", href: "/#how-it-works" },
 ] as const;

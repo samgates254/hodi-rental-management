@@ -54,7 +54,7 @@ export function SolutionsProblem() {
                 </p>
               </div>
 
-              <div className="border border-charcoal bg-charcoal p-5 text-white sm:p-6">
+              <div className="border border-charcoal bg-contrast-surface p-5 text-white sm:p-6">
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-teal">
                     With Hodi

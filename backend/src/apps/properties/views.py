@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 
@@ -10,6 +11,7 @@ from common.permissions import (
 
 from .models import Building, Property, Unit
 from .serializers import BuildingSerializer, PropertySerializer, UnitSerializer
+from apps.subscriptions.services import ensure_unit_capacity
 
 
 class OrganizationScopedViewSet(viewsets.ModelViewSet):
@@ -100,9 +102,14 @@ class UnitViewSet(OrganizationScopedViewSet):
 	def get_queryset(self):
 		return Unit.objects.filter(building__property__organization_id__in=self.allowed_organization_ids())
 
+	@transaction.atomic
 	def perform_create(self, serializer):
 		building = serializer.validated_data['building']
 		self.ensure_allowed(building.property.organization_id)
+		ensure_unit_capacity(
+			building.property.organization_id,
+			counts_as_rentable=serializer.validated_data.get('status', Unit.Status.AVAILABLE) != Unit.Status.INACTIVE,
+		)
 		unit = serializer.save()
 		record_audit(
 			action='unit.create',
@@ -114,12 +121,22 @@ class UnitViewSet(OrganizationScopedViewSet):
 			request=self.request,
 		)
 
+	@transaction.atomic
 	def perform_update(self, serializer):
 		building = serializer.validated_data.get(
 			'building',
 			serializer.instance.building,
 		)
 		self.ensure_allowed(building.property.organization_id)
+		new_status = serializer.validated_data.get('status', serializer.instance.status)
+		existing_organization_id = (
+			serializer.instance.building.property.organization_id
+		)
+		ensure_unit_capacity(
+			building.property.organization_id,
+			counts_as_rentable=new_status != Unit.Status.INACTIVE,
+			existing_unit_id=serializer.instance.pk if building.property.organization_id == existing_organization_id else None,
+		)
 		unit = serializer.save()
 		record_audit(
 			action='unit.update',

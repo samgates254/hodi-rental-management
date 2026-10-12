@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import { Container } from "../components/ui/Container";
@@ -23,6 +24,7 @@ import TenantLinkGate from "./ops/TenantLinkGate";
 import TenantProfileEditor from "./ops/TenantProfileEditor";
 import TenantWorkStatus from "./ops/TenantWorkStatus";
 import StatementPanel from "./tenant/StatementPanel";
+import ThemeToggle from "@/components/theme/ThemeToggle";
 import "./client-portal.css";
 
 const MARKETPLACE_AVAILABLE = true;
@@ -182,6 +184,7 @@ type LedgerInvoice = {
   status?: string;
   notes?: string;
   total_cents?: number;
+  paid_cents?: number;
   balance_cents?: number;
 };
 type Invoice = {
@@ -285,6 +288,7 @@ function fromLease(lease: LeaseRecord): Tenancy {
 
 function fromLedgerInvoice(invoice: LedgerInvoice): Invoice {
   const total = Number(invoice.total_cents ?? 0) / 100;
+  const paid = Number(invoice.paid_cents ?? 0) / 100;
   const balance = Number(invoice.balance_cents ?? 0) / 100;
   const period = [invoice.period_start, invoice.period_end].filter(Boolean).join(" – ");
   return {
@@ -293,7 +297,7 @@ function fromLedgerInvoice(invoice: LedgerInvoice): Invoice {
     description: invoice.notes?.trim() || (period ? `Rent ${period}` : "Rent invoice"),
     amount: total,
     balance,
-    paid_amount: Math.max(0, total - balance),
+    paid_amount: paid,
     status: invoice.status,
     due_date: invoice.due_date,
   };
@@ -618,6 +622,7 @@ function PropertyCard({
   imageIndex: number;
   onImageChange: (index: number) => void;
 }) {
+  const [failedImage, setFailedImage] = useState("");
   const images = propertyImages(property);
   const image = images[imageIndex % Math.max(images.length, 1)] ?? propertyImage(property);
   const location = displayLocation(property);
@@ -630,8 +635,16 @@ function PropertyCard({
       onClick={() => onOpen(property)}
     >
       <div className="dashboard-property-image-wrap">
-        {image ? (
-          <img className="dashboard-property-image" src={image} alt={title} loading="lazy" />
+        {image && failedImage !== image ? (
+          <Image
+            className="dashboard-property-image"
+            src={image}
+            alt={`Property photo for ${title}`}
+            fill
+            sizes="(max-width: 760px) 100vw, (max-width: 1100px) 50vw, 33vw"
+            unoptimized
+            onError={() => setFailedImage(image)}
+          />
         ) : (
           <div className="dashboard-property-image dashboard-property-placeholder">
             <Icon name="home" size={34} />
@@ -1726,6 +1739,7 @@ export default function ClientDashboard() {
               }}
             ><Icon name={mobileSearchOpen ? "close" : "search"} size={19} /></button>
             <NotificationBell />
+            <ThemeToggle className="portal-theme-toggle" />
             <span className="portal-current-flat"><Icon name="home" size={15} /> Flat {flatNumber}</span>
             <button className="portal-profile-chip" type="button" onClick={() => scrollToSection("profile")}>
               <span className="dashboard-account-avatar">{clientName.slice(0, 1).toUpperCase()}</span>
@@ -1882,7 +1896,7 @@ export default function ClientDashboard() {
                     <span className="portal-invoice-select">{PAYMENT_FLOW_AVAILABLE && active && <span />}</span>
                     <span className="portal-invoice-name"><strong>{invoice.month ?? invoice.description ?? "Rent invoice"}</strong><small>Due {formatDate(invoice.due_date)}</small></span>
                     <span className={`portal-invoice-status status-${normalizedStatus(invoice.status) || "pending"}`}>{humanizeStatus(invoice.status ?? "pending")}</span>
-                    <span className="portal-invoice-balance"><strong>KES {money(balance)}</strong><small>of {money(invoice.amount)}</small></span>
+                    <span className="portal-invoice-balance"><strong>Balance due: KES {money(balance)}</strong><small>Invoice total: KES {money(invoice.amount)}</small><small>Amount paid: KES {money(invoice.paid_amount)}</small></span>
                   </button>;
                 })}</div>
               ) : <div className="portal-empty-inline"><Icon name="check" size={20} /><strong>{tenancy ? "No rent invoices yet" : "Add a tenancy to view rent"}</strong><span>When your next invoice is issued, it will show here.</span></div>}

@@ -37,7 +37,7 @@ export function Tenancy() {
           <ol className="flex min-w-max items-stretch gap-0 sm:min-w-0 sm:flex-wrap lg:flex-nowrap lg:justify-center">
             {chain.map((item, index) => (
               <li key={item.label} className="flex items-center">
-                <div className="min-w-[8.5rem] rounded-lg border border-charcoal/15 bg-charcoal px-4 py-3.5 text-center shadow-soft sm:min-w-[9.5rem]">
+                <div className="min-w-[8.5rem] rounded-lg border border-charcoal/15 bg-contrast-surface px-4 py-3.5 text-center shadow-soft sm:min-w-[9.5rem]">
                   <p className="text-sm font-semibold tracking-tight text-white">
                     {item.label}
                   </p>

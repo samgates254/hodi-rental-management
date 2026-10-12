@@ -16,7 +16,7 @@ export function FinalCta() {
           aria-hidden
         />
         <div
-          className="absolute inset-0 bg-charcoal/88"
+          className="absolute inset-0 bg-contrast-surface/88"
           aria-hidden
         />
       </div>
@@ -32,6 +32,9 @@ export function FinalCta() {
             connected system — and run homes with less fragmentation.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Button href="/pricing" variant="secondary" size="lg">
+              Compare plans
+            </Button>
             <Button
               href="/signup"
               size="lg"

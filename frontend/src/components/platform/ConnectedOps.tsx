@@ -21,7 +21,7 @@ export function ConnectedOps() {
           description="Hodi’s value is not a longer feature list. It is that property work shares one record — so a payment, a lease change, or a repair still points back to the same unit and people."
         />
 
-        <div className="mt-12 rounded-lg bg-charcoal p-6 sm:p-8 lg:p-10">
+        <div className="mt-12 rounded-lg bg-contrast-surface p-6 sm:p-8 lg:p-10">
           <p className="text-center text-[0.6875rem] font-medium uppercase tracking-[0.08em] text-white/60">
             One connected path
           </p>

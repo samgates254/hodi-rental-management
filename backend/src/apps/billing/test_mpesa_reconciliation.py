@@ -143,6 +143,21 @@ class MpesaReconciliationCommandTests(TestCase):
         self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
         self.assertEqual(self.attempt.reconciliation_attempts, 1)
 
+    def test_retry_limit_excludes_exhausted_attempt_from_provider_queries(self):
+        MpesaAttempt.objects.filter(pk=self.attempt.pk).update(
+            reconciliation_attempts=5,
+            reconciliation_state=MpesaAttempt.ReconciliationState.EXHAUSTED,
+            last_reconciliation_at=timezone.now() - timedelta(hours=1),
+        )
+        with patch('infrastructure.payments.mpesa.MpesaClient.stk_query') as query:
+            output = self.run_command()
+            query.assert_not_called()
+
+        review = self.run_command('--review-required')
+        self.assertIn('1 attempt(s) require operator review', review)
+        self.assertIn('EXHAUSTED', review)
+        self.assertIn('UNRESOLVED=0', output)
+
     def test_mismatched_query_references_remain_unresolved(self):
         with patch('infrastructure.payments.mpesa.MpesaClient.stk_query', return_value=self.query_result(
             '1032', CheckoutRequestID='other-checkout',

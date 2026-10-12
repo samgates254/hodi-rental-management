@@ -1,12 +1,12 @@
 .caretaker-app {
-  --caretaker-ink: #19202a;
-  --caretaker-muted: #687381;
-  --caretaker-line: #e6e8ec;
-  --caretaker-paper: #fff;
-  --caretaker-teal: #0bacaa;
-  --caretaker-soft: #e8f7f6;
+  --caretaker-ink: var(--hodi-text);
+  --caretaker-muted: var(--hodi-muted);
+  --caretaker-line: var(--hodi-border);
+  --caretaker-paper: var(--hodi-surface);
+  --caretaker-teal: var(--hodi-brand);
+  --caretaker-soft: var(--hodi-brand-soft);
   min-height: 100vh;
-  background: #f7f8f7;
+  background: var(--hodi-canvas);
   color: var(--caretaker-ink);
 }
 
@@ -18,7 +18,7 @@
   display: flex;
   flex-direction: column;
   padding: 28px 18px 20px;
-  background: var(--caretaker-ink);
+  background: var(--hodi-sidebar);
   color: #fff;
 }
 
@@ -36,7 +36,7 @@
 .caretaker-sidebar-label,
 .caretaker-eyebrow {
   display: block;
-  color: #778391;
+  color: var(--hodi-muted);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 1.25px;
@@ -92,7 +92,7 @@
   border: 0;
   border-radius: 999px;
   background: var(--caretaker-teal);
-  color: #fff;
+  color: var(--hodi-brand-contrast);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -100,6 +100,7 @@
 
 .caretaker-sidebar-bottom button {
   background: #25313d;
+  color: #fff;
 }
 
 .caretaker-main {
@@ -137,10 +138,10 @@
 .caretaker-alert {
   margin-bottom: 16px;
   padding: 12px 14px;
-  border: 1px solid #f0c7c7;
+  border: 1px solid color-mix(in srgb, var(--hodi-error) 38%, var(--hodi-border));
   border-radius: 14px;
-  background: #fff5f5;
-  color: #9f2f2f;
+  background: var(--hodi-error-soft);
+  color: var(--hodi-error);
   font-size: 14px;
 }
 
@@ -180,8 +181,8 @@
 }
 
 .caretaker-summary article.is-warning {
-  border-color: #f1d7a8;
-  background: #fffaf0;
+  border-color: color-mix(in srgb, var(--hodi-warning) 38%, var(--hodi-border));
+  background: var(--hodi-warning-soft);
 }
 
 .caretaker-refresh,
@@ -190,7 +191,7 @@
   padding: 0 12px;
   border: 1px solid var(--caretaker-line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--hodi-surface);
   color: var(--caretaker-ink);
   font: inherit;
   font-size: 12px;
@@ -203,7 +204,11 @@
 
 .caretaker-refresh:hover:not(:disabled) {
   border-color: var(--caretaker-teal);
-  color: #087d7a;
+  color: var(--hodi-brand);
+}
+
+.caretaker-header .theme-toggle {
+  flex: none;
 }
 
 .caretaker-refresh:disabled {
@@ -252,7 +257,7 @@
   min-height: 40px;
   border: 1px solid var(--caretaker-line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--hodi-surface);
   color: var(--caretaker-ink);
   padding: 0 12px;
   font: inherit;
@@ -289,7 +294,7 @@
   padding: 16px;
   border: 1px solid var(--caretaker-line);
   border-radius: 10px;
-  background: #fcfcfc;
+  background: var(--hodi-surface-raised);
 }
 
 .caretaker-issue-top {
@@ -319,7 +324,7 @@
   padding: 0 10px;
   border-radius: 6px;
   background: var(--caretaker-soft);
-  color: #0a7f7d;
+  color: var(--hodi-brand);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -329,20 +334,20 @@
 .caretaker-status.status-overdue,
 .caretaker-status.status-urgent,
 .caretaker-status.status-high {
-  background: #fff1f0;
-  color: #b42318;
+  background: var(--hodi-error-soft);
+  color: var(--hodi-error);
 }
 
 .caretaker-status.status-in_progress,
 .caretaker-status.status-pending {
-  background: #fff8eb;
-  color: #b54708;
+  background: var(--hodi-warning-soft);
+  color: var(--hodi-warning);
 }
 
 .caretaker-status.status-resolved,
 .caretaker-status.status-paid {
-  background: #eefbf3;
-  color: #027a48;
+  background: var(--hodi-success-soft);
+  color: var(--hodi-success);
 }
 
 .caretaker-issue-meta {
@@ -355,14 +360,14 @@
 .caretaker-issue-meta span {
   padding: 5px 8px;
   border-radius: 6px;
-  background: #f1f4f5;
+  background: var(--hodi-surface-raised);
   color: var(--caretaker-muted);
   font-size: 11px;
 }
 
 .caretaker-issue-description {
   margin: 10px 0;
-  color: #46515d;
+  color: var(--hodi-muted);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -408,7 +413,7 @@
 .caretaker-updates li {
   padding: 10px 12px;
   border-radius: 12px;
-  background: #f4f6f7;
+  background: var(--hodi-surface-raised);
   color: var(--caretaker-muted);
   font-size: 13px;
 }
@@ -440,7 +445,7 @@
 }
 
 .caretaker-table-wrap tbody tr:hover {
-  background: #f8fbfb;
+  background: var(--hodi-surface-raised);
 }
 
 .caretaker-empty {
@@ -453,7 +458,7 @@
   display: grid;
   place-content: center;
   gap: 14px;
-  background: #f7f8f7;
+  background: var(--hodi-canvas);
   color: var(--caretaker-ink, #19202a);
   text-align: center;
 }

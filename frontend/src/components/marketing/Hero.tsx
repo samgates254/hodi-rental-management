@@ -19,8 +19,8 @@ export function Hero() {
             together for owners and managers.
           </p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button href="#final-cta" size="lg">
-              Get Started
+            <Button href="/pricing" size="lg">
+              Explore plans
             </Button>
             <Button href="#how-it-works" variant="secondary" size="lg">
               See How It Works

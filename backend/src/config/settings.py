@@ -54,7 +54,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'apps.accounts', 'apps.organizations', 'apps.properties', 'apps.tenants',
     'apps.leases', 'apps.billing', 'apps.maintenance', 'apps.notifications', 'apps.audit',
-    'apps.marketplace',
+    'apps.marketplace', 'apps.subscriptions',
 ]
 
 MIDDLEWARE = [

@@ -16,7 +16,7 @@ export function SolutionsCta() {
           className="object-cover object-center"
           aria-hidden
         />
-        <div className="absolute inset-0 bg-charcoal/88" aria-hidden />
+        <div className="absolute inset-0 bg-contrast-surface/88" aria-hidden />
       </div>
 
       <Container className="relative section-pad">

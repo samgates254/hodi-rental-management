@@ -123,7 +123,7 @@ export function MarketplaceBrowse() {
     <>
       <Header />
       <main id="main" className="bg-bg">
-        <section className="border-b border-border bg-charcoal text-white">
+        <section className="border-b border-border bg-contrast-surface text-white">
           <Container className="py-14 md:py-20">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal">Hodi marketplace</p>
             <h1 className="mt-3 max-w-2xl text-4xl leading-tight text-white md:text-5xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>
@@ -184,7 +184,7 @@ export function MarketplaceBrowse() {
               </select>
             </label>
             <div className="flex items-end gap-2 md:col-span-2">
-              <button type="submit" className="h-11 rounded-xl bg-teal px-5 text-sm font-semibold text-white">Search</button>
+              <button type="submit" className="h-11 rounded-xl bg-teal px-5 text-sm font-semibold text-brand-contrast">Search</button>
               <button
                 type="button"
                 className="h-11 rounded-xl border border-border px-4 text-sm"

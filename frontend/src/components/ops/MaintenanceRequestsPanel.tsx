@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, asList, formatWhen, getList, humanize, type ListPayload } from "@/lib/opsApi";
+import { MAINTENANCE_ASSIGNEE_STAFF_ROLES } from "@/lib/organizationRoles";
 import "./ops.css";
 
 type UnitRow = { id: number | string; building: number | string; name: string };
 type BuildingRow = { id: number | string; property: number | string; name: string };
 type PropertyRow = { id: number | string; organization: number | string; name: string };
 type TenantRow = { id: number | string; organization: number | string; full_name?: string; first_name: string; last_name: string };
-type StaffRow = { user: number | string; first_name?: string; last_name?: string; username?: string; role: string; organization: number | string };
+type StaffRow = { user: number | string; first_name?: string; last_name?: string; username?: string; role: string; organization: number | string; is_active: boolean };
 type MembershipRow = { user: number | string; role: string; organization: number | string; is_active: boolean };
 
 type WorkOrder = {
@@ -129,7 +130,9 @@ export default function MaintenanceRequestsPanel({
         const staff = await clientApi.get<ListPayload<StaffRow>>("/api/v1/organizations/staff/", {
           params: { organization: organizationId },
         });
-        people = asList(staff.data).map(row => ({
+        people = asList(staff.data).filter(row =>
+          row.is_active && MAINTENANCE_ASSIGNEE_STAFF_ROLES.includes(row.role as typeof MAINTENANCE_ASSIGNEE_STAFF_ROLES[number]),
+        ).map(row => ({
           id: String(row.user),
           label: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.username || `User ${row.user}`,
         }));

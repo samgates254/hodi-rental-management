@@ -3,6 +3,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.maintenance.models import TechnicianProfile
 from apps.organizations.models import Organization, OrganizationMembership
 
 
@@ -114,13 +115,35 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
-    def test_owner_can_create_manager_and_caretaker_accounts(self):
+    def test_owner_membership_api_provisions_technician_profile(self):
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.post(
+            reverse('organizations:membership-list'),
+            {
+                'organization': self.organization.pk,
+                'user': self.candidate.pk,
+                'role': OrganizationMembership.Role.TECHNICIAN,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        membership = OrganizationMembership.objects.get(user=self.candidate)
+        self.assertEqual(membership.organization, self.organization)
+        self.assertEqual(membership.role, OrganizationMembership.Role.TECHNICIAN)
+        profile = TechnicianProfile.objects.get(user=self.candidate)
+        self.assertTrue(profile.verified)
+        self.assertTrue(profile.available)
+
+    def test_owner_can_create_manager_caretaker_and_technician_accounts(self):
         self.client.force_authenticate(self.owner)
         password = 'Manager-strong-password-243!'
         created = []
         for role, username in (
             (OrganizationMembership.Role.PROPERTY_MANAGER, 'new-manager'),
             (OrganizationMembership.Role.CARETAKER, 'new-caretaker'),
+            (OrganizationMembership.Role.TECHNICIAN, 'new-technician'),
         ):
             response = self.client.post(
                 reverse('organizations:staff'),
@@ -147,7 +170,14 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
             user = get_user_model().objects.get(username=username)
             self.assertTrue(user.check_password(password))
             self.assertEqual(user.account_profile.account_type, 'UNSPECIFIED')
-            self.assertEqual(user.organization_memberships.get().role, role)
+            membership = user.organization_memberships.get()
+            self.assertEqual(membership.role, role)
+            self.assertEqual(membership.organization, self.organization)
+
+            if role == OrganizationMembership.Role.TECHNICIAN:
+                technician_profile = TechnicianProfile.objects.get(user=user)
+                self.assertTrue(technician_profile.verified)
+                self.assertTrue(technician_profile.available)
 
             login_response = self.client.post(
                 '/api/v1/accounts/login/',
@@ -156,6 +186,14 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
             )
             self.assertEqual(login_response.status_code, status.HTTP_200_OK)
             self.assertEqual(login_response.data['memberships'][0]['role'], role)
+
+            if role == OrganizationMembership.Role.TECHNICIAN:
+                self.client.force_authenticate(user)
+                maintenance_response = self.client.get('/api/v1/maintenance/requests/')
+                property_response = self.client.get('/api/v1/properties/')
+                self.assertEqual(maintenance_response.status_code, status.HTTP_200_OK)
+                self.assertEqual(property_response.status_code, status.HTTP_403_FORBIDDEN)
+                self.client.force_authenticate(self.owner)
 
     def test_owner_can_create_accountant_account(self):
         self.client.force_authenticate(self.owner)
@@ -177,12 +215,75 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['role'], OrganizationMembership.Role.ACCOUNTANT)
+        login_response = self.client.post(
+            '/api/v1/accounts/login/',
+            {'username': 'new-accountant', 'password': password},
+            format='json',
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(login_response.data['memberships'][0]['role'], OrganizationMembership.Role.ACCOUNTANT)
         listing = self.client.get(
             reverse('organizations:staff'),
             {'organization': self.organization.pk},
         )
         self.assertEqual(listing.status_code, status.HTTP_200_OK)
         self.assertTrue(any(row['username'] == 'new-accountant' for row in listing.data))
+
+    def test_staff_endpoint_rejects_privileged_or_unsupported_roles(self):
+        self.client.force_authenticate(self.owner)
+        password = 'Strong-password-243!'
+        for role, username in (
+            (OrganizationMembership.Role.OWNER, 'forged-owner'),
+            (OrganizationMembership.Role.SUPPORT, 'forged-support'),
+        ):
+            with self.subTest(role=role):
+                response = self.client.post(
+                    reverse('organizations:staff'),
+                    {
+                        'organization': self.organization.pk,
+                        'username': username,
+                        'email': f'{username}@example.com',
+                        'first_name': 'Forged',
+                        'last_name': 'Role',
+                        'role': role,
+                        'password': password,
+                        'password_confirm': password,
+                    },
+                    format='json',
+                )
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertFalse(get_user_model().objects.filter(username=username).exists())
+
+    def test_staff_listing_includes_existing_accountants_and_new_technicians(self):
+        existing_accountant = get_user_model().objects.create_user(
+            username='existing-accountant',
+            password='password',
+        )
+        OrganizationMembership.objects.create(
+            organization=self.organization,
+            user=existing_accountant,
+            role=OrganizationMembership.Role.ACCOUNTANT,
+        )
+        technician = get_user_model().objects.create_user(
+            username='existing-technician',
+            password='password',
+        )
+        OrganizationMembership.objects.create(
+            organization=self.organization,
+            user=technician,
+            role=OrganizationMembership.Role.TECHNICIAN,
+        )
+
+        self.client.force_authenticate(self.owner)
+        response = self.client.get(
+            reverse('organizations:staff'),
+            {'organization': self.organization.pk},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        listed_roles = {row['username']: row['role'] for row in response.data}
+        self.assertEqual(listed_roles['existing-accountant'], OrganizationMembership.Role.ACCOUNTANT)
+        self.assertEqual(listed_roles['existing-technician'], OrganizationMembership.Role.TECHNICIAN)
 
     def test_non_owner_cannot_create_staff_accounts(self):
         self.client.force_authenticate(self.member)

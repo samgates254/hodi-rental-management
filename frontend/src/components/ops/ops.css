@@ -1,10 +1,10 @@
 .ops-panel {
   margin-top: 28px;
   padding: 22px 22px 18px;
-  border: 1px solid #e6e8ec;
+  border: 1px solid var(--hodi-border);
   border-radius: 16px;
-  background: #fff;
-  color: #19202a;
+  background: var(--hodi-surface);
+  color: var(--hodi-text);
 }
 
 .ops-heading {
@@ -26,14 +26,14 @@
 .ops-empty p,
 .ops-status {
   margin: 6px 0 0;
-  color: #687381;
+  color: var(--hodi-muted);
   font-size: 14px;
   line-height: 1.45;
 }
 
 .ops-kicker {
   display: block;
-  color: #778391;
+  color: var(--hodi-muted);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 1.2px;
@@ -54,10 +54,10 @@
 .ops-tabs button,
 .ops-button {
   min-height: 36px;
-  border: 1px solid #dce1e5;
+  border: 1px solid var(--hodi-border);
   border-radius: 8px;
-  background: #fff;
-  color: #19202a;
+  background: var(--hodi-surface);
+  color: var(--hodi-text);
   padding: 0 12px;
   font-size: 13px;
   font-weight: 650;
@@ -66,9 +66,9 @@
 
 .ops-tabs button.is-active,
 .ops-button--primary {
-  border-color: #0bacaa;
-  background: #0bacaa;
-  color: #fff;
+  border-color: var(--hodi-brand);
+  background: var(--hodi-brand);
+  color: var(--hodi-brand-contrast);
 }
 
 .ops-button:disabled {
@@ -85,13 +85,13 @@
 }
 
 .ops-alert {
-  background: #fff1f0;
-  color: #8d2a22;
+  background: var(--hodi-error-soft);
+  color: var(--hodi-error);
 }
 
 .ops-success {
-  background: #e8f7f6;
-  color: #0d6e6c;
+  background: var(--hodi-brand-soft);
+  color: var(--hodi-brand);
 }
 
 .ops-table-wrap {
@@ -107,13 +107,13 @@
 .ops-table th,
 .ops-table td {
   padding: 10px 8px;
-  border-bottom: 1px solid #e6e8ec;
+  border-bottom: 1px solid var(--hodi-border);
   text-align: left;
   vertical-align: top;
 }
 
 .ops-table th {
-  color: #687381;
+  color: var(--hodi-muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -125,20 +125,20 @@
   min-height: 24px;
   padding: 0 8px;
   border-radius: 999px;
-  background: #f3f5f5;
-  color: #46515d;
+  background: var(--hodi-surface-raised);
+  color: var(--hodi-muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .ops-pill.is-hot {
-  background: #fff1e8;
-  color: #9a3412;
+  background: var(--hodi-warning-soft);
+  color: var(--hodi-warning);
 }
 
 .ops-pill.is-good {
-  background: #e8f7f6;
-  color: #0d6e6c;
+  background: var(--hodi-brand-soft);
+  color: var(--hodi-brand);
 }
 
 .ops-form,
@@ -148,7 +148,7 @@
   margin: 14px 0;
   padding: 14px;
   border-radius: 12px;
-  background: #f7f8f7;
+  background: var(--hodi-canvas);
 }
 
 .ops-grid {
@@ -161,7 +161,7 @@
 .ops-field {
   display: grid;
   gap: 6px;
-  color: #46515d;
+  color: var(--hodi-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -173,10 +173,10 @@
 .ops-field select {
   min-height: 38px;
   width: 100%;
-  border: 1px solid #dce1e5;
+  border: 1px solid var(--hodi-border);
   border-radius: 8px;
-  background: #fff;
-  color: #19202a;
+  background: var(--hodi-surface);
+  color: var(--hodi-text);
   padding: 8px 10px;
   font: inherit;
   font-weight: 500;
@@ -201,11 +201,11 @@
 .ops-meta div {
   padding: 10px 12px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--hodi-surface);
 }
 
 .ops-meta dt {
-  color: #687381;
+  color: var(--hodi-muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -230,8 +230,8 @@
   width: min(520px, 100%);
   padding: 22px;
   border-radius: 16px;
-  background: #fff;
-  color: #19202a;
+  background: var(--hodi-surface);
+  color: var(--hodi-text);
 }
 
 .ops-dialog h3 {
@@ -244,7 +244,7 @@
   display: grid;
   place-items: center;
   padding: 28px 16px;
-  background: #f7f8f7;
+  background: var(--hodi-canvas);
 }
 
 .ops-link-card {
@@ -259,10 +259,10 @@
   position: relative;
   min-width: 40px;
   min-height: 40px;
-  border: 1px solid #dce1e5;
+  border: 1px solid var(--hodi-border);
   border-radius: 999px;
-  background: #fff;
-  color: #19202a;
+  background: var(--hodi-surface);
+  color: var(--hodi-text);
   cursor: pointer;
 }
 
@@ -273,7 +273,7 @@
   min-width: 18px;
   height: 18px;
   border-radius: 999px;
-  background: #c45c26;
+  background: var(--hodi-error);
   color: #fff;
   font-size: 11px;
   line-height: 18px;
@@ -289,9 +289,9 @@
   max-height: 420px;
   overflow: auto;
   padding: 12px;
-  border: 1px solid #e6e8ec;
+  border: 1px solid var(--hodi-border);
   border-radius: 14px;
-  background: #fff;
+  background: var(--hodi-surface);
   box-shadow: 0 16px 40px rgba(25, 32, 42, 0.12);
 }
 
@@ -303,14 +303,14 @@
   padding: 8px;
   border: 0;
   border-radius: 8px;
-  background: #f7f8f7;
+  background: var(--hodi-canvas);
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .ops-bell-popover button.ops-note-row.is-unread {
-  background: #e8f7f6;
+  background: var(--hodi-brand-soft);
 }
 
 .ops-profile-card {

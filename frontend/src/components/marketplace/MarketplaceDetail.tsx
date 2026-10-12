@@ -112,7 +112,7 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
                   <label className="block text-sm text-text-secondary">Message<textarea className="auth-input mt-1 min-h-28" name="message" required maxLength={2000} /></label>
                   {inquiryError && <p className="text-sm text-red-700" role="alert">{inquiryError}</p>}
                   {inquiryNotice && <p className="text-sm text-charcoal" role="status">{inquiryNotice}</p>}
-                  <button type="submit" disabled={sending} className="h-11 w-full rounded-xl bg-teal text-sm font-semibold text-white disabled:opacity-60">
+                  <button type="submit" disabled={sending} className="h-11 w-full rounded-xl bg-teal text-sm font-semibold text-brand-contrast disabled:opacity-60">
                     {sending ? "Sending…" : "Send inquiry"}
                   </button>
                 </form>

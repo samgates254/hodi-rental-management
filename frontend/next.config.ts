@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   skipTrailingSlashRedirect: true,
   async rewrites() {
+    // This value is captured when `next build` generates the rewrite manifest.
+    // Production deployments must set API_PROXY_TARGET at build time (or route
+    // /api/v1/ to Django at the hosting layer).
     const backendOrigin = process.env.API_PROXY_TARGET ??
       (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000" : undefined);
 

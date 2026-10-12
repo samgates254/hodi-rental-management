@@ -14,6 +14,9 @@ import BillingWorkspace from "@/components/ops/BillingWorkspace";
 import MaintenanceRequestsPanel from "@/components/ops/MaintenanceRequestsPanel";
 import MarketplaceManager from "@/components/marketplace/MarketplaceManager";
 import NotificationBell from "@/components/ops/NotificationBell";
+import SubscriptionPanel from "@/components/SubscriptionPanel";
+import ThemeToggle from "@/components/theme/ThemeToggle";
+import { ORGANIZATION_STAFF_ROLES, staffLoginKindForRole } from "@/lib/organizationRoles";
 import "./landlord-dashboard.css";
 import "@/components/ops/ops.css";
 
@@ -792,8 +795,9 @@ export default function LandlordDashboard() {
     }
 
     const role = String(form.get("role") ?? "CARETAKER");
-    const roleLabel = role === "CARETAKER" ? "Caretaker" : role === "ACCOUNTANT" ? "Accountant" : "Manager";
-    const accessLabel = role === "CARETAKER" ? "Caretaker" : "Landlord";
+    const roleLabel = ORGANIZATION_STAFF_ROLES.find(item => item.value === role)?.label ?? "Team member";
+    const loginKind = staffLoginKindForRole(role);
+    const accessLabel = loginKind === "caretaker" ? "Caretaker" : loginKind === "technician" ? "Technician" : "Landlord";
     setIsSaving(true);
     setTeamError("");
     try {
@@ -853,6 +857,7 @@ export default function LandlordDashboard() {
           {canWritePortfolio && <a href="#marketplace"><Icon name="building" />Listings</a>}
           <Link href="/marketplace">Marketplace</Link>
           {canReadBilling && <a href="#billing"><Icon name="lease" />Billing</a>}
+          {canReadBilling && <a href="#subscription"><Icon name="lease" />Subscription</a>}
           {canMaintenance && <a href="#maintenance-requests"><Icon name="building" />Maintenance</a>}
           {canManageTeam && <a href="#team"><Icon name="people" />Team</a>}
           {canAudit && !previewMode && <a href="#audit"><Icon name="overview" />Audit</a>}
@@ -870,6 +875,7 @@ export default function LandlordDashboard() {
             <h1>{organization?.name ?? "Your properties"}</h1>
           </div>
           <div className="landlord-topbar-actions">
+            <ThemeToggle />
             {data.organizations.length > 1 && (
               <label className="landlord-org-select">
                 <span className="sr-only">Organization</span>
@@ -1092,7 +1098,7 @@ export default function LandlordDashboard() {
               {teamError && <div className="landlord-alert" role="alert">{teamError}</div>}
               {teamFormOpen && !previewMode && (
                 <form className="landlord-inline-form" onSubmit={createTeamMember}>
-                  <h3>Add a manager, caretaker, or accountant</h3>
+                  <h3>Add an organization team member</h3>
                   <p className="landlord-form-note">
                     This creates a login for {organization?.name ?? "this organization"}. Share the initial password securely.
                   </p>
@@ -1104,9 +1110,9 @@ export default function LandlordDashboard() {
                     <label>Phone number <span className="landlord-optional">(optional)</span><input name="phone_number" type="tel" maxLength={30} autoComplete="tel" /></label>
                     <label>Role
                       <select name="role" defaultValue="CARETAKER">
-                        <option value="PROPERTY_MANAGER">Property manager</option>
-                        <option value="CARETAKER">Caretaker</option>
-                        <option value="ACCOUNTANT">Accountant</option>
+                        {ORGANIZATION_STAFF_ROLES.map(item => (
+                          <option key={item.value} value={item.value}>{item.label}</option>
+                        ))}
                       </select>
                     </label>
                     <label>Initial password<input name="password" type="password" required minLength={8} autoComplete="new-password" /></label>
@@ -1427,6 +1433,9 @@ export default function LandlordDashboard() {
                 canWriteLedger={canWriteLedger}
                 canWriteRentLog={canWriteRentLog}
               />
+            )}
+            {canReadBilling && !previewMode && (
+              <SubscriptionPanel organizationId={selectedOrganizationId} canManage={canWritePortfolio} />
             )}
             {canMaintenance && !previewMode && (
               <MaintenanceRequestsPanel

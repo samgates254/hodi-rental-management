@@ -47,7 +47,7 @@ export function PropertyStructure() {
                       />
                     ) : null}
                     <span
-                      className="relative z-[1] flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-charcoal/15 bg-charcoal text-sm font-semibold tabular-nums text-white shadow-soft"
+                      className="relative z-[1] flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-charcoal/15 bg-contrast-surface text-sm font-semibold tabular-nums text-white shadow-soft"
                       aria-hidden
                     >
                       {index + 1}

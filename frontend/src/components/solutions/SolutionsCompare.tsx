@@ -51,7 +51,7 @@ export function SolutionsCompare() {
             </ul>
           </div>
 
-          <div className="border border-charcoal bg-charcoal p-6 text-white md:border-0 md:p-8">
+          <div className="border border-charcoal bg-contrast-surface p-6 text-white md:border-0 md:p-8">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-teal">
               With Hodi
             </p>

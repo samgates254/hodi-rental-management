@@ -3,7 +3,7 @@ from rest_framework import serializers
 from apps.leases.models import Lease
 from apps.tenants.models import Tenant
 
-from .models import Charge, Invoice, LedgerPosting, Payment, PaymentAllocation
+from .models import Charge, DocumentStatus, Invoice, LedgerPosting, Payment, PaymentAllocation
 
 
 class ChargeSerializer(serializers.ModelSerializer):
@@ -28,16 +28,24 @@ class ChargeWriteSerializer(serializers.Serializer):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     charges = ChargeSerializer(many=True, read_only=True)
+    paid_cents = serializers.SerializerMethodField()
+
+    def get_paid_cents(self, invoice):
+        return sum(
+            charge.amount_cents - charge.balance_cents
+            for charge in invoice.charges.all()
+            if charge.lifecycle == DocumentStatus.POSTED
+        )
 
     class Meta:
         model = Invoice
         fields = (
             'id', 'organization', 'tenant', 'lease', 'period_start', 'period_end',
-            'due_date', 'status', 'currency', 'total_cents', 'balance_cents', 'notes',
+            'due_date', 'status', 'currency', 'total_cents', 'paid_cents', 'balance_cents', 'notes',
             'charges', 'created_at', 'updated_at',
         )
         read_only_fields = (
-            'id', 'organization', 'status', 'currency', 'total_cents', 'balance_cents',
+            'id', 'organization', 'status', 'currency', 'total_cents', 'paid_cents', 'balance_cents',
             'charges', 'created_at', 'updated_at',
         )
 

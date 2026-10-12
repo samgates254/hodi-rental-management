@@ -8,6 +8,7 @@ from application.services.audit import record_audit
 from common.api import organization_ids_for_user
 
 from .models import Organization, OrganizationMembership
+from .roles import STAFF_ROLE_VALUES, ensure_role_profile
 from .serializers import (
     OrganizationMembershipSerializer,
     OrganizationSerializer,
@@ -50,11 +51,7 @@ def prevent_removing_last_active_owner(membership, role=None, is_active=None, de
 class OrganizationStaffView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
-    staff_roles = (
-        OrganizationMembership.Role.PROPERTY_MANAGER,
-        OrganizationMembership.Role.CARETAKER,
-        OrganizationMembership.Role.ACCOUNTANT,
-    )
+    staff_roles = STAFF_ROLE_VALUES
 
     def get_organization(self, organization_id):
         if not organization_id:
@@ -118,6 +115,13 @@ class OrganizationViewSet(viewsets.ModelViewSet):
             or RentPayment.objects.filter(lease__tenant__organization=instance).exists()
         ):
             raise ValidationError('Organization cannot be deleted while financial records exist.')
+        from apps.subscriptions.models import OrganizationSubscription
+
+        subscription = OrganizationSubscription.objects.filter(organization=instance).first()
+        if subscription and subscription.invoices.exists():
+            raise ValidationError('Organization cannot be deleted while Hodi subscription billing history exists.')
+        if subscription:
+            subscription.delete()
         instance.delete()
 
 
@@ -130,10 +134,12 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
             organization_id__in=organization_ids_for_user(self.request.user),
         ).select_related('user', 'organization')
 
+    @transaction.atomic
     def perform_create(self, serializer):
         organization = serializer.validated_data['organization']
         require_organization_owner(self.request.user, organization)
         membership = serializer.save()
+        ensure_role_profile(membership.user, membership.role)
         record_audit(
             action='membership.create',
             object_type='OrganizationMembership',
@@ -148,6 +154,7 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @transaction.atomic
     def perform_update(self, serializer):
         membership = serializer.instance
         require_organization_owner(self.request.user, membership.organization)
@@ -157,6 +164,7 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
             is_active=serializer.validated_data.get('is_active'),
         )
         membership = serializer.save()
+        ensure_role_profile(membership.user, membership.role)
         record_audit(
             action='membership.update',
             object_type='OrganizationMembership',

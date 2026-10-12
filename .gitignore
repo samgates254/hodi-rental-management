@@ -18,3 +18,5 @@ frontend/tsconfig.tsbuildinfo
 backend/.env.backup
 backend/.env.repair-backup-*
 *.deb
+
+/backend/.env.save

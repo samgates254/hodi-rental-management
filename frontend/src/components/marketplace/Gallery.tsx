@@ -21,12 +21,12 @@ export function Gallery({ photos, title }: { photos: ListingPhoto[]; title: stri
   }, [open, photos.length]);
 
   if (!photo) {
-    return <div className="flex aspect-[16/10] items-center justify-center rounded-2xl bg-[#e7eeec] text-sm text-text-secondary">No photo yet</div>;
+    return <div className="flex aspect-[16/10] items-center justify-center rounded-2xl bg-soft-teal text-sm text-text-secondary">No photo yet</div>;
   }
 
   return (
     <div>
-      <button type="button" className="group block w-full overflow-hidden rounded-2xl bg-[#e7eeec] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal" onClick={() => setOpen(true)} aria-label="Open photo">
+      <button type="button" className="group block w-full overflow-hidden rounded-2xl bg-soft-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal" onClick={() => setOpen(true)} aria-label="Open photo">
         {failed[active] ? (
           <div className="flex aspect-[16/10] items-center justify-center text-sm text-text-secondary">This photo could not be loaded</div>
         ) : (

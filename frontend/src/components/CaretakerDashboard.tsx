@@ -7,6 +7,7 @@ import { clientApi } from "@/lib/clientApi";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
 import MaintenanceRequestsPanel from "./ops/MaintenanceRequestsPanel";
 import NotificationBell from "./ops/NotificationBell";
+import ThemeToggle from "@/components/theme/ThemeToggle";
 import "./caretaker-dashboard.css";
 
 type OrganizationMembership = {
@@ -333,6 +334,7 @@ export default function CaretakerDashboard() {
             {isLoading ? "Refreshing…" : "Refresh"}
           </button>
           <NotificationBell />
+          <ThemeToggle />
         </header>
 
         {pageError && <div className="caretaker-alert" role="alert">{pageError}</div>}

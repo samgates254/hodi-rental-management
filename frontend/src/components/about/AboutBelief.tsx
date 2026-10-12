@@ -10,7 +10,7 @@ const pillars = [
 
 export function AboutBelief() {
   return (
-    <section id="belief" className="section-pad bg-charcoal text-white">
+    <section id="belief" className="section-pad bg-contrast-surface text-white">
       <Container>
         <div className="mx-auto max-w-3xl text-center lg:mx-0 lg:max-w-3xl lg:text-left">
           <p className="text-sm font-medium tracking-wide text-teal">The belief</p>

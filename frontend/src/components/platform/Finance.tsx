@@ -50,7 +50,7 @@ export function Finance() {
                     className="relative flex min-h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5"
                   >
                     <span
-                      className="relative z-[1] flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-charcoal/15 bg-charcoal text-sm font-semibold tabular-nums text-white shadow-soft"
+                      className="relative z-[1] flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-charcoal/15 bg-contrast-surface text-sm font-semibold tabular-nums text-white shadow-soft"
                       aria-hidden
                     >
                       {String(index + 1).padStart(2, "0")}

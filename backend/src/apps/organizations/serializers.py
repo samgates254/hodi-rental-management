@@ -6,6 +6,7 @@ from rest_framework import serializers
 from apps.accounts.models import AccountProfile
 
 from .models import Organization, OrganizationMembership
+from .roles import STAFF_ROLE_CHOICES, ensure_role_profile
 
 User = get_user_model()
 
@@ -58,11 +59,7 @@ class OrganizationStaffCreateSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
     phone_number = serializers.CharField(max_length=30, required=False, allow_blank=True)
-    role = serializers.ChoiceField(choices=(
-        (OrganizationMembership.Role.PROPERTY_MANAGER, 'Property manager'),
-        (OrganizationMembership.Role.CARETAKER, 'Caretaker'),
-        (OrganizationMembership.Role.ACCOUNTANT, 'Accountant'),
-    ))
+    role = serializers.ChoiceField(choices=STAFF_ROLE_CHOICES)
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
 
@@ -111,8 +108,10 @@ class OrganizationStaffCreateSerializer(serializers.Serializer):
             account_type=AccountProfile.AccountType.UNSPECIFIED,
             phone_number=phone_number,
         )
-        return OrganizationMembership.objects.create(
+        membership = OrganizationMembership.objects.create(
             organization=organization,
             user=user,
             role=role,
         )
+        ensure_role_profile(user, role)
+        return membership

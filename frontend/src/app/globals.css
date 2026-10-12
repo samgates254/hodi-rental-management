@@ -1,17 +1,82 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-charcoal: #19202a;
-  --color-teal: #0bacaa;
-  --color-soft-teal: #e8f7f6;
-  --color-bg: #fafaf8;
-  --color-surface: #ffffff;
-  --color-text: #1c2430;
-  --color-text-secondary: #5b6573;
-  --color-border: #e6e8ec;
-  --font-sans: var(--font-body);
-  --font-display: var(--font-display);
-  --shadow-soft: 0 1px 2px rgb(25 32 42 / 0.04), 0 8px 24px rgb(25 32 42 / 0.06);
+  --color-charcoal: var(--hodi-text);
+  --color-contrast-surface: var(--hodi-contrast-surface);
+  --color-teal: var(--hodi-brand);
+  --color-brand: var(--hodi-brand);
+  --color-brand-contrast: var(--hodi-brand-contrast);
+  --color-soft-teal: var(--hodi-brand-soft);
+  --color-bg: var(--hodi-canvas);
+  --color-surface: var(--hodi-surface);
+  --color-text: var(--hodi-text);
+  --color-text-secondary: var(--hodi-muted);
+  --color-border: var(--hodi-border);
+  --font-sans: var(--font-dm-sans);
+  --font-display: var(--font-fraunces);
+  --shadow-soft: var(--hodi-shadow);
+}
+
+:root {
+  color-scheme: light;
+  --hodi-canvas: #f7f9fc;
+  --hodi-surface: #ffffff;
+  --hodi-surface-raised: #ffffff;
+  --hodi-text: #172033;
+  --hodi-muted: #64748b;
+  --hodi-border: #e2e8f0;
+  --hodi-brand: #0f766e;
+  --hodi-brand-hover: #115e59;
+  --hodi-brand-contrast: #ffffff;
+  --hodi-brand-soft: #e6f4f1;
+  --hodi-focus: #0f766e;
+  --hodi-sidebar: #172033;
+  --hodi-contrast-surface: #172033;
+  --hodi-success: #15803d;
+  --hodi-success-soft: #e8f5ec;
+  --hodi-warning: #b45309;
+  --hodi-warning-soft: #fff5e5;
+  --hodi-error: #b91c1c;
+  --hodi-error-soft: #fff0ef;
+  --hodi-info: #3164aa;
+  --hodi-info-soft: #eaf1fb;
+  --hodi-shadow: 0 1px 2px rgb(23 32 51 / 0.04), 0 8px 24px rgb(23 32 51 / 0.055);
+  --color-bg: var(--hodi-canvas);
+  --color-surface: var(--hodi-surface);
+  --color-text: var(--hodi-text);
+  --color-text-secondary: var(--hodi-muted);
+  --color-border: var(--hodi-border);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --hodi-canvas: #0b1220;
+  --hodi-surface: #111b2e;
+  --hodi-surface-raised: #162238;
+  --hodi-text: #f1f5f9;
+  --hodi-muted: #a3b1c6;
+  --hodi-border: #273449;
+  --hodi-brand: #34d399;
+  --hodi-brand-hover: #6ee7b7;
+  --hodi-brand-contrast: #0b1220;
+  --hodi-brand-soft: #12372f;
+  --hodi-focus: #6ee7b7;
+  --hodi-sidebar: #080e19;
+  --hodi-contrast-surface: #111b2e;
+  --hodi-success: #4ade80;
+  --hodi-success-soft: #133326;
+  --hodi-warning: #fbbf24;
+  --hodi-warning-soft: #3b2c13;
+  --hodi-error: #f87171;
+  --hodi-error-soft: #3c2026;
+  --hodi-info: #93c5fd;
+  --hodi-info-soft: #192b45;
+  --hodi-shadow: 0 1px 2px rgb(0 0 0 / 0.22), 0 10px 28px rgb(0 0 0 / 0.2);
+  --color-bg: var(--hodi-canvas);
+  --color-surface: var(--hodi-surface);
+  --color-text: var(--hodi-text);
+  --color-text-secondary: var(--hodi-muted);
+  --color-border: var(--hodi-border);
 }
 
 @layer base {
@@ -26,21 +91,29 @@
   }
 
   body {
-    background: var(--color-bg);
-    color: var(--color-text);
+    min-height: 100%;
+    background: var(--hodi-canvas);
+    color: var(--hodi-text);
     font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--color-teal) 28%, white);
-    color: var(--color-charcoal);
+    background: color-mix(in srgb, var(--hodi-brand) 26%, var(--hodi-surface));
+    color: var(--hodi-text);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-teal);
+    outline: 2px solid var(--hodi-focus);
     outline-offset: 3px;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 }
 
@@ -96,19 +169,19 @@
   .auth-input {
     width: 100%;
     border-radius: 0.75rem;
-    border: 1px solid #e6e8ec;
-    background: #fff;
+    border: 1px solid var(--hodi-border);
+    background: var(--hodi-surface);
     padding: 0.625rem 0.875rem;
     font-size: 0.875rem;
     line-height: 1.25rem;
-    color: #19202a;
+    color: var(--hodi-text);
     outline: none;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   .auth-input:focus {
-    border-color: #0bacaa;
-    box-shadow: 0 0 0 3px rgba(11, 172, 170, 0.15);
+    border-color: var(--hodi-brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hodi-brand) 20%, transparent);
   }
 
   /* Tighter fields on signup so the form fits one viewport */
@@ -135,6 +208,48 @@
   @media (prefers-reduced-motion: reduce) {
     .auth-role-enter {
       animation: none;
+    }
+  }
+
+  .theme-toggle {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 11px;
+    border: 1px solid var(--hodi-border);
+    border-radius: 9px;
+    background: var(--hodi-surface);
+    color: var(--hodi-text);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  }
+
+  .theme-toggle:hover {
+    border-color: var(--hodi-brand);
+    background: var(--hodi-brand-soft);
+  }
+
+  .theme-toggle svg {
+    flex: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .theme-toggle:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--hodi-focus) 35%, transparent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .theme-toggle {
+      transition: none;
     }
   }
 }

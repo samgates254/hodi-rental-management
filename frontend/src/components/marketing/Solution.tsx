@@ -41,7 +41,7 @@ export function Solution() {
             {chain.map((item, index) => (
               <li key={item} className="relative flex items-center justify-center">
                 <div className="flex flex-col items-center gap-2 px-2 py-1 text-center">
-                  <span className="relative flex h-12 w-14 items-center justify-center overflow-hidden rounded-md border border-charcoal/15 bg-charcoal text-sm font-semibold tabular-nums text-white shadow-soft">
+                  <span className="relative flex h-12 w-14 items-center justify-center overflow-hidden rounded-md border border-charcoal/15 bg-contrast-surface text-sm font-semibold tabular-nums text-white shadow-soft">
                     {String(index + 1).padStart(2, "0")}
                     <span className="absolute inset-x-0 bottom-0 h-1 bg-teal" aria-hidden />
                   </span>

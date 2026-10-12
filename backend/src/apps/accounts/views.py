@@ -166,6 +166,7 @@ class LoginView(APIView):
 		profile = getattr(user, 'account_profile', None)
 		response_data = {
 			'token': token.key,
+			'is_staff': user.is_staff,
 			'first_name': user.first_name,
 			'last_name': user.last_name,
 			'email': user.email,
