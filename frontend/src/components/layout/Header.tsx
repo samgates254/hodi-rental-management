@@ -9,8 +9,16 @@ import { primaryNav } from "@/lib/site";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 
 const NAV = primaryNav;
+const HOME_NAV = [
+  { label: "Platform", href: "/platform" },
+  { label: "Features", href: "#features" },
+  { label: "For landlords", href: "/solutions#owners-solution" },
+  { label: "About HODI", href: "/about" },
+] as const;
 
-export function Header() {
+export function Header({ variant = "default" }: { variant?: "default" | "homepage" }) {
+  const isHomepage = variant === "homepage";
+  const navItems = isHomepage ? HOME_NAV : NAV;
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -53,17 +61,18 @@ export function Header() {
   return (
     <header
       className={cn(
+        isHomepage && "hodi-home-header",
         "sticky top-0 z-50 border-b transition-[background-color,border-color,box-shadow] duration-200",
-        scrolled || open
+        !isHomepage && (scrolled || open)
           ? "border-border bg-surface/95 shadow-soft backdrop-blur-md"
-          : "border-transparent bg-bg/80 backdrop-blur-sm",
+          : !isHomepage && "border-transparent bg-bg/80 backdrop-blur-sm",
       )}
     >
-      <Container className="flex h-16 items-center justify-between gap-4 lg:h-[4.25rem]">
-        <Logo size={40} />
+      <Container className={cn("flex items-center justify-between gap-4", isHomepage ? "h-20 lg:h-24" : "h-16 lg:h-[4.25rem]")}>
+        <Logo size={40} homepage={isHomepage} />
 
         <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
-          {NAV.map((item) => (
+          {navItems.map((item) => (
             <a
               key={item.href}
               href={item.href}
@@ -75,9 +84,9 @@ export function Header() {
         </nav>
 
         <div className="hidden items-center gap-2 lg:flex">
-          <ThemeToggle />
+          {!isHomepage && <ThemeToggle />}
           <Button href="/signin" variant="ghost" size="sm">
-            Log in
+            {isHomepage ? "Sign in" : "Log in"}
           </Button>
           <Button href="/signup" size="sm">
             Get Started
@@ -121,7 +130,7 @@ export function Header() {
         className="border-t border-border bg-surface lg:hidden"
       >
         <Container className="flex flex-col gap-1 py-4">
-          {NAV.map((item) => (
+          {navItems.map((item) => (
             <a
               key={item.href}
               href={item.href}
@@ -132,13 +141,13 @@ export function Header() {
             </a>
           ))}
           <div className="mt-3 flex flex-col gap-2 border-t border-border pt-4">
-            <ThemeToggle className="w-full" />
+            {!isHomepage && <ThemeToggle className="w-full" />}
             <a
               href="/signin"
               onClick={close}
               className="inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface text-sm font-medium text-charcoal"
             >
-              Log in
+              {isHomepage ? "Sign in" : "Log in"}
             </a>
             <a
               href="/signup"

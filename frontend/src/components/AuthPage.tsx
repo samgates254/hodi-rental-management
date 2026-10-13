@@ -307,7 +307,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             </div>
           </section>
 
-          <section className={`w-full rounded-2xl border border-border bg-surface shadow-soft ${isSignup ? "p-4 sm:p-5" : "p-7 sm:p-10"}`}>
+          <section className={`auth-form-panel w-full rounded-2xl border border-border bg-surface shadow-soft ${isSignup ? "p-4 sm:p-5" : "p-7 sm:p-10"}`}>
             <p key={userKind} className="text-[10px] font-bold tracking-[0.16em] text-text-secondary auth-role-enter">
               {userKind === "landlord" ? "LANDLORD PORTAL" : userKind === "caretaker" ? "CARETAKER PORTAL" : userKind === "technician" ? "TECHNICIAN PORTAL" : "CLIENT PORTAL"}
             </p>
