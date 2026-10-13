@@ -305,3 +305,58 @@ test("accountant invitation acceptance is identity-bound, reports real client da
   await owner.close();
   await accountant.close();
 });
+
+test("expired accountant invitations do not add a workspace", async ({ browser }) => {
+  const owner = await browser.newPage();
+  await owner.route("**/api/v1/organizations/accountant-invitations/", route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify([{
+      id: 987654,
+      status: "PENDING",
+      can_accept: true,
+      expires_at: "2020-01-01T00:00:00Z",
+    }]),
+  }));
+
+  await signIn(owner, "owner", "landlord");
+  await expect(owner).toHaveURL(/\/landlords/);
+  await owner.close();
+});
+
+test("workspace access lookup failure does not block a known workspace", async ({ browser }) => {
+  const owner = await browser.newPage();
+  await owner.route("**/api/v1/organizations/accountant-invitations/", route => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ detail: "Temporarily unavailable" }),
+  }));
+
+  await signIn(owner, "owner", "landlord");
+  await expect(owner).toHaveURL(/\/landlords/);
+  await expect(owner.evaluate(() => sessionStorage.getItem("hodi_api_token"))).resolves.toBeTruthy();
+  await owner.close();
+});
+
+test("workspace access lookup failure preserves sign-in when no workspace is known", async ({ browser }) => {
+  const page = await browser.newPage();
+  await page.route("**/api/v1/accounts/login/", route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ token: "mock-token", account_type: "OWNER", memberships: [] }),
+  }));
+  await page.route("**/api/v1/organizations/accountant-invitations/", route => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ detail: "Temporarily unavailable" }),
+  }));
+
+  await page.goto("/signin");
+  await page.locator('input[name="username"]').fill("mock-owner");
+  await page.locator('input[name="password"]').fill("mock-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("could not load your workspace options");
+  await expect(page.evaluate(() => sessionStorage.getItem("hodi_api_token"))).resolves.toBe("mock-token");
+  await expect(page).toHaveURL(/\/signin/);
+  await page.close();
+});

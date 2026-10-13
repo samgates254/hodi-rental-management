@@ -254,17 +254,21 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         (auth.organization_id === null || auth.organization_id === undefined);
       setTenantNeedsOrganizationLink(tenantNeedsOrganizationLink);
       const workspaces = workspacesForAuth(auth, memberships);
-      let invitations: Array<{ status: string; can_accept: boolean }>;
+      let invitationLookupFailed = false;
+      let invitations: Array<{ status: string; can_accept: boolean; expires_at: string }> = [];
       try {
-        const response = await clientApi.get<Array<{ status: string; can_accept: boolean }>>(
+        const response = await clientApi.get<Array<{ status: string; can_accept: boolean; expires_at: string }>>(
           "/api/v1/organizations/accountant-invitations/",
         );
         invitations = response.data;
-      } catch (invitationError) {
-        clearSession();
-        throw invitationError;
+      } catch {
+        invitationLookupFailed = true;
       }
-      if (invitations.some(invitation => invitation.status === "PENDING" && invitation.can_accept)) {
+      if (invitations.some(invitation =>
+        invitation.status === "PENDING" &&
+        invitation.can_accept &&
+        Date.parse(invitation.expires_at) > Date.now()
+      )) {
         if (!workspaces.some(workspace => workspace.path === "/accountants")) {
           workspaces.push({
             path: "/accountants",
@@ -285,6 +289,11 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
           return;
         }
         goToWorkspace(workspace.path);
+        return;
+      }
+
+      if (invitationLookupFailed) {
+        setError("Your sign-in succeeded, but Hodi could not load your workspace options. Please try again.");
         return;
       }
 
