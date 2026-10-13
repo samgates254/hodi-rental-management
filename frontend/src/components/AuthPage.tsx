@@ -8,7 +8,6 @@ import {
   AUTH_TOKEN_KEY,
   ClientApiError,
   clientApi,
-  dashboardPathForAccountType,
   login as apiLogin,
   register as apiRegister,
   setStoredAuthToken,
@@ -16,17 +15,21 @@ import {
 } from "@/lib/clientApi";
 import TenantLinkGate from "@/components/ops/TenantLinkGate";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { staffLoginKindForRole } from "@/lib/organizationRoles";
 
-type UserKind = "tenant" | "landlord" | "caretaker" | "technician";
+type UserKind = "tenant" | "landlord";
 type AuthMode = "signin" | "signup";
 type OrganizationMembership = {
   organization_id: number | string;
   organization_name: string;
   role: string;
 };
+type WorkspaceOption = {
+  path: string;
+  label: string;
+  description: string;
+};
 
-const ACCOUNT_TYPE: Record<Exclude<UserKind, "caretaker" | "technician">, "TENANT" | "OWNER"> = {
+const ACCOUNT_TYPE: Record<UserKind, "TENANT" | "OWNER"> = {
   tenant: "TENANT",
   landlord: "OWNER",
 };
@@ -34,21 +37,51 @@ const ACCOUNT_TYPE: Record<Exclude<UserKind, "caretaker" | "technician">, "TENAN
 function userKindFromAccountType(accountType?: string): UserKind | null {
   const type = (accountType || "").toUpperCase();
   if (type === "TENANT") return "tenant";
-  // OWNER + service pros use the landlord app area today.
-  if (type === "OWNER" || type === "SERVICE_PROFESSIONAL") {
-    return "landlord";
-  }
+  if (type === "OWNER") return "landlord";
   return null;
 }
 
-function dashboardFor(kind: UserKind, accountType?: string) {
-  if (kind === "caretaker") return "/caretakers";
-  if (kind === "technician") return "/technicians";
-  return dashboardPathForAccountType(accountType);
+function workspacesForAuth(
+  auth: AuthResponse,
+  memberships: OrganizationMembership[],
+): WorkspaceOption[] {
+  const workspaces = new Map<string, WorkspaceOption>();
+  const addWorkspace = (path: string, label: string, description: string) => {
+    workspaces.set(path, { path, label, description });
+  };
+
+  const accountKind = userKindFromAccountType(auth.account_type);
+  if (accountKind === "tenant") {
+    addWorkspace("/clients", "Tenant workspace", "View your tenancy, rent, and maintenance.");
+  }
+
+  for (const membership of memberships) {
+    switch (membership.role) {
+      case "OWNER":
+      case "PROPERTY_MANAGER":
+        addWorkspace("/landlords", "Property management", "Manage properties and organization operations.");
+        break;
+      case "ACCOUNTANT":
+        addWorkspace("/accountants", "Accountant workspace", "Review invoices and recorded rent transactions.");
+        break;
+      case "CARETAKER":
+        addWorkspace("/caretakers", "Caretaker workspace", "Manage maintenance requests and day-to-day operations.");
+        break;
+      case "TECHNICIAN":
+        addWorkspace("/technicians", "Technician workspace", "Review and update your assigned repair work.");
+        break;
+    }
+  }
+
+  return Array.from(workspaces.values());
 }
 
-function dashboardWithPlan(kind: UserKind, accountType?: string) {
-  const destination = dashboardFor(kind, accountType);
+function dashboardFor(kind: UserKind) {
+  return kind === "tenant" ? "/clients" : "/landlords";
+}
+
+function dashboardWithPlan(kind: UserKind) {
+  const destination = dashboardFor(kind);
   const requestedPlan = new URLSearchParams(window.location.search).get("plan");
   if (kind !== "landlord" || !requestedPlan || !/^[a-z0-9-]{1,32}$/.test(requestedPlan)) {
     return destination;
@@ -86,8 +119,22 @@ function rememberSession(
   sessionStorage.setItem("hodi_phone_number", profile.phone_number ?? "");
 }
 
+function clearSession() {
+  setStoredAuthToken(null);
+  for (const key of [
+    "hodi_account_type",
+    "hodi_memberships",
+    "hodi_first_name",
+    "hodi_last_name",
+    "hodi_email",
+    "hodi_phone_number",
+  ]) {
+    sessionStorage.removeItem(key);
+  }
+}
+
 function membershipsFromAuth(auth: AuthResponse): OrganizationMembership[] {
-  const memberships = (auth as AuthResponse & { memberships?: unknown }).memberships;
+  const memberships = auth.memberships;
   if (!Array.isArray(memberships)) return [];
   return memberships.filter((membership): membership is OrganizationMembership => {
     if (!membership || typeof membership !== "object") return false;
@@ -105,17 +152,32 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [needsOrganizationLink, setNeedsOrganizationLink] = useState(false);
+  const [tenantNeedsOrganizationLink, setTenantNeedsOrganizationLink] = useState(false);
   const [requestedPlan, setRequestedPlan] = useState("");
+  const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOption[]>([]);
 
   useEffect(() => {
     const type = new URLSearchParams(window.location.search).get("type");
     const plan = new URLSearchParams(window.location.search).get("plan");
     if (plan && /^[a-z0-9-]{1,32}$/.test(plan)) setRequestedPlan(plan);
-    if (type === "tenant" || type === "client") setUserKind("tenant");
-    if (type === "landlord" || type === "owner") setUserKind("landlord");
-    if (type === "caretaker") setUserKind("caretaker");
-    if (type === "technician") setUserKind("technician");
-  }, []);
+    if (mode === "signup") {
+      if (type === "tenant" || type === "client") setUserKind("tenant");
+      if (type === "landlord" || type === "owner") setUserKind("landlord");
+    }
+  }, [mode]);
+
+  function goToWorkspace(path: string) {
+    if (path === "/clients" && tenantNeedsOrganizationLink) {
+      setWorkspaceOptions([]);
+      setNeedsOrganizationLink(true);
+      return;
+    }
+    if (path === "/landlords") {
+      window.location.assign(dashboardWithPlan("landlord"));
+      return;
+    }
+    window.location.assign(path);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -127,9 +189,6 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
     try {
       if (mode === "signup") {
-        if (userKind === "caretaker" || userKind === "technician") {
-          throw new Error("Caretaker access is assigned by your property organization.");
-        }
         const profile = {
           first_name: String(form.get("first_name") ?? "").trim(),
           last_name: String(form.get("last_name") ?? "").trim(),
@@ -176,64 +235,63 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
           setNeedsOrganizationLink(true);
           return;
         }
-        window.location.assign(dashboardWithPlan(actualKind, accountType));
+        window.location.assign(dashboardWithPlan(actualKind));
         return;
       }
 
       const auth = await apiLogin({ username, password });
-      const memberships = membershipsFromAuth(auth);
       if (!auth.token) throw new Error("This account could not be signed in.");
-      if (memberships.some(item => item.role === "ACCOUNTANT") && !memberships.some(item => item.role === "OWNER" || item.role === "PROPERTY_MANAGER")) {
-        rememberSession(auth, { first_name: auth.first_name?.trim() || username, last_name: auth.last_name, email: auth.email || username, phone_number: auth.phone_number }, memberships);
-        window.location.assign("/accountants");
-        return;
-      }
-      const hasCaretakerMembership = memberships.some(
-        membership => staffLoginKindForRole(membership.role) === "caretaker",
-      );
-      const hasTechnicianMembership = memberships.some(
-        membership => staffLoginKindForRole(membership.role) === "technician",
-      );
-      const hasLandlordMembership = memberships.some(membership =>
-        membership.role === "OWNER" || staffLoginKindForRole(membership.role) === "landlord",
-      );
-      const actualKind = userKind === "caretaker"
-        ? hasCaretakerMembership ? "caretaker" : null
-        : userKind === "technician"
-          ? hasTechnicianMembership ? "technician" : null
-        : userKindFromAccountType(auth.account_type) ?? (hasLandlordMembership ? "landlord" : null);
-      if (!actualKind) {
-        setStoredAuthToken(auth.token);
-        try {
-          const { data: invitations } = await clientApi.get<Array<{ status: string; can_accept: boolean }>>("/api/v1/organizations/accountant-invitations/");
-          if (invitations.some(invitation => invitation.status === "PENDING" && invitation.can_accept)) {
-            rememberSession(auth, { first_name: auth.first_name?.trim() || username, last_name: auth.last_name, email: auth.email || username, phone_number: auth.phone_number }, memberships);
-            window.location.assign("/accountants");
-            return;
-          }
-        } catch { /* The normal dashboard error below remains the useful sign-in message. */ }
-        setStoredAuthToken(null);
-        throw new Error(userKind === "caretaker"
-          ? "This account does not have an active caretaker membership."
-          : userKind === "technician"
-            ? "This account does not have an active technician membership."
-          : "This account type does not have a Hodi dashboard yet.");
-      }
-      if (actualKind !== userKind) {
-        const accessType = actualKind === "tenant" ? "client" : actualKind === "technician" ? "technician" : "landlord";
-        throw new Error(`This account is set up for ${accessType} access.`);
-      }
+      const memberships = membershipsFromAuth(auth);
       rememberSession(auth, {
         first_name: auth.first_name?.trim() || username,
         last_name: auth.last_name,
         email: auth.email || username,
         phone_number: auth.phone_number,
       }, memberships);
-      if (actualKind === "tenant" && (auth.organization_id === null || auth.organization_id === undefined)) {
-        setNeedsOrganizationLink(true);
+
+      const tenantNeedsOrganizationLink =
+        auth.account_type?.toUpperCase() === "TENANT" &&
+        (auth.organization_id === null || auth.organization_id === undefined);
+      setTenantNeedsOrganizationLink(tenantNeedsOrganizationLink);
+      const workspaces = workspacesForAuth(auth, memberships);
+      let invitations: Array<{ status: string; can_accept: boolean }>;
+      try {
+        const response = await clientApi.get<Array<{ status: string; can_accept: boolean }>>(
+          "/api/v1/organizations/accountant-invitations/",
+        );
+        invitations = response.data;
+      } catch (invitationError) {
+        clearSession();
+        throw invitationError;
+      }
+      if (invitations.some(invitation => invitation.status === "PENDING" && invitation.can_accept)) {
+        if (!workspaces.some(workspace => workspace.path === "/accountants")) {
+          workspaces.push({
+            path: "/accountants",
+            label: "Accountant workspace",
+            description: "Review and accept your organization invitation.",
+          });
+        }
+      }
+
+      if (workspaces.length > 1) {
+        setWorkspaceOptions(workspaces);
         return;
       }
-      window.location.assign(dashboardWithPlan(actualKind, auth.account_type));
+      if (workspaces.length === 1) {
+        const workspace = workspaces[0];
+        if (workspace.path === "/clients" && tenantNeedsOrganizationLink) {
+          setNeedsOrganizationLink(true);
+          return;
+        }
+        goToWorkspace(workspace.path);
+        return;
+      }
+
+      clearSession();
+      throw new Error(
+        "Your sign-in succeeded, but this account has no active Hodi workspace yet. Ask an organization owner to invite you, or contact support.",
+      );
     } catch (submitError) {
       setError(errorText(submitError));
     } finally {
@@ -246,6 +304,39 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
   if (needsOrganizationLink) {
     return <TenantLinkGate onLinked={() => window.location.assign("/clients")} />;
+  }
+
+  if (workspaceOptions.length > 1) {
+    return (
+      <main className="min-h-screen bg-bg px-5 py-12 text-text sm:px-8">
+        <div className="mx-auto w-full max-w-2xl">
+          <div className="mb-8 flex items-center justify-between gap-3">
+            <Logo size={40} className="w-fit" />
+            <ThemeToggle />
+          </div>
+          <section className="rounded-2xl border border-border bg-surface p-7 shadow-soft sm:p-10">
+            <p className="text-[10px] font-bold tracking-[0.16em] text-text-secondary">SIGNED IN</p>
+            <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight">Choose a workspace</h1>
+            <p className="mt-2 text-sm leading-6 text-text-secondary">
+              This account has access to more than one Hodi workspace. Choose where you want to go.
+            </p>
+            <div className="mt-6 grid gap-3">
+              {workspaceOptions.map(workspace => (
+                <button
+                  key={workspace.path}
+                  type="button"
+                  onClick={() => goToWorkspace(workspace.path)}
+                  className="rounded-xl border border-border bg-surface-raised p-4 text-left transition-colors hover:border-brand"
+                >
+                  <span className="block font-semibold">{workspace.label}</span>
+                  <span className="mt-1 block text-sm text-text-secondary">{workspace.description}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -278,38 +369,25 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
               PROPERTY OPERATIONS, CONNECTED
             </p>
             <h1>
-              {userKind === "landlord"
-                ? "Run your portfolio with clarity."
-                : userKind === "caretaker"
-                  ? "Keep property operations moving."
-                  : userKind === "technician"
-                    ? "Keep your assigned repair work moving."
+              {!isSignup
+                ? "One sign-in for every Hodi workspace."
+                : userKind === "landlord"
+                  ? "Run your portfolio with clarity."
                   : "Feel at home with Hodi."}
             </h1>
             <p>
-              {userKind === "landlord"
-                ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
-                : userKind === "caretaker"
-                  ? "Review maintenance requests, track their progress, and check residents’ rent status."
-                  : userKind === "technician"
-                    ? "Review only the work orders assigned to you and submit repair outcomes for verification."
+              {!isSignup
+                ? "Sign in with your account. Hodi will take you to the workspaces your organization has granted you."
+                : userKind === "landlord"
+                  ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
                   : "Keep your home, rent, and maintenance updates connected in one dependable place."}
             </p>
-            <div className="mt-6 flex flex-wrap gap-3 text-sm">
-              <Link className="font-semibold text-brand underline-offset-4 hover:underline" href="/signin?type=landlord">
-                Landlord access
-              </Link>
-              <span className="text-text-secondary">·</span>
-              <Link className="font-semibold text-brand underline-offset-4 hover:underline" href="/signin?type=tenant">
-                Client access
-              </Link>
-            </div>
             </div>
           </section>
 
           <section className={`auth-form-panel w-full rounded-2xl border border-border bg-surface shadow-soft ${isSignup ? "p-4 sm:p-5" : "p-7 sm:p-10"}`}>
             <p key={userKind} className="text-[10px] font-bold tracking-[0.16em] text-text-secondary auth-role-enter">
-              {userKind === "landlord" ? "LANDLORD PORTAL" : userKind === "caretaker" ? "CARETAKER PORTAL" : userKind === "technician" ? "TECHNICIAN PORTAL" : "CLIENT PORTAL"}
+              {!isSignup ? "HODI ACCOUNT" : userKind === "landlord" ? "LANDLORD PORTAL" : "CLIENT PORTAL"}
             </p>
             <h2 className={`${isSignup ? "mt-2 text-2xl" : "mt-3 text-3xl"} font-display font-semibold tracking-tight`}>
               {isSignup ? "Create your account" : "Welcome back"}
@@ -317,11 +395,12 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             <p className={`${isSignup ? "mt-1.5 text-xs leading-5 sm:text-sm" : "mt-2 text-sm leading-6"} text-text-secondary`}>
               {isSignup
                 ? "Choose how you use Hodi to get started."
-                : "Sign in to continue to your Hodi dashboard."}
+                : "Enter your account details. We’ll use your active access to choose the right workspace."}
             </p>
 
-            <div className={`${isSignup ? "mt-4 grid-cols-2" : "mt-6 grid-cols-4"} grid gap-2 rounded-lg bg-surface-raised p-1`}>
-              {(isSignup ? ["landlord", "tenant"] as const : ["landlord", "tenant", "caretaker", "technician"] as const).map(kind => (
+            {isSignup && <>
+              <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-surface-raised p-1">
+              {(["landlord", "tenant"] as const).map(kind => (
                 <button
                   key={kind}
                   type="button"
@@ -330,32 +409,20 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                     setUserKind(kind);
                     setError("");
                   }}
-                  className={`${isSignup ? "min-h-9 px-3 text-sm" : "min-h-10 min-w-0 whitespace-nowrap px-1 text-xs sm:px-2 sm:text-sm"} rounded-md font-semibold transition-colors duration-300 ease-in-out ${
+                  className={`min-h-9 rounded-md px-3 text-sm font-semibold transition-colors duration-300 ease-in-out ${
                     userKind === kind
                       ? "bg-brand text-brand-contrast shadow-sm"
                       : "text-text-secondary hover:text-text"
                   }`}
                 >
-                  {kind === "landlord" ? "Landlord" : kind === "caretaker" ? "Caretaker" : kind === "technician" ? "Technician" : isSignup ? "Client / tenant" : "Tenant"}
+                  {kind === "landlord" ? "Property owner" : "Tenant"}
                 </button>
               ))}
-            </div>
-
-            {!isSignup && userKind === "caretaker" && (
-              <p key="caretaker-access-hint" className="mt-2 text-xs leading-5 text-text-secondary auth-role-enter">
-                Caretaker access is assigned by your property organization.
+              </div>
+              <p className="mt-2 text-xs leading-5 text-text-secondary">
+                Property managers, accountants, caretakers, and technicians get access through an organization invitation.
               </p>
-            )}
-            {!isSignup && userKind === "technician" && (
-              <p key="technician-access-hint" className="mt-2 text-xs leading-5 text-text-secondary auth-role-enter">
-                Technician access is assigned by your property organization.
-              </p>
-            )}
-            {!isSignup && userKind === "landlord" && (
-              <p key="landlord-access-hint" className="mt-2 text-xs leading-5 text-text-secondary auth-role-enter">
-                Owners, property managers, and accountants use Landlord access.
-              </p>
-            )}
+            </>}
 
             <form className={`grid ${isSignup ? "mt-3 gap-2.5" : "mt-6 gap-4"}`} onSubmit={submit}>
               {isSignup && (
@@ -422,21 +489,17 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
               </button>
             </form>
 
-            {!isSignup && (userKind === "caretaker" || userKind === "technician") ? (
-              <p className="mt-6 text-center text-sm text-text-secondary auth-role-enter">
-                Need access? Contact your property organization.
-              </p>
-            ) : (
-              <p className={`${isSignup ? "mt-4" : "mt-6"} text-center text-sm text-text-secondary`}>
-                {isSignup ? "Already have an account?" : "New to Hodi?"}{" "}
-                <Link
-                  href={`${isSignup ? "/signin" : "/signup"}?type=${userKind}${userKind === "landlord" && requestedPlan ? `&plan=${encodeURIComponent(requestedPlan)}` : ""}`}
-                  className="font-semibold text-brand hover:underline"
-                >
-                  {isSignup ? "Sign in" : "Create an account"}
-                </Link>
-              </p>
-            )}
+            <p className={`${isSignup ? "mt-4" : "mt-6"} text-center text-sm text-text-secondary`}>
+              {isSignup ? "Already have an account?" : "New to Hodi?"}{" "}
+              <Link
+                href={isSignup
+                  ? `/signin${requestedPlan ? `?plan=${encodeURIComponent(requestedPlan)}` : ""}`
+                  : `/signup?type=${userKind}${userKind === "landlord" && requestedPlan ? `&plan=${encodeURIComponent(requestedPlan)}` : ""}`}
+                className="font-semibold text-brand hover:underline"
+              >
+                {isSignup ? "Sign in" : "Create an account"}
+              </Link>
+            </p>
           </section>
         </div>
       </div>

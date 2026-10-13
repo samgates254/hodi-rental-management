@@ -4,7 +4,7 @@ import { Footer } from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to your Hodi landlord or client account.",
+  description: "Sign in to Hodi and continue to the workspaces your account can access.",
 };
 
 export default function SignInPage() {

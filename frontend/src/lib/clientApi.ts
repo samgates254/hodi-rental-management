@@ -42,6 +42,11 @@ export type AuthResponse = {
   account_type?: AccountType;
   organization_id?: number | null;
   professional_trade?: string;
+  memberships?: Array<{
+    organization_id: number | string;
+    organization_name: string;
+    role: string;
+  }>;
 };
 
 export type OrganizationOption = {

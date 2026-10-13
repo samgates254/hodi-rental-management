@@ -48,6 +48,8 @@ Content-Type: application/json
 
 Send the returned token on protected requests as `Authorization: Token <token>`. `POST /api/v1/accounts/logout/` revokes the current token and returns `204`.
 
+The web sign-in form does not ask users to choose a role. After credentials are verified, it routes from the returned account type and active organization memberships: tenants go to the tenant workspace; owners and property managers to property management; accountants, caretakers, and technicians to their respective workspaces. If an account has access to multiple workspace types, the user chooses a workspace after signing in. Organization-specific dashboards then allow selection among the organizations for which that role is active. Staff access must come from an organization invitation; choosing a portal on the sign-in page does not grant access.
+
 ```json
 {
   "token": "...",
