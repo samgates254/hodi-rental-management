@@ -14,7 +14,7 @@ export default function HomePage() {
     <>
       <Header variant="homepage" />
       <HomepageExperience />
-      <Footer variant="homepage" />
+      <Footer />
     </>
   );
 }

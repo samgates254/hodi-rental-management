@@ -69,7 +69,7 @@ export function Header({ variant = "default" }: { variant?: "default" | "homepag
       )}
     >
       <Container className={cn("flex items-center justify-between gap-4", isHomepage ? "h-20 lg:h-24" : "h-16 lg:h-[4.25rem]")}>
-        <Logo size={40} homepage={isHomepage} />
+        <Logo size={40} />
 
         <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
           {navItems.map((item) => (
