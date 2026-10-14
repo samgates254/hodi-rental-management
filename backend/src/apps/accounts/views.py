@@ -4,6 +4,9 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from google.auth.exceptions import GoogleAuthError
+from google.auth.transport.requests import Request as GoogleRequest
+from google.oauth2.id_token import verify_oauth2_token
 from rest_framework import permissions, status
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ValidationError
@@ -26,6 +29,42 @@ from .serializers import (
 from .services import reset_user_password, send_password_reset_email
 
 logger = logging.getLogger(__name__)
+
+
+def _auth_response_data(user):
+	profile = getattr(user, 'account_profile', None)
+	response_data = {
+		'token': Token.objects.get_or_create(user=user)[0].key,
+		'is_staff': user.is_staff,
+		'first_name': user.first_name,
+		'last_name': user.last_name,
+		'email': user.email,
+	}
+	if profile is not None:
+		response_data.update({
+			'account_type': profile.account_type,
+			'organization_id': profile.organization_id,
+			'professional_trade': profile.professional_trade,
+			'phone_number': profile.phone_number,
+		})
+	agent_profile = getattr(user, 'agent_profile', None)
+	if agent_profile is not None:
+		response_data['agent_verification_status'] = agent_profile.verification_status
+		response_data['agent_account_status'] = agent_profile.account_status
+	memberships = OrganizationMembership.objects.filter(
+		user=user,
+		is_active=True,
+		organization__is_active=True,
+	).select_related('organization').order_by('organization__name')
+	response_data['memberships'] = [
+		{
+			'organization_id': membership.organization_id,
+			'organization_name': membership.organization.name,
+			'role': membership.role,
+		}
+		for membership in memberships
+	]
+	return response_data
 
 
 class SignupView(APIView):
@@ -167,40 +206,60 @@ class LoginView(APIView):
 		serializer = LoginSerializer(data=request.data, context={'request': request})
 		serializer.is_valid(raise_exception=True)
 		user = serializer.validated_data['user']
-		token, _created = Token.objects.get_or_create(user=user)
-		profile = getattr(user, 'account_profile', None)
-		response_data = {
-			'token': token.key,
-			'is_staff': user.is_staff,
-			'first_name': user.first_name,
-			'last_name': user.last_name,
-			'email': user.email,
-		}
-		if profile is not None:
-			response_data.update({
-				'account_type': profile.account_type,
-				'organization_id': profile.organization_id,
-				'professional_trade': profile.professional_trade,
-				'phone_number': profile.phone_number,
-			})
-		agent_profile = getattr(user, 'agent_profile', None)
-		if agent_profile is not None:
-			response_data['agent_verification_status'] = agent_profile.verification_status
-			response_data['agent_account_status'] = agent_profile.account_status
-		memberships = OrganizationMembership.objects.filter(
-			user=user,
+		return Response(_auth_response_data(user), status=status.HTTP_200_OK)
+
+
+class GoogleLoginView(APIView):
+	permission_classes = (permissions.AllowAny,)
+	authentication_classes = ()
+	throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
+	throttle_scope = 'auth_login'
+
+	def post(self, request):
+		client_id = settings.GOOGLE_OAUTH_CLIENT_ID
+		if not client_id:
+			return Response(
+				{'detail': 'Google sign-in is not configured.'},
+				status=status.HTTP_503_SERVICE_UNAVAILABLE,
+			)
+
+		credential = request.data.get('credential')
+		if not isinstance(credential, str) or not credential:
+			return Response(
+				{'credential': ['This field is required.']},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+
+		try:
+			claims = verify_oauth2_token(
+				credential,
+				GoogleRequest(),
+				audience=client_id,
+			)
+		except (GoogleAuthError, ValueError):
+			return Response(
+				{'detail': 'Unable to sign in with this Google account.'},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+
+		email = claims.get('email')
+		if not claims.get('email_verified') or not isinstance(email, str) or not email.strip():
+			return Response(
+				{'detail': 'Unable to sign in with this Google account.'},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+
+		user = get_user_model().objects.filter(
+			email__iexact=email.strip(),
 			is_active=True,
-			organization__is_active=True,
-		).select_related('organization').order_by('organization__name')
-		response_data['memberships'] = [
-			{
-				'organization_id': membership.organization_id,
-				'organization_name': membership.organization.name,
-				'role': membership.role,
-			}
-			for membership in memberships
-		]
-		return Response(response_data, status=status.HTTP_200_OK)
+		).first()
+		if user is None:
+			return Response(
+				{'detail': 'Unable to sign in with this Google account.'},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+
+		return Response(_auth_response_data(user), status=status.HTTP_200_OK)
 
 
 class MeView(APIView):

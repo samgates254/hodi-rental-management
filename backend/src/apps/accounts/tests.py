@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.apps import apps as model_apps
 from django.core import mail
 from django.core.cache import cache
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -67,6 +67,7 @@ class AuthenticationApiTests(TestCase):
 
     def test_authentication_endpoint_names_resolve_to_slash_terminated_routes(self):
         self.assertEqual(reverse('accounts:login'), '/api/v1/accounts/login/')
+        self.assertEqual(reverse('accounts:google-login'), '/api/v1/accounts/google/')
         self.assertEqual(reverse('accounts:signup'), '/api/v1/accounts/signup/')
         self.assertEqual(reverse('accounts:logout'), '/api/v1/accounts/logout/')
 
@@ -77,6 +78,59 @@ class AuthenticationApiTests(TestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['token'])
+
+    def test_google_login_uses_existing_user_and_returns_their_single_account(self):
+        self.user.email = 'manager@example.com'
+        self.user.save(update_fields=('email',))
+        with override_settings(GOOGLE_OAUTH_CLIENT_ID='google-client-id'), patch(
+            'apps.accounts.views.verify_oauth2_token',
+            return_value={'email': 'MANAGER@example.com', 'email_verified': True},
+        ) as verify_token:
+            response = self.client.post(
+                reverse('accounts:google-login'),
+                {'credential': 'verified-google-token'},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['token'])
+        self.assertEqual(response.data['email'], 'manager@example.com')
+        self.assertEqual(get_user_model().objects.count(), 1)
+        verify_token.assert_called_once()
+        self.assertEqual(verify_token.call_args.args[0], 'verified-google-token')
+        self.assertEqual(verify_token.call_args.kwargs['audience'], 'google-client-id')
+
+    @override_settings(GOOGLE_OAUTH_CLIENT_ID='google-client-id')
+    @patch('apps.accounts.views.verify_oauth2_token')
+    def test_google_login_rejects_unverified_or_unknown_emails_without_creating_users(self, verify_token):
+        verify_token.return_value = {
+            'email': 'manager@example.com',
+            'email_verified': False,
+        }
+        unverified_response = self.client.post(
+            reverse('accounts:google-login'),
+            {'credential': 'unverified-token'},
+            format='json',
+        )
+        verify_token.return_value = {
+            'email': 'unknown@example.com',
+            'email_verified': True,
+        }
+        unknown_response = self.client.post(
+            reverse('accounts:google-login'),
+            {'credential': 'unknown-email-token'},
+            format='json',
+        )
+
+        self.assertEqual(unverified_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(unknown_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    def test_user_can_have_only_one_account_profile(self):
+        AccountProfile.objects.create(user=self.user)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            AccountProfile.objects.create(user=self.user)
 
     def test_frontend_auth_paths_match_django_routes_and_keep_trailing_slashes(self):
         repository_root = Path(__file__).resolve().parents[4]

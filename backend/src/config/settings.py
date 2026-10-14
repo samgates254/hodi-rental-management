@@ -33,6 +33,8 @@ if DJANGO_ENV == 'production' and (
 ):
     raise ImproperlyConfigured('Production DJANGO_SECRET_KEY must be a strong generated secret.')
 
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '').strip()
+
 allowed_hosts_value = os.environ.get('DJANGO_ALLOWED_HOSTS')
 if DJANGO_ENV == 'production' and not allowed_hosts_value:
     raise ImproperlyConfigured('DJANGO_ALLOWED_HOSTS is required in production.')

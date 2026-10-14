@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import Script from "next/script";
 import { Logo } from "@/components/layout/Logo";
 import {
   AUTH_TOKEN_KEY,
   ClientApiError,
   clientApi,
+  googleLogin as apiGoogleLogin,
   login as apiLogin,
   register as apiRegister,
   setStoredAuthToken,
@@ -28,6 +30,33 @@ type WorkspaceOption = {
   label: string;
   description: string;
 };
+
+type GoogleCredentialResponse = { credential: string };
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize(options: {
+            client_id: string;
+            callback: (response: GoogleCredentialResponse) => void;
+          }): void;
+          renderButton(
+            element: HTMLElement,
+            options: {
+              theme: "outline";
+              size: "large";
+              text: "continue_with";
+              shape: "rectangular";
+              width: number;
+            },
+          ): void;
+        };
+      };
+    };
+  }
+}
 
 const ACCOUNT_TYPE: Record<UserKind, "TENANT" | "OWNER" | "PROPERTY_AGENT"> = {
   tenant: "TENANT",
@@ -200,6 +229,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   const [tenantNeedsOrganizationLink, setTenantNeedsOrganizationLink] = useState(false);
   const [requestedPlan, setRequestedPlan] = useState("");
   const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOption[]>([]);
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
 
   useEffect(() => {
     const type = new URLSearchParams(window.location.search).get("type");
@@ -223,6 +254,97 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
       return;
     }
     window.location.assign(path);
+  }
+
+  async function finishLogin(auth: AuthResponse, fallbackName = "") {
+    if (!auth.token) throw new Error("This account could not be signed in.");
+    const memberships = membershipsFromAuth(auth);
+    rememberSession(auth, {
+      first_name: auth.first_name?.trim() || fallbackName,
+      last_name: auth.last_name,
+      email: auth.email || fallbackName,
+      phone_number: auth.phone_number,
+    }, memberships);
+
+    const tenantNeedsOrganizationLink =
+      auth.account_type?.toUpperCase() === "TENANT" &&
+      (auth.organization_id === null || auth.organization_id === undefined);
+    setTenantNeedsOrganizationLink(tenantNeedsOrganizationLink);
+    const workspaces = workspacesForAuth(auth, memberships);
+    let invitationLookupFailed = false;
+    let invitations: Array<{ status: string; can_accept: boolean; expires_at: string }> = [];
+    try {
+      const response = await clientApi.get<Array<{ status: string; can_accept: boolean; expires_at: string }>>(
+        "/api/v1/organizations/accountant-invitations/",
+      );
+      invitations = response.data;
+    } catch {
+      invitationLookupFailed = true;
+    }
+    if (invitations.some(invitation =>
+      invitation.status === "PENDING" &&
+      invitation.can_accept &&
+      Date.parse(invitation.expires_at) > Date.now()
+    )) {
+      if (!workspaces.some(workspace => workspace.path === "/accountants")) {
+        workspaces.push({
+          path: "/accountants",
+          label: "Accountant workspace",
+          description: "Review and accept your organization invitation.",
+        });
+      }
+    }
+
+    if (workspaces.length > 1) {
+      setWorkspaceOptions(workspaces);
+      return;
+    }
+    if (workspaces.length === 1) {
+      const workspace = workspaces[0];
+      if (workspace.path === "/clients" && tenantNeedsOrganizationLink) {
+        setNeedsOrganizationLink(true);
+        return;
+      }
+      goToWorkspace(workspace.path);
+      return;
+    }
+
+    if (invitationLookupFailed) {
+      throw new Error("Your sign-in succeeded, but Hodi could not load your workspace options. Please try again.");
+    }
+
+    clearSession();
+    throw new Error(
+      "Your sign-in succeeded, but this account has no active Hodi workspace yet. Ask an organization owner to invite you, or contact support.",
+    );
+  }
+
+  async function handleGoogleCredential(credential: string) {
+    setError("");
+    setIsSubmitting(true);
+    try {
+      const auth = await apiGoogleLogin(credential);
+      await finishLogin(auth, auth.email ?? "");
+    } catch (submitError) {
+      setError(errorText(submitError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function onGoogleScriptLoad() {
+    if (!googleClientId || !googleButtonRef.current || !window.google) return;
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: response => void handleGoogleCredential(response.credential),
+    });
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      text: "continue_with",
+      shape: "rectangular",
+      width: 320,
+    });
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -286,67 +408,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
       }
 
       const auth = await apiLogin({ username, password });
-      if (!auth.token) throw new Error("This account could not be signed in.");
-      const memberships = membershipsFromAuth(auth);
-      rememberSession(auth, {
-        first_name: auth.first_name?.trim() || username,
-        last_name: auth.last_name,
-        email: auth.email || username,
-        phone_number: auth.phone_number,
-      }, memberships);
-
-      const tenantNeedsOrganizationLink =
-        auth.account_type?.toUpperCase() === "TENANT" &&
-        (auth.organization_id === null || auth.organization_id === undefined);
-      setTenantNeedsOrganizationLink(tenantNeedsOrganizationLink);
-      const workspaces = workspacesForAuth(auth, memberships);
-      let invitationLookupFailed = false;
-      let invitations: Array<{ status: string; can_accept: boolean; expires_at: string }> = [];
-      try {
-        const response = await clientApi.get<Array<{ status: string; can_accept: boolean; expires_at: string }>>(
-          "/api/v1/organizations/accountant-invitations/",
-        );
-        invitations = response.data;
-      } catch {
-        invitationLookupFailed = true;
-      }
-      if (invitations.some(invitation =>
-        invitation.status === "PENDING" &&
-        invitation.can_accept &&
-        Date.parse(invitation.expires_at) > Date.now()
-      )) {
-        if (!workspaces.some(workspace => workspace.path === "/accountants")) {
-          workspaces.push({
-            path: "/accountants",
-            label: "Accountant workspace",
-            description: "Review and accept your organization invitation.",
-          });
-        }
-      }
-
-      if (workspaces.length > 1) {
-        setWorkspaceOptions(workspaces);
-        return;
-      }
-      if (workspaces.length === 1) {
-        const workspace = workspaces[0];
-        if (workspace.path === "/clients" && tenantNeedsOrganizationLink) {
-          setNeedsOrganizationLink(true);
-          return;
-        }
-        goToWorkspace(workspace.path);
-        return;
-      }
-
-      if (invitationLookupFailed) {
-        setError("Your sign-in succeeded, but Hodi could not load your workspace options. Please try again.");
-        return;
-      }
-
-      clearSession();
-      throw new Error(
-        "Your sign-in succeeded, but this account has no active Hodi workspace yet. Ask an organization owner to invite you, or contact support.",
-      );
+      await finishLogin(auth, username);
     } catch (submitError) {
       setError(errorText(submitError));
     } finally {
@@ -532,6 +594,26 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                   : isSignup ? "Create account" : "Sign in"}
               </button>
             </form>
+
+            {!isSignup && googleClientId && (
+              <div className="mt-4 grid gap-3">
+                <div className="flex items-center gap-3 text-xs text-text-secondary" aria-hidden="true">
+                  <span className="h-px flex-1 bg-border" />
+                  <span>OR</span>
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+                <div
+                  ref={googleButtonRef}
+                  className={`flex min-h-10 justify-center ${isSubmitting ? "pointer-events-none opacity-60" : ""}`}
+                  aria-busy={isSubmitting}
+                />
+                <Script
+                  src="https://accounts.google.com/gsi/client"
+                  strategy="afterInteractive"
+                  onLoad={onGoogleScriptLoad}
+                />
+              </div>
+            )}
 
             <p className={`${isSignup ? "mt-4" : "mt-6"} text-center text-sm text-text-secondary`}>
               {isSignup ? "Already have an account?" : "New to Hodi?"}{" "}

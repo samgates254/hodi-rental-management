@@ -13,6 +13,7 @@ export const AUTH_TOKEN_KEY = "hodi_api_token";
 /** Canonical Django authentication endpoints (the backend requires trailing slashes). */
 export const AUTH_API_PATHS = {
   login: "/api/v1/accounts/login/",
+  google: "/api/v1/accounts/google/",
   signup: "/api/v1/accounts/signup/",
   logout: "/api/v1/accounts/logout/",
 } as const;
@@ -304,6 +305,25 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
   if (!data?.token) {
     throw new ClientApiError(500, "Invalid response", {
       detail: "Login succeeded but no token was returned.",
+    });
+  }
+  setStoredAuthToken(data.token);
+  if (typeof window !== "undefined" && data.account_type) {
+    window.sessionStorage.setItem("hodi_account_type", data.account_type);
+  }
+  return data;
+}
+
+/** Django: POST /api/v1/accounts/google/ { credential } */
+export async function googleLogin(credential: string): Promise<AuthResponse> {
+  const { data } = await clientApi.post<AuthResponse>(
+    AUTH_API_PATHS.google,
+    { credential },
+    { skipAuth: true },
+  );
+  if (!data?.token) {
+    throw new ClientApiError(500, "Invalid response", {
+      detail: "Google sign-in succeeded but no token was returned.",
     });
   }
   setStoredAuthToken(data.token);
