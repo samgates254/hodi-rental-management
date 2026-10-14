@@ -177,6 +177,17 @@ class RentScheduleViewSet(LeaseScopedViewSet):
 
 	@transaction.atomic
 	def save_and_validate(self, serializer):
+		lease_ids = set()
+		lease = serializer.validated_data.get('lease')
+		if lease is not None:
+			lease_ids.add(lease.pk)
+		if serializer.instance is not None:
+			lease_ids.add(serializer.instance.lease_id)
+		# RentSchedule.clean() enforces the existing non-overlap policy. Lock
+		# the parent lease first so two PostgreSQL requests cannot validate the
+		# same temporal gap concurrently and both insert a schedule.
+		if lease_ids:
+			list(Lease.objects.select_for_update().filter(pk__in=lease_ids).order_by('pk'))
 		instance = serializer.save()
 		try:
 			instance.full_clean()

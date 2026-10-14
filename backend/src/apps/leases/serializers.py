@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from rental_os.algorithms.money import MAX_MONEY_MINOR
+
 from .models import Lease, LeaseAmendment, RentSchedule
 
 
@@ -9,6 +11,8 @@ class LeaseSerializer(serializers.ModelSerializer):
     property_city = serializers.CharField(source='unit.building.property.city', read_only=True)
     organization_name = serializers.CharField(source='tenant.organization.name', read_only=True)
     tenant_name = serializers.CharField(source='tenant.full_name', read_only=True)
+    monthly_rent_minor = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
+    security_deposit_minor = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR, required=False)
 
     class Meta:
         model = Lease
@@ -35,6 +39,8 @@ class LeaseSerializer(serializers.ModelSerializer):
 
 
 class RentScheduleSerializer(serializers.ModelSerializer):
+    amount_minor = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
+
     class Meta:
         model = RentSchedule
         fields = ('id', 'lease', 'effective_from', 'effective_to', 'amount_minor', 'frequency', 'created_at', 'updated_at')

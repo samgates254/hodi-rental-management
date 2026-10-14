@@ -1,5 +1,6 @@
-from datetime import date
+from datetime import date, datetime, timezone as datetime_timezone
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -13,6 +14,7 @@ from apps.leases.models import Lease
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
+from common.rental_dates import rental_business_date
 
 from .models import MaintenanceIssue, MaintenanceIssueUpdate, MaintenanceRequest, WorkOrder
 
@@ -71,7 +73,7 @@ class MaintenanceIssueApiTests(TestCase):
 
 	def test_linked_tenant_can_create_issue_and_creation_is_recorded(self):
 		self.lease.status = Lease.Status.ACTIVE
-		self.lease.start_date = timezone.localdate()
+		self.lease.start_date = rental_business_date()
 		self.lease.save(update_fields=('status', 'start_date', 'updated_at'))
 		self.client.force_authenticate(self.tenant_user)
 
@@ -89,7 +91,7 @@ class MaintenanceIssueApiTests(TestCase):
 
 	def test_tenant_issue_is_created_on_their_active_lease_unit(self):
 		self.lease.status = Lease.Status.ACTIVE
-		self.lease.start_date = timezone.localdate()
+		self.lease.start_date = rental_business_date()
 		self.lease.save(update_fields=('status', 'start_date', 'updated_at'))
 		self.client.force_authenticate(self.tenant_user)
 		payload = self.issue_payload()
@@ -100,9 +102,39 @@ class MaintenanceIssueApiTests(TestCase):
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 		self.assertEqual(response.data['unit'], self.unit.pk)
 
+	def test_lease_start_today_in_nairobi_authorizes_maintenance(self):
+		self.lease.status = Lease.Status.ACTIVE
+		self.lease.start_date = date(2026, 10, 15)
+		self.lease.save(update_fields=('status', 'start_date', 'updated_at'))
+		self.client.force_authenticate(self.tenant_user)
+		instant_before_utc_midnight = datetime(
+			2026, 10, 14, 22, 30, tzinfo=datetime_timezone.utc,
+		)
+
+		with patch('django.utils.timezone.now', return_value=instant_before_utc_midnight):
+			response = self.client.post('/api/v1/maintenance/issues/', self.issue_payload(), format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+		self.assertEqual(MaintenanceIssue.objects.get().tenant, self.tenant)
+
+	def test_tenant_remains_authorized_through_the_inclusive_lease_end_day(self):
+		self.lease.status = Lease.Status.ACTIVE
+		self.lease.start_date = date(2026, 10, 1)
+		self.lease.end_date = date(2026, 10, 15)
+		self.lease.save(update_fields=('status', 'start_date', 'end_date', 'updated_at'))
+		self.client.force_authenticate(self.tenant_user)
+		instant_before_utc_midnight = datetime(
+			2026, 10, 14, 22, 30, tzinfo=datetime_timezone.utc,
+		)
+
+		with patch('django.utils.timezone.now', return_value=instant_before_utc_midnight):
+			response = self.client.post('/api/v1/maintenance/issues/', self.issue_payload(), format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
 	def test_linked_maintenance_cannot_reopen_after_resolution(self):
 		self.lease.status = Lease.Status.ACTIVE
-		self.lease.start_date = timezone.localdate()
+		self.lease.start_date = rental_business_date()
 		self.lease.save(update_fields=('status', 'start_date', 'updated_at'))
 		self.client.force_authenticate(self.tenant_user)
 		created = self.client.post('/api/v1/maintenance/issues/', self.issue_payload(), format='json')
@@ -124,7 +156,7 @@ class MaintenanceIssueApiTests(TestCase):
 
 	def test_tenant_can_submit_photos_and_videos_that_are_visible_to_caretaker(self):
 		self.lease.status = Lease.Status.ACTIVE
-		self.lease.start_date = timezone.localdate()
+		self.lease.start_date = rental_business_date()
 		self.lease.save(update_fields=('status', 'start_date', 'updated_at'))
 		self.client.force_authenticate(self.tenant_user)
 
@@ -155,7 +187,7 @@ class MaintenanceIssueApiTests(TestCase):
 
 	def test_tenant_cannot_upload_unsupported_attachment_types(self):
 		self.lease.status = Lease.Status.ACTIVE
-		self.lease.start_date = timezone.localdate()
+		self.lease.start_date = rental_business_date()
 		self.lease.save(update_fields=('status', 'start_date', 'updated_at'))
 		self.client.force_authenticate(self.tenant_user)
 

@@ -21,6 +21,7 @@ from apps.billing.models import (
     Charge,
     DocumentStatus,
     Invoice,
+    MAX_MONEY_CENTS,
     MpesaAttempt,
 )
 from apps.billing.statements import tenant_for_statement
@@ -70,6 +71,10 @@ def kes_from_cents(amount_cents: int) -> int:
         raise ValidationError({
             'amount_cents': 'Amount must be a positive integer number of cents.',
         }) from error
+    if cents > MAX_MONEY_CENTS:
+        raise ValidationError({
+            'amount_cents': f'Amount must be between 1 and {MAX_MONEY_CENTS} cents.',
+        })
     if cents % 100 != 0:
         raise ValidationError({
             'amount_cents': 'Amount must be a whole number of Kenyan shillings (cents divisible by 100).',

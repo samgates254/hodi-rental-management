@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.leases.models import Lease, LeaseAmendment, RentSchedule
+from apps.leases.serializers import LeaseSerializer, RentScheduleSerializer
 from django.contrib.auth import get_user_model
 from apps.organizations.models import Organization
 from apps.properties.models import Building, Property, Unit
@@ -56,6 +57,43 @@ class LeaseTests(TestCase):
         with self.assertRaises(ValidationError):
             overlapping.full_clean()
 
+    def test_inclusive_lease_end_rejects_same_day_successor_but_allows_next_day(self):
+        previous = Lease.objects.create(
+            tenant=self.tenant,
+            unit=self.unit,
+            reference='LEASE-INCLUSIVE-PREVIOUS',
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 14),
+            monthly_rent_minor=2500000,
+        )
+        next_tenant = Tenant.objects.create(
+            organization=self.organization,
+            first_name='Brian',
+            last_name='Mwangi',
+            phone_number='+254711111111',
+        )
+        same_day = Lease(
+            tenant=next_tenant,
+            unit=self.unit,
+            reference='LEASE-INCLUSIVE-SAME-DAY',
+            start_date=date(2026, 10, 14),
+            end_date=date(2026, 12, 31),
+            monthly_rent_minor=2500000,
+        )
+        next_day = Lease(
+            tenant=next_tenant,
+            unit=self.unit,
+            reference='LEASE-INCLUSIVE-NEXT-DAY',
+            start_date=date(2026, 10, 15),
+            end_date=date(2026, 12, 31),
+            monthly_rent_minor=2500000,
+        )
+
+        self.assertEqual(previous.end_date, date(2026, 10, 14))
+        with self.assertRaises(ValidationError):
+            same_day.full_clean()
+        next_day.full_clean()
+
     def test_tenant_and_unit_must_share_an_organization(self):
         other_organization = Organization.objects.create(
             name='Other Homes',
@@ -90,6 +128,34 @@ class LeaseTests(TestCase):
 
         with self.assertRaises(ValidationError):
             lease.full_clean()
+
+    def test_lease_and_rent_schedule_amounts_reject_values_above_storage_range(self):
+        maximum_plus_one = 1 << 63
+        lease_serializer = LeaseSerializer(data={
+            'tenant': self.tenant.pk,
+            'unit': self.unit.pk,
+            'reference': 'LEASE-OVERFLOW',
+            'start_date': '2026-10-01',
+            'monthly_rent_minor': maximum_plus_one,
+        })
+        self.assertFalse(lease_serializer.is_valid())
+        self.assertIn('monthly_rent_minor', lease_serializer.errors)
+
+        lease = Lease.objects.create(
+            tenant=self.tenant,
+            unit=self.unit,
+            reference='LEASE-SCHEDULE-OVERFLOW',
+            start_date=date(2026, 1, 1),
+            monthly_rent_minor=1000,
+        )
+        schedule_serializer = RentScheduleSerializer(data={
+            'lease': lease.pk,
+            'effective_from': '2026-01-01',
+            'amount_minor': maximum_plus_one,
+            'frequency': RentSchedule.Frequency.MONTHLY,
+        })
+        self.assertFalse(schedule_serializer.is_valid())
+        self.assertIn('amount_minor', schedule_serializer.errors)
 
     def test_rent_schedule_rejects_overlapping_effective_dates(self):
         lease = Lease.objects.create(

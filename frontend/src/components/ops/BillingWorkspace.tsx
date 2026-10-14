@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, formatCents, getList, humanize } from "@/lib/opsApi";
 import { shillingsToCents } from "@/lib/money";
+import { rentalBusinessDate } from "@/lib/rentalDate";
 import "./ops.css";
 
 type TenantRow = { id: number | string; organization: number | string; full_name?: string; first_name: string; last_name: string };
@@ -96,17 +97,15 @@ function kesToCents(value: string): number | null {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return rentalBusinessDate();
 }
 
 export default function BillingWorkspace({
   organizationId,
   canWriteLedger,
-  canWriteRentLog,
 }: {
   organizationId: string;
   canWriteLedger: boolean;
-  canWriteRentLog: boolean;
 }) {
   const [tab, setTab] = useState<"invoices" | "payments" | "ledger" | "delinquency">("invoices");
   const [tenants, setTenants] = useState<TenantRow[]>([]);
@@ -249,31 +248,36 @@ export default function BillingWorkspace({
     }
   }
 
-  async function recordRent(event: FormEvent<HTMLFormElement>) {
+  async function recordManualReceipt(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const cents = kesToCents(String(form.get("amount") ?? ""));
     if (cents == null) {
-      setError("Enter the rent amount in KES with up to two decimals.");
+      setError("Enter the receipt amount in KES with up to two decimals.");
+      return;
+    }
+    const lease = leases.find(row => String(row.id) === String(form.get("lease") ?? ""));
+    if (!lease) {
+      setError("Select the lease for this receipt.");
       return;
     }
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      await clientApi.post("/api/v1/billing/payments/", {
-        lease: Number(form.get("lease")),
-        due_date: String(form.get("due_date")),
-        amount_minor: cents,
-        status: String(form.get("status") ?? "PENDING"),
-        method: String(form.get("method") ?? ""),
+      const response = await clientApi.post<LedgerPayment>("/api/v1/billing/ledger-payments/manual-receipts/", {
+        tenant: Number(lease.tenant),
+        amount_cents: cents,
+        received_date: String(form.get("received_date")),
+        method: String(form.get("method")),
         reference: String(form.get("reference") ?? ""),
       });
       setShowRent(false);
-      setNotice(`Rent payment recorded for ${cents} cents.`);
+      setAllocation(response.data);
+      setNotice(`Manual receipt allocated for ${response.data.amount_cents} cents.`);
       await load();
     } catch (rentError) {
-      setError(apiErrorMessage(rentError, "The rent payment couldn’t be recorded."));
+      setError(apiErrorMessage(rentError, "The manual receipt couldn’t be recorded."));
     } finally {
       setBusy(false);
     }
@@ -462,14 +466,14 @@ export default function BillingWorkspace({
 
       {tab === "payments" && (
         <>
-          <p className="ops-note">This list is the rent-payment record (`amount_minor`, PENDING / PAID / OVERDUE). It is not the ledger.</p>
-          {canWriteRentLog && (
+          <p className="ops-note">Historical pre-ledger rent-payment records are read-only. They do not prove a current ledger settlement.</p>
+          {canWriteLedger && (
             <button type="button" className="ops-button ops-button--primary" onClick={() => setShowRent(open => !open)}>
-              {showRent ? "Cancel" : "Record rent payment"}
+              {showRent ? "Cancel" : "Record manual receipt"}
             </button>
           )}
-          {showRent && canWriteRentLog && (
-            <form className="ops-form" onSubmit={event => void recordRent(event)}>
+          {showRent && canWriteLedger && (
+            <form className="ops-form" onSubmit={event => void recordManualReceipt(event)}>
               <div className="ops-grid">
                 <label>Lease
                   <select name="lease" required defaultValue="">
@@ -478,21 +482,21 @@ export default function BillingWorkspace({
                   </select>
                 </label>
                 <label>Amount (KES)<input name="amount" inputMode="decimal" required /></label>
-                <label>Due date<input name="due_date" type="date" required defaultValue={today()} /></label>
-                <label>Status
-                  <select name="status" defaultValue="PENDING">
-                    <option value="PENDING">Pending</option>
-                    <option value="PAID">Paid</option>
-                    <option value="OVERDUE">Overdue</option>
+                <label>Received<input name="received_date" type="date" required defaultValue={today()} /></label>
+                <label>Method
+                  <select name="method" defaultValue="CASH">
+                    <option value="CASH">Cash</option>
+                    <option value="BANK_TRANSFER">Bank transfer</option>
+                    <option value="OTHER">Other</option>
                   </select>
                 </label>
-                <label>Method<input name="method" placeholder="CASH" /></label>
-                <label>Reference<input name="reference" /></label>
+                <label>Receipt reference<input name="reference" required /></label>
               </div>
-              <button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Save rent payment"}</button>
+              <p className="ops-note">Use only for money already received. This immediately posts one canonical payment, allocates eligible non-deposit charges, and preserves any remainder as tenant credit. Verified M-Pesa payments arrive through the provider workflow.</p>
+              <button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Record and allocate receipt"}</button>
             </form>
           )}
-          {!loading && payments.length === 0 && <div className="ops-empty"><strong>No rent payments</strong><p>Recorded rent payments for this organization will appear here.</p></div>}
+          {!loading && payments.length === 0 && <div className="ops-empty"><strong>No historical rent-payment records</strong><p>New receipts appear in the canonical ledger after allocation.</p></div>}
           {payments.length > 0 && (
             <div className="ops-table-wrap">
               <table className="ops-table">
@@ -518,10 +522,10 @@ export default function BillingWorkspace({
 
       {tab === "ledger" && (
         <>
-          <p className="ops-note">Ledger payments are allocated by the server with policy CANONICAL_PRIORITY version 2. Do not treat a local sum as the balance.</p>
+          <p className="ops-note">Canonical ledger payments are allocated by the server with policy CANONICAL_PRIORITY version 2. Manual receipts use the receipt action above; do not treat a local sum as the balance.</p>
           {canWriteLedger && (
             <button type="button" className="ops-button ops-button--primary" onClick={() => setShowLedger(open => !open)}>
-              {showLedger ? "Cancel" : "Record ledger payment"}
+              {showLedger ? "Cancel" : "Record pending ledger entry"}
             </button>
           )}
           {showLedger && canWriteLedger && (
@@ -539,14 +543,13 @@ export default function BillingWorkspace({
                   <select name="method" defaultValue="CASH">
                     <option value="CASH">Cash</option>
                     <option value="BANK_TRANSFER">Bank transfer</option>
-                    <option value="MPESA">M-Pesa reference only</option>
                     <option value="OTHER">Other</option>
                   </select>
                 </label>
                 <label>Reference<input name="reference" /></label>
               </div>
-              <p className="ops-note">M-Pesa here only stores a method label. It does not start a checkout.</p>
-              <button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Save ledger payment"}</button>
+              <p className="ops-note">This creates a pending canonical entry for controlled back-office work. It does not confirm an external payment. M-Pesa is recorded only after provider verification.</p>
+              <button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Save pending entry"}</button>
             </form>
           )}
           {allocation && (

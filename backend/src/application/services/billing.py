@@ -2,8 +2,9 @@ from datetime import date
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
+from django.db.models.functions import Trim
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 
 from apps.billing.models import (
     CHARGE_TYPES,
@@ -12,12 +13,15 @@ from apps.billing.models import (
     DocumentStatus,
     Invoice,
     LedgerPosting,
+    MAX_MONEY_CENTS,
     Payment,
     PaymentAllocation,
     PaymentReversal,
     PaymentReversalAllocation,
+    RentPayment,
 )
 from apps.leases.models import RentSchedule
+from apps.organizations.models import Organization
 from application.services.audit import record_audit
 from application.services.notifications import notify_user
 from engines.allocation.facade import AllocationCharge, allocate
@@ -40,12 +44,18 @@ def recompute_invoice_totals(invoice):
         DocumentStatus.VOIDED,
         DocumentStatus.WRITTEN_OFF,
     )]
-    invoice.total_cents = sum(charge.amount_cents for charge in active)
-    invoice.balance_cents = sum(
+    total_cents = sum(charge.amount_cents for charge in active)
+    balance_cents = sum(
         charge.balance_cents
         for charge in charges
         if charge.lifecycle == DocumentStatus.POSTED
     )
+    if total_cents > MAX_MONEY_CENTS or balance_cents > MAX_MONEY_CENTS:
+        raise ValidationError({
+            'amount_cents': f'Invoice totals cannot exceed {MAX_MONEY_CENTS} cents.',
+        })
+    invoice.total_cents = total_cents
+    invoice.balance_cents = balance_cents
     invoice.save(update_fields=('total_cents', 'balance_cents', 'updated_at'))
     return invoice
 
@@ -88,8 +98,8 @@ def create_invoice(
     if len(generation_key) > 160:
         raise ValidationError({'generation_key': 'Must be 160 characters or fewer.'})
     amount = rent_charge_amount(lease, period_start, period_end) if include_rent else None
-    if include_rent and amount <= 0:
-        raise ValidationError({'lease': 'Rent charge amount must be greater than zero.'})
+    if include_rent and (amount <= 0 or amount > MAX_MONEY_CENTS):
+        raise ValidationError({'lease': 'Rent charge amount must be within the supported positive money range.'})
     if generation_key:
         existing = Invoice.objects.filter(organization=tenant.organization, generation_key=generation_key).first()
         if existing is not None:
@@ -134,7 +144,11 @@ def add_charge(*, invoice, charge_type, amount_cents, due_date, actor, period_st
         raise ValidationError({
             'charge_type': 'Security deposits must use the separate deposit workflow, not a rent invoice.',
         })
-    if isinstance(amount_cents, bool) or not isinstance(amount_cents, int) or amount_cents <= 0:
+    if (
+        isinstance(amount_cents, bool)
+        or not isinstance(amount_cents, int)
+        or not 0 < amount_cents <= MAX_MONEY_CENTS
+    ):
         raise ValidationError({'amount_cents': 'Amount must be a positive integer number of cents.'})
     charge = Charge.objects.create(
         invoice=invoice,
@@ -252,8 +266,14 @@ def record_payment(
     external_id='',
     request=None,
 ):
-    if isinstance(amount_cents, bool) or not isinstance(amount_cents, int) or amount_cents <= 0:
-        raise ValidationError({'amount_cents': 'Amount must be a positive integer number of cents.'})
+    if (
+        isinstance(amount_cents, bool)
+        or not isinstance(amount_cents, int)
+        or not 0 < amount_cents <= MAX_MONEY_CENTS
+    ):
+        raise ValidationError({
+            'amount_cents': f'Amount must be between 1 and {MAX_MONEY_CENTS} cents.',
+        })
     if type(received_date).__name__ != 'date':
         raise ValidationError({'received_date': 'Received date must be a civil date.'})
     reference = (reference or '').strip()
@@ -287,6 +307,142 @@ def record_payment(
         request=request,
     )
     return payment
+
+
+def _matches_manual_receipt(payment, *, tenant, amount_cents, received_date, method, reference):
+    return (
+        payment.organization_id == tenant.organization_id
+        and payment.tenant_id == tenant.pk
+        and payment.amount_cents == amount_cents
+        and payment.received_date == received_date
+        and payment.method == method
+        and payment.reference == reference
+        and payment.external_id == ''
+        and payment.status == Payment.Status.ALLOCATED
+    )
+
+
+class ManualReceiptReferenceConflict(APIException):
+    status_code = 409
+    default_detail = {
+        'reference': (
+            'This reference exists in historical rent-payment records. Reconciliation is required '
+            'before a new receipt can be recorded.'
+        ),
+    }
+    default_code = 'receipt_reference_reconciliation_required'
+
+
+@transaction.atomic
+def record_manual_receipt(
+    *, tenant, amount_cents, received_date, method, reference, actor, request=None,
+):
+    """Record one staff-confirmed receipt and settle it in the canonical ledger.
+
+    ``reference`` is the receipt idempotency key within the organization. A
+    retry with the same facts returns the already allocated payment; a reused
+    reference with different facts is rejected for reconciliation.
+    """
+    if method == Payment.Method.MPESA:
+        raise ValidationError({
+            'method': 'M-Pesa payments are recorded only after verified provider settlement.',
+        })
+    reference = (reference or '').strip()
+    if not reference:
+        raise ValidationError({'reference': 'A receipt reference is required.'})
+
+    # Serialize receipt-reference checks by organization. The canonical table
+    # still has its unique organization/reference constraint as the final
+    # idempotency guard; the organization lock also makes the read across the
+    # legacy table stable against concurrent canonical receipt submissions.
+    organization = Organization.objects.select_for_update().get(pk=tenant.organization_id)
+    existing = (
+        Payment.objects.select_for_update()
+        .filter(organization=organization, reference=reference)
+        .first()
+    )
+    if existing is not None:
+        if _matches_manual_receipt(
+            existing,
+            tenant=tenant,
+            amount_cents=amount_cents,
+            received_date=received_date,
+            method=method,
+            reference=reference,
+        ):
+            return existing, True
+        raise ValidationError({
+            'reference': 'This receipt reference is already used by a different payment record.',
+        })
+
+    legacy_collision = (
+        RentPayment.objects.annotate(normalized_reference=Trim('reference'))
+        .filter(
+            lease__tenant__organization=organization,
+            normalized_reference=reference,
+        )
+        .order_by('pk')
+        .first()
+    )
+    if legacy_collision is not None:
+        # A legacy status is not proof that funds were received or reconciled.
+        # Keep the row untouched and fail closed until an authorized review can
+        # determine whether a canonical posting already represents the money.
+        raise ManualReceiptReferenceConflict()
+
+    try:
+        # Keep creation, allocation, postings, charge updates, and audit rows
+        # in one transaction. A failure at any point leaves no partial receipt.
+        with transaction.atomic():
+            payment = record_payment(
+                tenant=tenant,
+                amount_cents=amount_cents,
+                received_date=received_date,
+                method=method,
+                reference=reference,
+                actor=actor,
+                request=request,
+            )
+            payment = allocate_payment(
+                payment,
+                policy_id='CANONICAL_PRIORITY',
+                policy_version=2,
+                actor=actor,
+                request=request,
+            )
+    except IntegrityError:
+        # A simultaneous retry can win after the initial lookup. The unique
+        # organization/reference constraint remains the final arbiter.
+        existing = (
+            Payment.objects.select_for_update()
+            .filter(organization=tenant.organization, reference=reference)
+            .first()
+        )
+        if existing is None:
+            raise
+        if _matches_manual_receipt(
+            existing,
+            tenant=tenant,
+            amount_cents=amount_cents,
+            received_date=received_date,
+            method=method,
+            reference=reference,
+        ):
+            return existing, True
+        raise ValidationError({
+            'reference': 'This receipt reference is already used by a different payment record.',
+        })
+
+    record_audit(
+        action='payment.manual_receipt',
+        object_type='Payment',
+        object_id=payment.pk,
+        actor=actor,
+        organization=payment.organization,
+        metadata={'reference': reference, 'method': method, 'tenant_id': tenant.pk},
+        request=request,
+    )
+    return payment, False
 
 
 @transaction.atomic

@@ -3,11 +3,11 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import MpesaAttempt
+from .models import MAX_MONEY_CENTS, MpesaAttempt
 
 
 class MpesaInitiateSerializer(serializers.Serializer):
-    amount_cents = serializers.IntegerField(min_value=1)
+    amount_cents = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_CENTS)
     phone_number = serializers.CharField(required=False, allow_blank=True, max_length=30)
     invoice = serializers.IntegerField(required=False, min_value=1)
     idempotency_key = serializers.UUIDField()
@@ -24,7 +24,7 @@ class MpesaOperatorEvidenceSerializer(serializers.Serializer):
     evidence_source = serializers.ChoiceField(choices=EvidenceSource.choices)
     evidence_reference = serializers.CharField(min_length=3, max_length=120, trim_whitespace=True)
     receipt = serializers.RegexField(r'^[A-Za-z0-9]{5,64}$', max_length=64, trim_whitespace=True)
-    amount_cents = serializers.IntegerField(min_value=1)
+    amount_cents = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_CENTS)
     merchant_request_id = serializers.CharField(min_length=1, max_length=64, trim_whitespace=True)
     checkout_request_id = serializers.CharField(min_length=1, max_length=64, trim_whitespace=True)
     account_reference = serializers.CharField(required=False, allow_blank=True, max_length=12, trim_whitespace=True)

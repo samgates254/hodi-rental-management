@@ -21,6 +21,7 @@ from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.subscriptions.models import SubscriptionInvoice, SubscriptionPayment
 from apps.tenants.models import Tenant
+from common.rental_dates import rental_business_date
 
 
 class MaintenanceRequestApiTests(APITestCase):
@@ -466,7 +467,7 @@ class MaintenanceRequestApiTests(APITestCase):
     def _vacate_fixture_lease(self):
         self.client.force_authenticate(self.owner)
         response = self.client.post(f'/api/v1/leases/{self.lease.pk}/terminate/', {
-            'end_date': (timezone.localdate() - timedelta(days=1)).isoformat(),
+            'end_date': (rental_business_date() - timedelta(days=1)).isoformat(),
             'reason': 'Unit vacated for turnover.',
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
@@ -948,6 +949,28 @@ class MaintenanceRequestApiTests(APITestCase):
             }],
         }, format='json')
         self.assertEqual(overflow.status_code, status.HTTP_400_BAD_REQUEST)
+
+        estimate_overflow = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+                'explanation': 'Estimate exceeds signed storage range.',
+                'labour_estimate_cents': 1 << 63,
+                'materials_estimate_cents': 0,
+            }, format='json',
+        )
+        self.assertEqual(estimate_overflow.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('labour_estimate_cents', estimate_overflow.data)
+
+        unit_price_overflow = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/quotations/', {
+                'explanation': 'Unit price exceeds signed storage range.',
+                'lines': [{
+                    'category': 'OTHER', 'description': 'Overflow', 'quantity': '1',
+                    'unit': 'job', 'unit_price_cents': 1 << 63,
+                }],
+            }, format='json',
+        )
+        self.assertEqual(unit_price_overflow.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('unit_price_cents', str(unit_price_overflow.data))
 
         quote_id = created.data['id']
         changed = self.client.patch(

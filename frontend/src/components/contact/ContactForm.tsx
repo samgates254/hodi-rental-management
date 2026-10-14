@@ -650,10 +650,7 @@ function PortfolioSizeSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-<<<<<<< HEAD
         aria-describedby={invalid ? `${id}-err` : undefined}
-=======
->>>>>>> 51ad35e (update all code)
         onClick={() => setOpen((v) => !v)}
         onKeyDown={onMenuKeyDown}
         onBlur={(event) => {

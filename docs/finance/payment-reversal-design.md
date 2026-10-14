@@ -1,15 +1,31 @@
-# Payment correction and reversal design gate
+# Rental payment reversal status
 
-HODI does not currently implement an auditable ledger payment reversal. The present `Payment` row, `PaymentAllocation` rows, charge balances, and `LedgerPosting` rows are committed together by allocation. Postings identify the payment but have no reversal/compensating-entry relationship, and there is no existing tenant refund payable or disbursement workflow.
+HODI implements an append-only reversal workflow for canonical rental ledger
+payments. It preserves the original payment, allocations, and postings, and
+records a linked reversal with compensating allocations and balanced postings.
+Reversal requests are full-payment only; partial reversals are rejected.
+An identical request with the same trimmed reason is idempotent. A conflicting
+second request is rejected. Only an organization owner or accountant may
+request a reversal.
 
-Do not mark a settled payment `VOIDED`, delete allocations, or restore charge balances directly. That would remove or misstate the original financial history. Do not call a ledger correction an M-Pesa refund.
+For non-M-Pesa methods, the operation marks the payment reversed, restores
+charge balances from still-allocated payments, removes any original tenant
+credit from the live balance through compensating postings, and writes an
+audit record. The original payment and correction history remain available to
+statements and reporting.
 
-Before implementation, accounting must approve the meaning of each correction:
+For M-Pesa payments, HODI records a `REVIEW_REQUIRED` reversal request and an
+audit event. It does not change payment status, allocations, charge or invoice
+balances, or ledger postings. HODI verifies STK settlement, but does not verify
+provider-side reversal events. An operator-entered reference or callback claim
+cannot complete an external refund. There is no provider reversal or review
+completion workflow in this operation.
 
-1. **Unapply/reallocate:** append a correction linked to the original payment and allocations; restore the affected charge balances; append balanced reversing postings and replacement postings; preserve original rows and add correction audit metadata.
-2. **Retain funds as tenant credit:** distinguish unapplied/refundable tenant liability from rent prepayment and specify how it appears on statements and delinquency calculations.
-3. **External refund:** record a separate provider payout/refund attempt and reconcile its provider reference. Do not infer that an internal correction returned money to the payer.
+## Remaining accounting and provider work
 
-A future schema should use one immutable correction record per request with organization, original payment, reason, actor/approver, idempotency key, effective timestamp, and child correction-allocation/posting rows. Enforce a unique idempotency key per organization, lock the payment and its allocations/charges in a documented global order, and expose only organization-authorized approval actions. Tests must cover full and partial allocation, tenant credit, duplicate requests, conflicting concurrent corrections, balanced inverse entries, unchanged original history, and separation from external refunds.
-
-This remains gated until the account treatment and approval authority are agreed. The M2.1 work does not alter historical payments or invent that policy.
+The current API does not support partial payment reversals, tenant refund
+payables, or a verified external refund disbursement. Adding any of those
+requires an approved accounting policy, an authorized approval role, evidence
+requirements, and a provider reconciliation workflow. Until those decisions
+exist, a review-required M-Pesa request remains unresolved and must not be
+reported as money returned to the payer.

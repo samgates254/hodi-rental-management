@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -15,6 +16,7 @@ from apps.billing.models import (
 from apps.billing.logging import MpesaSensitiveLogFilter
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.tenants.models import Tenant
+from common.rental_dates import rental_business_date
 
 
 CALLBACK_TOKEN = 'operator-review-callback-token'
@@ -44,7 +46,7 @@ class MpesaOperatorResolutionTests(APITestCase):
             organization=self.organization, user=self.tenant_user,
             first_name='Review', last_name='Tenant', phone_number='+254700000010',
         )
-        today = timezone.localdate()
+        today = rental_business_date()
         self.invoice = Invoice.objects.create(
             organization=self.organization, tenant=self.tenant,
             period_start=today.replace(day=1), period_end=today, due_date=today,
@@ -128,6 +130,20 @@ class MpesaOperatorResolutionTests(APITestCase):
         invalid_receipt = self.resolve({**self.valid_evidence, 'receipt': 'not a receipt'})
         self.assertEqual(invalid_receipt.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(Payment.objects.count(), 0)
+
+    def test_invalid_date_can_be_corrected_by_later_authorized_reconciliation(self):
+        stale = self.resolve({
+            **self.valid_evidence,
+            'transaction_date': (self.today - timedelta(days=1)).isoformat(),
+        })
+        self.assertEqual(stale.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('transaction_date', stale.data)
+        self.assertEqual(Payment.objects.count(), 0)
+
+        resolved = self.resolve()
+        self.assertEqual(resolved.status_code, status.HTTP_200_OK)
+        self.assertTrue(resolved.data['settled'])
+        self.assertEqual(Payment.objects.count(), 1)
 
     def test_successful_resolution_posts_through_ledger_services_and_audits_reviewer_evidence(self):
         response = self.resolve()

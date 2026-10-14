@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from application.services.mpesa import initiate_mpesa_stk
 from application.services.mpesa_callback import (
     CallbackValidationError,
+    TransactionDateValidationError,
     classify_stk_query,
     parse_stk_callback,
     settle_verified_stk_failure,
@@ -121,15 +122,27 @@ class MpesaCallbackView(APIView):
             if callback_code == '0':
                 try:
                     validate_stk_success_callback(attempt, request.data)
+                except TransactionDateValidationError:
+                    # Persist the reconciliation marker through the same locked
+                    # settlement path, which guarantees no financial writes.
+                    result = settle_stk_callback(payload=request.data, provider_query=query, request=request)
+                    return Response({
+                        'detail': result.detail,
+                        'matched': result.matched,
+                        'settled': result.settled,
+                        'duplicate': result.duplicate,
+                        'status': result.status,
+                    }, status=status.HTTP_202_ACCEPTED)
                 except CallbackValidationError:
                     record_audit(
                         action='mpesa.stk.callback_discrepancy', object_type='MpesaAttempt',
                         object_id=attempt.pk, actor=attempt.initiated_by, organization=attempt.organization,
                         metadata={'reason': 'success_metadata_mismatch'}, request=request,
                     )
-                    return Response({'detail': 'Callback metadata is inconsistent; no payment was posted.',
-                                     'matched': True, 'settled': False, 'duplicate': False,
-                                     'status': 'UNRESOLVED'}, status=202)
+                    return Response({
+                        'detail': 'Callback failed validation; no payment was recorded.',
+                        'matched': True, 'settled': False, 'duplicate': False, 'status': 'UNRESOLVED',
+                    }, status=status.HTTP_202_ACCEPTED)
                 result = settle_stk_callback(payload=request.data, provider_query=query, request=request)
             else:
                 result = settle_verified_stk_failure(

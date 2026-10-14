@@ -16,14 +16,13 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.cache import cache
+from common.rental_dates import RENTAL_BUSINESS_TIME_ZONE as NAIROBI
 
 logger = logging.getLogger(__name__)
 
-NAIROBI = ZoneInfo('Africa/Nairobi')
 OAUTH_PATH = '/oauth/v1/generate'
 STK_PATH = '/mpesa/stkpush/v1/processrequest'
 STK_QUERY_PATH = '/mpesa/stkpushquery/v1/query'

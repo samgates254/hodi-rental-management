@@ -1,6 +1,7 @@
 import tempfile
-from datetime import date
+from datetime import date, datetime, timezone as datetime_timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -135,6 +136,12 @@ class MarketplaceApiTests(APITestCase):
 		self.assertNotIn('SECRET-ID', body)
 		self.assertNotIn('amina@example.com', body)
 		self.assertNotIn('+254700000001', body)
+
+	def test_listing_rent_above_storage_range_is_field_validation(self):
+		response = self._create(monthly_rent_minor=1 << 63)
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('monthly_rent_minor', response.data)
+		self.assertFalse(Listing.objects.exists())
 
 	def test_public_filters_and_ordering(self):
 		first = self._create(title='Cheaper studio', monthly_rent_minor=2500000, bedrooms=0, bathrooms=1, furnished=False, amenities=['Water'], area='Westlands')
@@ -438,3 +445,82 @@ class MarketplaceApiTests(APITestCase):
 		self.assertEqual(accepted.status_code, status.HTTP_200_OK, accepted.data)
 		self.assertEqual(CommerceOrder.objects.get(pk=order.pk).status, 'ACCEPTED')
 		self.assertEqual(AuditLog.objects.filter(object_type='CommerceOrder', object_id=str(order.pk)).count(), 2)
+
+	def test_lease_start_today_in_nairobi_authorizes_marketplace_request_before_utc_midnight(self):
+		supplier = SupplierProfile.objects.create(
+			organization=self.other_organization,
+			created_by=self.other,
+			business_name='Nairobi Laundry',
+			categories=['laundry'],
+		)
+		listing = CommerceListing.objects.create(
+			organization=self.other_organization,
+			supplier=supplier,
+			created_by=self.other,
+			kind='SERVICE',
+			category='laundry',
+			title='Wash and fold',
+			description='Laundry service',
+			is_published=True,
+			availability='AVAILABLE',
+			price_minor=50000,
+		)
+		tenant = Tenant.objects.get(user=self.tenant_user)
+		Lease.objects.create(
+			tenant=tenant,
+			unit=self.unit,
+			reference='L-NAIROBI-START',
+			start_date=date(2026, 10, 15),
+			monthly_rent_minor=4500000,
+			status=Lease.Status.ACTIVE,
+		)
+		self.client.force_authenticate(self.tenant_user)
+		instant = datetime(2026, 10, 14, 22, 30, tzinfo=datetime_timezone.utc)
+
+		with patch('django.utils.timezone.now', return_value=instant):
+			response = self.client.post(
+				reverse('marketplace:commerce-order-list'),
+				{'listing': listing.pk, 'quantity': '1'},
+				format='json',
+			)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+	def test_public_listing_reappears_only_after_inclusive_lease_day_and_expiry(self):
+		created = self._create()
+		self.assertEqual(self._publish(created.data['id']).status_code, status.HTTP_200_OK)
+		tenant = Tenant.objects.get(user=self.tenant_user)
+		lease = Lease.objects.create(
+			tenant=tenant,
+			unit=self.unit,
+			reference='L-MARKET-END-DAY',
+			start_date=date(2026, 10, 1),
+			monthly_rent_minor=4500000,
+		)
+		self.client.force_authenticate(self.owner)
+		activated = self.client.post(f'/api/v1/leases/{lease.pk}/activate/')
+		self.assertEqual(activated.status_code, status.HTTP_200_OK, activated.data)
+
+		final_day_instant = datetime(2026, 10, 14, 22, 30, tzinfo=datetime_timezone.utc)
+		with patch('django.utils.timezone.now', return_value=final_day_instant):
+			termination = self.client.post(
+				f'/api/v1/leases/{lease.pk}/terminate/',
+				{'end_date': '2026-10-15', 'reason': 'Final inclusive day'},
+				format='json',
+			)
+		self.assertEqual(termination.status_code, status.HTTP_200_OK, termination.data)
+		self.assertEqual(termination.data['status'], Lease.Status.ACTIVE)
+		self.unit.refresh_from_db()
+		self.assertEqual(self.unit.status, Unit.Status.OCCUPIED)
+		self.client.force_authenticate(None)
+		self.assertEqual(public_results(self.client.get(reverse('marketplace:public-listing-list'))), [])
+
+		after_final_day_instant = datetime(2026, 10, 15, 21, 30, tzinfo=datetime_timezone.utc)
+		self.client.force_authenticate(self.owner)
+		with patch('django.utils.timezone.now', return_value=after_final_day_instant):
+			finalized = self.client.post(f'/api/v1/leases/{lease.pk}/expire/')
+		self.assertEqual(finalized.status_code, status.HTTP_200_OK, finalized.data)
+		self.unit.refresh_from_db()
+		self.assertEqual(self.unit.status, Unit.Status.AVAILABLE)
+		self.client.force_authenticate(None)
+		self.assertEqual(len(public_results(self.client.get(reverse('marketplace:public-listing-list')))), 1)

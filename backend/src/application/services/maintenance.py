@@ -31,12 +31,11 @@ from engines.maintenance.priority.facade import score
 from rental_os.algorithms.matching import Job, Technician
 from rental_os.algorithms.priority import PriorityError
 from rental_os.algorithms.matching import MatchingError
+from rental_os.algorithms.money import MAX_MONEY_MINOR
+from common.rental_dates import rental_business_date
 
 
 OPEN_FOR_EDIT = {MaintenanceRequest.Status.OPEN, MaintenanceRequest.Status.IN_PROGRESS}
-MAX_MONEY_MINOR = 9223372036854775807
-
-
 def quotation_line_total_cents(quantity, unit_price_cents):
     """Round nonnegative quantity × minor-unit price to cents using ROUND_HALF_UP."""
     try:
@@ -212,7 +211,7 @@ def create_request(
     if tenant is not None and tenant.organization_id != unit.organization_id:
         raise ValidationError({'unit': 'Tenant and unit must belong to the same organization.'})
     if tenant is not None and tenant.user_id == actor.id:
-        today = timezone.localdate()
+        today = rental_business_date()
         if not _active_lease(tenant, unit, today):
             raise ValidationError({'unit': 'The unit must be on your active lease.'})
     result = score_maintenance(

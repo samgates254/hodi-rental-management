@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+# Shared portable storage ceiling for monetary minor-unit fields backed by a
+# signed SQLite/PostgreSQL BIGINT. Product-specific business caps may be lower.
+MAX_MONEY_MINOR = (1 << 63) - 1
+
 
 class MoneyError(ValueError):
     """Invalid monetary input."""

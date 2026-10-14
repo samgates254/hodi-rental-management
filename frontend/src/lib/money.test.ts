@@ -34,6 +34,13 @@ test("parses shilling input on the decimal string and rejects extra precision", 
   assert.equal(shillingsToCents("10.999"), undefined);
   assert.equal(shillingsToCents("45,000"), 4500000);
   assert.equal(shillingsToCents("45 000.50"), 4500050);
+  assert.equal(shillingsToCents("1,234.50"), 123450);
+  assert.equal(shillingsToCents("45000.50"), 4500050);
+  assert.equal(shillingsToCents("1,2"), undefined);
+  assert.equal(shillingsToCents("1,,2"), undefined);
+  assert.equal(shillingsToCents("12,34"), undefined);
+  assert.equal(shillingsToCents("12 34"), undefined);
+  assert.equal(shillingsToCents("1,234 567"), undefined);
   assert.equal(shillingsToCents("-1"), undefined);
   assert.equal(shillingsToCents("-0.01"), undefined);
   assert.equal(shillingsToCents(""), undefined);
@@ -41,6 +48,8 @@ test("parses shilling input on the decimal string and rejects extra precision", 
   assert.equal(shillingsToCents("10."), undefined);
   assert.equal(shillingsToCents("92233720368547758.08"), undefined);
   assert.equal(wholeShillingsToCents("1500"), 150000);
+  assert.equal(wholeShillingsToCents("1,500"), 150000);
+  assert.equal(wholeShillingsToCents("1,50"), undefined);
   assert.equal(wholeShillingsToCents("1500.50"), undefined);
   assert.equal(wholeShillingsToCents("0"), 0);
   assert.equal(minorToShillingsInput(1010), "10.10");

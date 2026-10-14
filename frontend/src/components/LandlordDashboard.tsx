@@ -19,10 +19,11 @@ import NotificationBell from "@/components/ops/NotificationBell";
 import SubscriptionPanel from "@/components/SubscriptionPanel";
 import UtilitiesWorkspace from "@/components/utilities/UtilitiesWorkspace";
 import ThemeToggle from "@/components/theme/ThemeToggle";
+import { shillingsToCents } from "@/lib/money";
+import { rentalBusinessDate } from "@/lib/rentalDate";
 import { CurrencyText } from "@/components/ui/CurrencyText";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
-import { shillingsToCents } from "@/lib/money";
 import { ORGANIZATION_STAFF_ROLES, staffLoginKindForRole } from "@/lib/organizationRoles";
 import "./landlord-dashboard.css";
 import "@/components/ops/ops.css";
@@ -430,7 +431,6 @@ export default function LandlordDashboard() {
   const canReadBilling = isOwner || isManager || isAccountant;
   const canReadUtilities = isOwner || isManager || isAccountant;
   const canWriteLedger = (isOwner || isAccountant) && !previewMode;
-  const canWriteRentLog = (isOwner || isManager || isAccountant) && !previewMode;
   const canMaintenance = isOwner || isManager;
   const canAudit = isOwner || isManager || isAccountant;
 
@@ -698,11 +698,15 @@ export default function LandlordDashboard() {
     setPageError("");
     try {
       if (leaseAction.mode === "terminate") {
-        await apiRequest<Lease>(`/leases/${leaseAction.id}/terminate/`, token, {
+        const updatedLease = await apiRequest<Lease>(`/leases/${leaseAction.id}/terminate/`, token, {
           method: "POST",
           body: JSON.stringify({ end_date: leaseEndDate, reason: leaseReason }),
         });
-        setNotice("Lease terminated. If nothing else occupies the unit, it becomes available.");
+        setNotice(
+          updatedLease.status === "ACTIVE" && updatedLease.end_date === rentalBusinessDate()
+            ? `Lease remains active through ${formatDate(updatedLease.end_date)}.`
+            : "Lease terminated. If nothing else occupies the unit, it becomes available.",
+        );
       } else {
         await apiRequest<Lease>(`/leases/${leaseAction.id}/expire/`, token, { method: "POST" });
         setNotice("Lease expired. If nothing else occupies the unit, it becomes available.");
@@ -1243,28 +1247,86 @@ export default function LandlordDashboard() {
                 </form>
               )}
               {organizationData.leases.length ? (
-                <ResponsiveTable
+<ResponsiveTable
                   caption="Lease records"
                   rows={organizationData.leases}
                   getRowKey={lease => lease.id}
                   columns={[
                     { key: "lease", header: "Lease", render: lease => <strong>{lease.reference}</strong> },
-                    { key: "tenant", header: "Tenant", render: lease => organizationData.tenants.find(item => String(item.id) === String(lease.tenant))?.full_name ?? "Tenant unavailable" },
-                    { key: "unit", header: "Unit", render: lease => {
-                      const unit = organizationData.units.find(item => String(item.id) === String(lease.unit));
-                      const building = organizationData.buildings.find(item => String(item.id) === String(unit?.building));
-                      const property = organizationData.properties.find(item => String(item.id) === String(building?.property));
-                      return unit ? `${property?.name ?? building?.name ?? "Property"} · ${unit.name}` : "Unit unavailable";
-                    } },
-                    { key: "rent", header: "Monthly rent", render: lease => <CurrencyText amount={lease.monthly_rent_minor / 100} /> },
-                    { key: "dates", header: "Dates", render: lease => `${formatDate(lease.start_date)} – ${formatDate(lease.end_date)}` },
-                    { key: "status", header: "Status", render: lease => <span className={`landlord-status ${lease.status === "ACTIVE" ? "is-active" : ""}`}>{displayStatus(lease.status)}</span> },
-                    ...(canWritePortfolio && !previewMode ? [{ key: "actions", header: "Actions", render: (lease: Lease) => lease.status === "ACTIVE" ? (
-                      <div className="landlord-section-actions">
-                        <button type="button" className="landlord-button landlord-button--quiet min-h-11" onClick={() => { setLeaseEndDate(new Date().toISOString().slice(0, 10)); setLeaseReason(""); setLeaseAction({ id: lease.id, reference: lease.reference, mode: "terminate" }); }}>Terminate</button>
-                        <button type="button" className="landlord-button landlord-button--quiet min-h-11" onClick={() => setLeaseAction({ id: lease.id, reference: lease.reference, mode: "expire" })}>Expire</button>
-                      </div>
-                    ) : "—" }] : []),
+                    {
+                      key: "tenant",
+                      header: "Tenant",
+                      render: lease => organizationData.tenants.find(
+                        item => String(item.id) === String(lease.tenant),
+                      )?.full_name ?? "Tenant unavailable",
+                    },
+                    {
+                      key: "unit",
+                      header: "Unit",
+                      render: lease => {
+                        const unit = organizationData.units.find(
+                          item => String(item.id) === String(lease.unit),
+                        );
+                        const building = organizationData.buildings.find(
+                          item => String(item.id) === String(unit?.building),
+                        );
+                        const property = organizationData.properties.find(
+                          item => String(item.id) === String(building?.property),
+                        );
+                        return unit
+                          ? `${property?.name ?? building?.name ?? "Property"} · ${unit.name}`
+                          : "Unit unavailable";
+                      },
+                    },
+                    {
+                      key: "rent",
+                      header: "Monthly rent",
+                      render: lease => <CurrencyText amount={lease.monthly_rent_minor / 100} />,
+                    },
+                    {
+                      key: "dates",
+                      header: "Dates",
+                      render: lease => `${formatDate(lease.start_date)} – ${formatDate(lease.end_date)}`,
+                    },
+                    {
+                      key: "status",
+                      header: "Status",
+                      render: lease => (
+                        <span className={`landlord-status ${lease.status === "ACTIVE" ? "is-active" : ""}`}>
+                          {lease.status === "ACTIVE" && lease.end_date === rentalBusinessDate()
+                            ? "Active through today"
+                            : displayStatus(lease.status)}
+                        </span>
+                      ),
+                    },
+                    ...(canWritePortfolio && !previewMode
+                      ? [{
+                          key: "actions",
+                          header: "Actions",
+                          render: (lease: Lease) => lease.status === "ACTIVE" ? (
+                            <div className="landlord-section-actions">
+                              <button
+                                type="button"
+                                className="landlord-button landlord-button--quiet min-h-11"
+                                onClick={() => {
+                                  setLeaseEndDate(rentalBusinessDate());
+                                  setLeaseReason("");
+                                  setLeaseAction({ id: lease.id, reference: lease.reference, mode: "terminate" });
+                                }}
+                              >
+                                Terminate
+                              </button>
+                              <button
+                                type="button"
+                                className="landlord-button landlord-button--quiet min-h-11"
+                                onClick={() => setLeaseAction({ id: lease.id, reference: lease.reference, mode: "expire" })}
+                              >
+                                Expire
+                              </button>
+                            </div>
+                          ) : "—",
+                        }]
+                      : []),
                   ]}
                 />
               ) : (
@@ -1379,7 +1441,6 @@ export default function LandlordDashboard() {
                 key={`billing-${selectedOrganizationId}`}
                 organizationId={selectedOrganizationId}
                 canWriteLedger={canWriteLedger}
-                canWriteRentLog={canWriteRentLog}
               />
             )}
             {canReadUtilities && !previewMode && (

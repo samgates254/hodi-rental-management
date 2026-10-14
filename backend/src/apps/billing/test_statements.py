@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -11,6 +12,7 @@ from apps.leases.models import Lease, RentSchedule
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
+from common.rental_dates import rental_business_date
 
 from .models import Charge, DocumentStatus, Invoice, Payment
 
@@ -18,7 +20,7 @@ from .models import Charge, DocumentStatus, Invoice, Payment
 class TenantStatementTests(TestCase):
 	def setUp(self):
 		user_model = get_user_model()
-		self.today = timezone.localdate()
+		self.today = rental_business_date()
 		self.owner = user_model.objects.create_user(username='stmt-owner', password='secret')
 		self.tenant_user = user_model.objects.create_user(username='stmt-tenant', password='secret')
 		self.other_user = user_model.objects.create_user(username='stmt-other', password='secret')
@@ -204,6 +206,37 @@ class TenantStatementTests(TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data['tenant']['name'], 'Ada Tenant')
 		self.assertEqual(response.data['outstanding_cents'], 2600000)
+
+	def test_overdue_statement_uses_nairobi_business_date_across_utc_midnight(self):
+		Charge.objects.create(
+			invoice=self.invoice,
+			organization=self.organization,
+			tenant=self.tenant,
+			charge_type='RENT',
+			description='Due on previous UTC date',
+			amount_cents=2500,
+			balance_cents=2500,
+			due_date=date(2026, 10, 14),
+			lifecycle=DocumentStatus.POSTED,
+		)
+		self.client.force_authenticate(self.tenant_user)
+
+		with patch('apps.billing.statements.rental_business_date', return_value=date(2026, 10, 14)):
+			before_nairobi_midnight = self.client.get('/api/v1/billing/statements/me/?period=current_month')
+		with patch('apps.billing.statements.rental_business_date', return_value=date(2026, 10, 15)):
+			after_nairobi_midnight = self.client.get('/api/v1/billing/statements/me/?period=current_month')
+
+		self.assertEqual(before_nairobi_midnight.status_code, status.HTTP_200_OK)
+		self.assertEqual(after_nairobi_midnight.status_code, status.HTTP_200_OK)
+		expected_due_day_delta = sum(Charge.objects.filter(
+			tenant=self.tenant,
+			lifecycle=DocumentStatus.POSTED,
+			due_date=date(2026, 10, 14),
+		).values_list('balance_cents', flat=True))
+		self.assertEqual(
+			after_nairobi_midnight.data['overdue_cents'],
+			before_nairobi_midnight.data['overdue_cents'] + expected_due_day_delta,
+		)
 
 	def test_other_tenant_cannot_be_addressed_and_owner_without_link_is_not_found(self):
 		self.client.force_authenticate(self.other_user)

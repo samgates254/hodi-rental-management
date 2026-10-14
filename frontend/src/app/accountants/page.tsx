@@ -3,11 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { clientApi, ClientApiError, fetchMe, logout, type MeResponse } from "@/lib/clientApi";
 import { formatMinor } from "@/lib/money";
-<<<<<<< HEAD
 import { Logo } from "@/components/layout/Logo";
-=======
 import { useAggregatedBalances } from "@/hooks/useAggregatedBalances";
->>>>>>> 51ad35e (update all code)
 
 type Invite = {
   id: number;
@@ -167,17 +164,6 @@ export default function AccountantWorkspace() {
 
         {clients.length > 0 && (
           <>
-<<<<<<< HEAD
-            <label>
-              Client organisation
-              <select value={org} onChange={(event) => setOrg(event.target.value)}>
-                {clients.map((membership) => (
-                  <option key={membership.organization} value={membership.organization}>{membership.organization_name}</option>
-                ))}
-              </select>
-            </label>
-            <section id="overview" className="hodi-record-stats" aria-label="Invoice totals" aria-busy={loading}>
-=======
             <div className="relative max-w-xl">
               <label className="block text-sm font-medium" htmlFor="accountant-client-search">Client organisation</label>
               <input
@@ -228,8 +214,7 @@ export default function AccountantWorkspace() {
               )}
               {clientPickerOpen && matchingClients.length === 0 && <p className="hodi-record-note" role="status">No matching organisations.</p>}
             </div>
-            <section className="hodi-record-stats" aria-label="Invoice totals">
->>>>>>> 51ad35e (update all code)
+            <section id="overview" className="hodi-record-stats" aria-label="Invoice totals" aria-busy={loading}>
               <article className="hodi-record-stat"><span>Invoices</span><strong>{invoices.length}</strong></article>
               <article className="hodi-record-stat"><span>Invoiced</span><strong>{formatMinor(sum(invoices, "total_cents"), currency)}</strong></article>
               <article className="hodi-record-stat"><span>Paid</span><strong>{formatMinor(sum(invoices, "paid_cents"), currency)}</strong></article>

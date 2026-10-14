@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.properties.models import Unit
+from rental_os.algorithms.money import MAX_MONEY_MINOR
 
 from .models import (AgentProfile, AgentUnitAuthorization, CommerceListing, CommerceOrder,
 	CommercePhoto, SupplierProfile, Listing, ListingInquiry, ListingPhoto, ViewingRequest)
@@ -35,6 +36,7 @@ class CommercePhotoSerializer(serializers.ModelSerializer):
 class CommerceListingSerializer(serializers.ModelSerializer):
 	supplier_name = serializers.CharField(source='supplier.business_name', read_only=True)
 	photos = CommercePhotoSerializer(many=True, read_only=True)
+	price_minor = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=MAX_MONEY_MINOR)
 	class Meta:
 		model = CommerceListing
 		fields = ('id', 'organization', 'supplier', 'supplier_name', 'kind', 'category', 'title',
@@ -142,7 +144,7 @@ class ListingWriteSerializer(serializers.Serializer):
 	unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all())
 	title = serializers.CharField(max_length=200)
 	description = serializers.CharField(required=False, allow_blank=True, max_length=10000)
-	monthly_rent_minor = serializers.IntegerField(min_value=1)
+	monthly_rent_minor = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_MINOR)
 	currency = serializers.CharField(required=False, default='KES', max_length=3)
 	bedrooms = serializers.IntegerField(required=False, min_value=0, max_value=30)
 	bathrooms = serializers.IntegerField(required=False, min_value=0, max_value=30)
@@ -157,7 +159,7 @@ class ListingWriteSerializer(serializers.Serializer):
 
 class ListingUpdateSerializer(ListingWriteSerializer):
 	title = serializers.CharField(max_length=200, required=False)
-	monthly_rent_minor = serializers.IntegerField(min_value=1, required=False)
+	monthly_rent_minor = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_MINOR, required=False)
 	unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all(), required=False)
 
 

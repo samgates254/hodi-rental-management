@@ -223,7 +223,7 @@ class CrossOrganizationIsolationTests(SecurityWorldMixin, APITestCase):
             response = getattr(self.client, method)(url, body, format='json') if body is not None else getattr(self.client, method)(url)
             self.assertIn(
                 response.status_code,
-                (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+                (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND, status.HTTP_405_METHOD_NOT_ALLOWED),
                 f'{method.upper()} {url} leaked or mutated ({response.status_code})',
             )
         self.property_b.refresh_from_db()
@@ -269,12 +269,12 @@ class CrossOrganizationIsolationTests(SecurityWorldMixin, APITestCase):
         readable = self.client.get(f'/api/v1/billing/payments/{self.rent_b.pk}/')
         self.assertEqual(readable.status_code, status.HTTP_200_OK)
         deleted = self.client.delete(f'/api/v1/billing/payments/{self.rent_b.pk}/')
-        self.assertEqual(deleted.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(deleted.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
         moved = self.client.patch(f'/api/v1/billing/payments/{self.rent_b.pk}/', {
             'lease': self.lease_a.pk,
             'status': 'PAID',
         }, format='json')
-        self.assertEqual(moved.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(moved.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
         self.rent_b.refresh_from_db()
         self.assertEqual(self.rent_b.lease_id, self.lease_b.pk)
         self.assertEqual(self.rent_b.status, RentPayment.Status.PENDING)
@@ -317,8 +317,16 @@ class RoleBoundaryTests(SecurityWorldMixin, APITestCase):
             'amount_minor': 1000,
             'status': 'PENDING',
         }, format='json')
-        self.assertEqual(rent_log.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(rent_log.data['recorded_by'], self.manager_a.pk)
+        self.assertEqual(rent_log.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertEqual(RentPayment.objects.filter(lease=self.lease_a).count(), 1)
+        manager_manual_receipt = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', {
+            'tenant': self.tenant_a.pk,
+            'amount_cents': 1000,
+            'received_date': '2026-11-01',
+            'method': 'CASH',
+            'reference': 'MANAGER-RECEIPT-DENIED',
+        }, format='json')
+        self.assertEqual(manager_manual_receipt.status_code, status.HTTP_403_FORBIDDEN)
 
         self.auth(self.caretaker_a)
         self.assertEqual(self.client.get('/api/v1/billing/invoices/').status_code, status.HTTP_403_FORBIDDEN)

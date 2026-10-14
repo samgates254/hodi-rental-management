@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
+from rental_os.algorithms.money import MAX_MONEY_MINOR
 
 from .models import (
     OrganizationSubscription,
@@ -108,7 +109,7 @@ class PaymentReviewSerializer(serializers.Serializer):
 
 class EnterpriseInvoiceSerializer(serializers.Serializer):
     organization = serializers.IntegerField(min_value=1)
-    amount_minor = serializers.IntegerField(min_value=1)
+    amount_minor = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_MINOR)
     unit_limit = serializers.IntegerField(min_value=1)
     reason = serializers.CharField(min_length=8, max_length=1000, trim_whitespace=True)
 

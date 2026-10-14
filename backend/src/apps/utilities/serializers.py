@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.properties.models import Property, Unit
+from rental_os.algorithms.money import MAX_MONEY_MINOR
 
 from .models import UtilityAccount, UtilityBill
 
@@ -30,6 +31,7 @@ class UtilityAccountSerializer(serializers.ModelSerializer):
 
 
 class UtilityBillSerializer(serializers.ModelSerializer):
+    amount_minor = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
     account_name = serializers.SerializerMethodField()
     property_name = serializers.CharField(source='account.property.name', read_only=True)
     unit_name = serializers.CharField(source='account.unit.name', read_only=True, default='')

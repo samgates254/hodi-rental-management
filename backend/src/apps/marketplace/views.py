@@ -12,6 +12,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from common.permissions import OrganizationRolePermission, organization_ids_for_resource, user_can_access_organization_resource
+from common.rental_dates import rental_business_date
 from application.services.audit import record_audit
 
 from apps.accounts.models import AccountProfile
@@ -108,11 +109,11 @@ class CommerceOrderViewSet(viewsets.ModelViewSet):
 			Q(requested_by=self.request.user) | Q(listing__organization_id__in=ids)).distinct()
 	def create(self, request, *args, **kwargs):
 		from apps.leases.models import Lease
-		from django.utils import timezone
 		from rest_framework.exceptions import PermissionDenied
 		try: tenant = request.user.tenant_record
 		except Exception as error: raise PermissionDenied('An active tenant account is required to place a request.') from error
-		if not tenant.is_active or not Lease.objects.filter(tenant=tenant, status='ACTIVE', start_date__lte=timezone.localdate()).filter(Q(end_date__isnull=True)|Q(end_date__gte=timezone.localdate())).exists():
+		today = rental_business_date()
+		if not tenant.is_active or not Lease.objects.filter(tenant=tenant, status='ACTIVE', start_date__lte=today).filter(Q(end_date__isnull=True)|Q(end_date__gte=today)).exists():
 			raise PermissionDenied('An active tenancy is required to place a request.')
 		serializer = self.get_serializer(data=request.data)
 		serializer.is_valid(raise_exception=True)
