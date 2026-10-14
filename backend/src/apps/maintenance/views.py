@@ -24,6 +24,7 @@ from .serializers import (
 	MaintenanceIssueCreateSerializer,
 	MaintenanceIssueSerializer,
 	MaintenanceIssueUpdateSerializer,
+	create_issue_attachments,
 )
 
 
@@ -132,12 +133,13 @@ class MaintenanceIssueViewSet(
 	def add_update(self, request, pk=None):
 		issue = self.get_object()
 
-		update_serializer = MaintenanceIssueUpdateSerializer(data=request.data)
+		update_serializer = MaintenanceIssueUpdateSerializer(data=request.data, context={'issue': issue})
 		update_serializer.is_valid(raise_exception=True)
 		values = update_serializer.validated_data
 		note = values.get('note', '')
 		new_status = values.get('status')
-		if not note and new_status is None:
+		attachments = values.pop('attachments', [])
+		if not note and new_status is None and not attachments:
 			raise serializers.ValidationError('Provide a note, a status, or both.')
 		is_tenant = issue.tenant.user_id == request.user.pk and issue.tenant.is_active
 		if is_tenant:
@@ -172,6 +174,7 @@ class MaintenanceIssueViewSet(
 			status=new_status,
 			note=note,
 		)
+		create_issue_attachments(issue, attachments)
 		if operational_request is not None and note:
 			MaintenanceComment.objects.create(request=operational_request, author=request.user, body=note)
 		return Response(

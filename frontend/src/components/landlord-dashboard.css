@@ -161,7 +161,7 @@
 
 .landlord-org-select select {
   min-width: 170px;
-  height: 40px;
+  height: 44px;
   padding: 0 30px 0 12px;
 }
 
@@ -213,7 +213,7 @@
 }
 
 .landlord-icon-button {
-  width: 40px;
+  width: 44px;
   border-color: var(--landlord-line);
   background: var(--hodi-surface);
   color: var(--landlord-ink);
@@ -659,7 +659,7 @@
 .landlord-form-grid input,
 .landlord-form-grid select,
 .landlord-form-grid textarea {
-  height: 40px;
+  height: 44px;
   padding: 0 11px;
   border: 1px solid var(--landlord-line);
   border-radius: 8px;
@@ -972,7 +972,7 @@
   }
 
   .landlord-topbar-actions .landlord-button--quiet {
-    width: 40px;
+    width: 44px;
     overflow: hidden;
     padding: 0;
     font-size: 0;
@@ -1041,7 +1041,7 @@
   }
 
   .landlord-section-heading .landlord-button {
-    min-height: 37px;
+    min-height: 44px;
     padding: 0 10px;
     font-size: 11px;
     white-space: nowrap;

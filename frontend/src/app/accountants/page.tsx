@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { clientApi, ClientApiError, fetchMe, logout, type MeResponse } from "@/lib/clientApi";
 import { formatMinor } from "@/lib/money";
+<<<<<<< HEAD
 import { Logo } from "@/components/layout/Logo";
+=======
+import { useAggregatedBalances } from "@/hooks/useAggregatedBalances";
+>>>>>>> 51ad35e (update all code)
 
 type Invite = {
   id: number;
@@ -49,6 +53,8 @@ export default function AccountantWorkspace() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [org, setOrg] = useState("");
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -114,6 +120,11 @@ export default function AccountantWorkspace() {
   const clients = me?.memberships.filter((membership) => membership.role === "ACCOUNTANT" && membership.is_active) || [];
   const pending = invites.filter((invite) => invite.status === "PENDING" && invite.can_accept);
   const currency = invoices[0]?.currency || "KES";
+  const selectedClient = clients.find((membership) => String(membership.organization) === org);
+  const matchingClients = clients.filter((membership) =>
+    membership.organization_name.toLocaleLowerCase().includes(clientSearch.trim().toLocaleLowerCase()),
+  );
+  const totalBalanceCents = useAggregatedBalances(org, invoices);
 
   return (
     <main className="hodi-record">
@@ -139,6 +150,7 @@ export default function AccountantWorkspace() {
         <p className="hodi-record-lead">
           Client access is granted by an organisation owner and can be revoked at any time. Figures below are recorded invoices and payments only.
         </p>
+        {selectedClient && <p className="hodi-record-note" aria-live="polite">Total balance: <strong>{formatMinor(totalBalanceCents, currency)}</strong></p>}
         {error && <p className="hodi-record-alert" role="alert">{error}</p>}
         {loading && <p className="hodi-record-note" role="status">Loading client access…</p>}
 
@@ -155,6 +167,7 @@ export default function AccountantWorkspace() {
 
         {clients.length > 0 && (
           <>
+<<<<<<< HEAD
             <label>
               Client organisation
               <select value={org} onChange={(event) => setOrg(event.target.value)}>
@@ -164,6 +177,59 @@ export default function AccountantWorkspace() {
               </select>
             </label>
             <section id="overview" className="hodi-record-stats" aria-label="Invoice totals" aria-busy={loading}>
+=======
+            <div className="relative max-w-xl">
+              <label className="block text-sm font-medium" htmlFor="accountant-client-search">Client organisation</label>
+              <input
+                id="accountant-client-search"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={clientPickerOpen}
+                aria-controls="accountant-client-options"
+                aria-activedescendant={undefined}
+                autoComplete="off"
+                className="mt-1 min-h-11 w-full rounded border border-border bg-surface px-3 text-base"
+                placeholder={selectedClient?.organization_name ?? "Search client organisations"}
+                value={clientSearch}
+                onFocus={() => setClientPickerOpen(true)}
+                onChange={(event) => { setClientSearch(event.target.value); setClientPickerOpen(true); }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setClientPickerOpen(false);
+                  if (event.key === "Enter" && matchingClients[0]) {
+                    event.preventDefault();
+                    setInvoices([]);
+                    setPayments([]);
+                    setOrg(String(matchingClients[0].organization));
+                    setClientSearch("");
+                    setClientPickerOpen(false);
+                  }
+                }}
+              />
+              {clientPickerOpen && matchingClients.length > 0 && (
+                <ul id="accountant-client-options" role="listbox" className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded border border-border bg-surface p-1 shadow-lg">
+                  {matchingClients.map((membership) => (
+                    <li key={membership.organization} role="option" aria-selected={String(membership.organization) === org}>
+                      <button
+                        type="button"
+                        className="min-h-11 w-full rounded px-3 text-left text-sm hover:bg-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+                        onClick={() => {
+                          setInvoices([]);
+                          setPayments([]);
+                          setOrg(String(membership.organization));
+                          setClientSearch("");
+                          setClientPickerOpen(false);
+                        }}
+                      >
+                        {membership.organization_name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {clientPickerOpen && matchingClients.length === 0 && <p className="hodi-record-note" role="status">No matching organisations.</p>}
+            </div>
+            <section className="hodi-record-stats" aria-label="Invoice totals">
+>>>>>>> 51ad35e (update all code)
               <article className="hodi-record-stat"><span>Invoices</span><strong>{invoices.length}</strong></article>
               <article className="hodi-record-stat"><span>Invoiced</span><strong>{formatMinor(sum(invoices, "total_cents"), currency)}</strong></article>
               <article className="hodi-record-stat"><span>Paid</span><strong>{formatMinor(sum(invoices, "paid_cents"), currency)}</strong></article>

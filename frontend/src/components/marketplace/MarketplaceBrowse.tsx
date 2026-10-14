@@ -37,7 +37,7 @@ function BrowseListingCard({ listing }: { listing: PublicListing }) {
     <li>
       <Link
         href={`/marketplace/${listing.id}`}
-        className="group block overflow-hidden border border-border bg-surface transition duration-200 hover:-translate-y-0.5"
+        className="group block overflow-hidden border border-emerald-700 bg-surface transition duration-200 hover:-translate-y-0.5"
       >
         <div className="relative aspect-[16/10] overflow-hidden bg-soft-teal">
           {photo && !failed ? (

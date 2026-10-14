@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "./ui/Button";
 
@@ -18,8 +19,32 @@ export default function ReportIssueModal({
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+async function compressImage(file: File): Promise<File> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const compressed = await new Promise<Blob | null>(resolve => {
+      canvas.toBlob(resolve, "image/jpeg", 0.82);
+    });
+    if (!compressed || compressed.size >= file.size) return file;
+    return new File([compressed], file.name.replace(/\.[^.]+$/, "") + ".jpg", {
+      type: "image/jpeg",
+      lastModified: file.lastModified,
+    });
+  } catch {
+    return file;
+  }
+}
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [isPreparingPhotos, setIsPreparingPhotos] = useState(false);
 
   useEffect(() => {
     const urls = attachments.map(file => URL.createObjectURL(file));
@@ -27,7 +52,7 @@ export default function ReportIssueModal({
     return () => urls.forEach(url => URL.revokeObjectURL(url));
   }, [attachments]);
 
-  function addAttachments(fileList: FileList | null) {
+  async function addAttachments(fileList: FileList | null) {
     if (!fileList?.length) return;
     const selected = Array.from(fileList);
     if (attachments.length + selected.length > MAX_ATTACHMENTS) {
@@ -52,7 +77,15 @@ export default function ReportIssueModal({
       return;
     }
     setError("");
-    setAttachments(current => [...current, ...selected]);
+    setIsPreparingPhotos(true);
+    try {
+      const prepared = await Promise.all(selected.map(file =>
+        file.type.startsWith("image/") ? compressImage(file) : file,
+      ));
+      setAttachments(current => [...current, ...prepared]);
+    } finally {
+      setIsPreparingPhotos(false);
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -127,51 +160,54 @@ export default function ReportIssueModal({
           <fieldset className="portal-issue-media">
             <legend>Photos and videos <span className="portal-field-optional">(optional, up to 5)</span></legend>
             <div className="portal-issue-media-actions">
-              <label className="portal-media-button">
-                Take photo
+              <label className="portal-media-button min-h-14 w-full justify-center text-sm md:w-auto">
+                  Take photo
                 <input
                   type="file"
                   accept="image/*"
                   capture="environment"
+                  inputMode="none"
                   onChange={event => {
-                    addAttachments(event.currentTarget.files);
+                    void addAttachments(event.currentTarget.files);
                     event.currentTarget.value = "";
                   }}
                 />
               </label>
-              <label className="portal-media-button">
+              <label className="portal-media-button min-h-11 w-full justify-center md:w-auto">
                 Record video
                 <input
                   type="file"
                   accept="video/*"
                   capture="environment"
                   onChange={event => {
-                    addAttachments(event.currentTarget.files);
+                    void addAttachments(event.currentTarget.files);
                     event.currentTarget.value = "";
                   }}
                 />
               </label>
-              <label className="portal-media-button">
+              <label className="portal-media-button min-h-11 w-full justify-center md:w-auto">
                 Choose files
                 <input
                   type="file"
                   accept="image/*,video/*"
+                  inputMode="none"
                   multiple
                   onChange={event => {
-                    addAttachments(event.currentTarget.files);
+                    void addAttachments(event.currentTarget.files);
                     event.currentTarget.value = "";
                   }}
                 />
               </label>
             </div>
-            <small className="portal-field-optional">Photos up to 10 MB each; videos up to 50 MB each.</small>
+            <small className="portal-field-optional">Photos are compressed before upload. Select multiple files to add several at once; photos up to 10 MB each and videos up to 50 MB each.</small>
+            {isPreparingPhotos && <small role="status">Preparing photos…</small>}
             {attachments.length > 0 && (
               <div className="portal-issue-media-list">
                 {attachments.map((file, index) => (
                   <div className="portal-issue-media-item" key={`${file.name}-${file.lastModified}-${index}`}>
                     {file.type.startsWith("video/")
                       ? <video src={previews[index]} controls preload="metadata" aria-label={`Preview ${file.name}`} />
-                      : <img src={previews[index]} alt={`Preview ${file.name}`} />}
+                      : <Image src={previews[index]} alt={`Preview ${file.name}`} unoptimized width={500} height={360} />}
                     <span title={file.name}>{file.name}</span>
                     <button
                       type="button"
@@ -189,8 +225,8 @@ export default function ReportIssueModal({
           {error && <p className="dashboard-form-error" role="alert">{error}</p>}
           <div className="portal-issue-actions">
             <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Submitting…" : "Submit request"}
+            <Button type="submit" disabled={isSubmitting || isPreparingPhotos}>
+              {isSubmitting ? "Submitting…" : isPreparingPhotos ? "Preparing photos…" : "Submit request"}
             </Button>
           </div>
         </form>

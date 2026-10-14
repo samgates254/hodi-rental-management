@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { clientApi } from "@/lib/clientApi";
 
@@ -59,7 +60,7 @@ function MaintenanceAttachmentItem({ attachment }: { attachment: MaintenanceAtta
     />
   ) : (
     <a href={source} target="_blank" rel="noreferrer" aria-label={`Open ${attachment.file_name}`}>
-      <img src={source} alt={attachment.file_name} loading="lazy" />
+      <Image src={source} alt={attachment.file_name} loading="lazy" unoptimized width={1200} height={800} />
     </a>
   );
 }

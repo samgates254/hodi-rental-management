@@ -119,7 +119,7 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
                   </ul>
                 )}
               </div>
-              <aside className="h-fit rounded-2xl border border-border bg-surface p-5 shadow-soft">
+              <aside className="h-fit rounded-2xl border border-emerald-700 bg-surface p-5 shadow-soft">
                 <h2 className="text-xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>Ask about this home</h2>
                 <p className="mt-2 text-sm leading-relaxed text-text-secondary">Your contact details go to the agent or property organization managing the listing. A viewing request is not a booking.</p>
                 <form className="mt-4 space-y-3" onSubmit={event => void sendInquiry(event)}>

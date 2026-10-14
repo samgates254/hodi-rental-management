@@ -193,10 +193,10 @@ export default function StatementPanel() {
           </p>
           {statement.period.note ? <p className="statement-meta">{statement.period.note}</p> : null}
           <div className="statement-figures">
-            <div><small>Current balance</small><strong>{kes(balance)}</strong></div>
+            <div><small>Balance</small><strong>{kes(balance)}</strong></div>
             <div><small>Charges in period</small><strong>{kes(statement.period_charges_cents)}</strong></div>
             <div><small>Payments in period</small><strong>{kes(statement.period_payments_cents)}</strong></div>
-            <div><small>Overdue</small><strong>{kes(statement.overdue_cents)}</strong></div>
+            <div><small>Amount Due</small><strong>{kes(statement.outstanding_cents)}</strong></div>
             <div><small>Unapplied credit</small><strong>{kes(statement.credit_cents)}</strong></div>
           </div>
           {statement.lines.length === 0 ? (

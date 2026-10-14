@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
 import { clientApi } from "@/lib/clientApi";
@@ -9,6 +10,7 @@ import MaintenanceAttachments, { type MaintenanceAttachment } from "./Maintenanc
 import MaintenanceRequestsPanel from "./ops/MaintenanceRequestsPanel";
 import NotificationBell from "./ops/NotificationBell";
 import ThemeToggle from "@/components/theme/ThemeToggle";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import "./caretaker-dashboard.css";
 
 type OrganizationMembership = {
@@ -130,6 +132,17 @@ export default function CaretakerDashboard() {
   const [issueSearch, setIssueSearch] = useState("");
   const [paymentSearch, setPaymentSearch] = useState("");
   const [updatingIssueId, setUpdatingIssueId] = useState<string | null>(null);
+  const [evidenceFiles, setEvidenceFiles] = useState<Record<string, File[]>>({});
+  const [evidencePreviews, setEvidencePreviews] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    const previews = Object.fromEntries(Object.entries(evidenceFiles).map(([issueId, files]) => [
+      issueId,
+      files.map(file => URL.createObjectURL(file)),
+    ]));
+    setEvidencePreviews(previews);
+    return () => Object.values(previews).flat().forEach(url => URL.revokeObjectURL(url));
+  }, [evidenceFiles]);
 
   useEffect(() => {
     const token = sessionStorage.getItem("hodi_api_token");
@@ -207,14 +220,22 @@ export default function CaretakerDashboard() {
     event: FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const note = String(form.get("note") ?? "").trim();
     const status = String(form.get("status") ?? issue.status);
-    if (!note && status === issue.status) return;
+    const attachments = form.getAll("attachments").filter(
+      (entry): entry is File => entry instanceof File && entry.size > 0,
+    );
+    if (!note && status === issue.status && attachments.length === 0) return;
+    form.delete("attachments");
+    attachments.forEach(file => form.append("attachments", file));
     setUpdatingIssueId(String(issue.id));
     setPageError("");
     try {
-      await clientApi.post(`/api/v1/maintenance/issues/${issue.id}/updates/`, { status, note });
+      await clientApi.post(`/api/v1/maintenance/issues/${issue.id}/updates/`, form);
+      formElement.reset();
+      setEvidenceFiles(current => ({ ...current, [String(issue.id)]: [] }));
       await loadDashboard();
     } catch (error) {
       setPageError(requestError(error, "The issue couldn’t be updated."));
@@ -292,7 +313,7 @@ export default function CaretakerDashboard() {
   }
 
   return (
-    <div className="caretaker-app">
+    <div className="caretaker-app [&_.ops-grid]:grid-cols-1 md:[&_.ops-grid]:grid-cols-2">
       <aside className="caretaker-sidebar">
         <Logo size={36} className="caretaker-sidebar-logo" wordmarkClassName="text-white" />
         <p className="caretaker-sidebar-label">CARETAKER WORKSPACE</p>
@@ -411,10 +432,11 @@ export default function CaretakerDashboard() {
                       ))}
                     </ol>
                   ) : null}
-                  {issue.operational_request_id ? (
+                  {issue.operational_request_id && (
                     <p className="caretaker-issue-description">This repair uses the unified work order. Triage, assignment and verification are managed in the repair queue below.</p>
-                  ) : issue.status !== "RESOLVED" && (
-                    <form className="caretaker-update-form" onSubmit={event => void updateIssue(issue, event)}>
+                  )}
+                  <form className="caretaker-update-form" onSubmit={event => void updateIssue(issue, event)}>
+                    {!issue.operational_request_id && issue.status !== "RESOLVED" && (
                       <label>
                         Update status
                         <select name="status" defaultValue={issue.status}>
@@ -423,15 +445,49 @@ export default function CaretakerDashboard() {
                           <option value="RESOLVED">Resolved</option>
                         </select>
                       </label>
-                      <label className="caretaker-note-field">
-                        Add a note
-                        <input name="note" maxLength={2000} placeholder="Add an update for this issue…" />
-                      </label>
-                      <button type="submit" disabled={updatingIssueId === String(issue.id)}>
-                        {updatingIssueId === String(issue.id) ? "Saving…" : "Save update"}
-                      </button>
-                    </form>
-                  )}
+                    )}
+                    <label className="caretaker-note-field">
+                      Add a note
+                      <input name="note" maxLength={2000} placeholder="Add an update for this issue…" />
+                    </label>
+                    <label className="caretaker-evidence-field">
+                      Photo evidence
+                      <input
+                        type="file"
+                        name="attachments"
+                        accept="image/*"
+                        capture="environment"
+                        multiple
+                        onChange={event => {
+                          const selected = Array.from(event.currentTarget.files ?? []);
+                          if ((issue.attachments?.length ?? 0) + selected.length > 5) {
+                            setPageError("An issue can have no more than five photos or videos.");
+                            event.currentTarget.value = "";
+                            return;
+                          }
+                          setPageError("");
+                          setEvidenceFiles(current => ({ ...current, [String(issue.id)]: selected }));
+                        }}
+                      />
+                    </label>
+                    {(evidencePreviews[String(issue.id)] ?? []).length > 0 && (
+                      <div className="caretaker-evidence-previews" aria-label="Photo evidence previews">
+                        {(evidencePreviews[String(issue.id)] ?? []).map((preview, index) => (
+                          <Image
+                            key={`${preview}-${index}`}
+                            src={preview}
+                            alt={`Photo evidence ${index + 1}`}
+                            width={72}
+                            height={72}
+                            unoptimized
+                          />
+                        ))}
+                      </div>
+                    )}
+                    <button className="caretaker-sticky-submit" type="submit" disabled={updatingIssueId === String(issue.id)}>
+                      {updatingIssueId === String(issue.id) ? "Saving…" : "Save update"}
+                    </button>
+                  </form>
                 </article>
               ))}
             </div>
@@ -482,24 +538,20 @@ export default function CaretakerDashboard() {
           {isLoading ? (
             <div className="caretaker-empty"><span className="caretaker-spinner" />Loading rent status…</div>
           ) : visiblePayments.length ? (
-            <div className="caretaker-table-wrap">
-              <table>
-                <thead><tr><th>Resident</th><th>Unit</th><th>Period / lease</th><th>Amount</th><th>Due date</th><th>Status</th><th>Paid on</th></tr></thead>
-                <tbody>
-                  {visiblePayments.map(payment => (
-                    <tr key={payment.id}>
-                      <td><strong>{payment.tenant_name ?? "Resident"}</strong></td>
-                      <td>{payment.unit_name ?? "—"}</td>
-                      <td>{payment.lease_reference ?? "Rent"}</td>
-                      <td>{formatMoney(payment.amount_minor)}</td>
-                      <td>{formatDate(payment.due_date)}</td>
-                      <td><span className={`caretaker-status status-${payment.status.toLowerCase()}`}>{humanize(payment.status)}</span></td>
-                      <td>{formatDate(payment.paid_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ResponsiveTable
+              caption="Rent payment records"
+              rows={visiblePayments}
+              getRowKey={payment => payment.id}
+              columns={[
+                { key: "resident", header: "Resident", render: payment => <strong>{payment.tenant_name ?? "Resident"}</strong> },
+                { key: "unit", header: "Unit", render: payment => payment.unit_name ?? "—" },
+                { key: "lease", header: "Period / lease", render: payment => payment.lease_reference ?? "Rent" },
+                { key: "amount", header: "Amount", render: payment => formatMoney(payment.amount_minor) },
+                { key: "due", header: "Due date", render: payment => formatDate(payment.due_date) },
+                { key: "status", header: "Status", render: payment => <span className={`caretaker-status status-${payment.status.toLowerCase()}`}>{humanize(payment.status)}</span> },
+                { key: "paid", header: "Paid on", render: payment => formatDate(payment.paid_at), mobileHidden: true },
+              ]}
+            />
           ) : (
             <div className="caretaker-empty">
               {payments.length ? "No payment records match your search and filter." : "There are no rent-payment records for this organization yet."}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { clientApi } from "@/lib/clientApi";
+import { useRequiresApproval } from "@/hooks/useRequiresApproval";
 import { apiErrorMessage, asList, formatWhen, getList, humanize, type ListPayload } from "@/lib/opsApi";
 import { MAINTENANCE_ASSIGNEE_STAFF_ROLES } from "@/lib/organizationRoles";
 import "./ops.css";
@@ -70,9 +71,10 @@ function quotationLineMinor(line: QuotationDraftLine): bigint {
 }
 
 function formatMinorAmount(value: bigint) {
-  const whole = value / BigInt(100);
-  const cents = String(value % BigInt(100)).padStart(2, "0");
-  return `KES ${whole.toLocaleString("en-KE")}.${cents}`;
+  return new Intl.NumberFormat("en-KE", {
+    style: "currency",
+    currency: "KES",
+  }).format(Number(value) / 100);
 }
 
 function makeIdempotencyKey() {
@@ -405,6 +407,7 @@ export default function MaintenanceRequestsPanel({
   }, [loadSupplementalData, selected?.completion?.id, selectedId]);
 
   const latestQuotation = selected?.quotations?.[0] ?? null;
+  const requiresApproval = useRequiresApproval(latestQuotation?.status);
   const currentApprovedMaterialLines = latestQuotation?.status === "APPROVED"
     ? (latestQuotation.lines ?? []).filter(line => line.category === "MATERIAL")
     : [];
@@ -781,7 +784,7 @@ export default function MaintenanceRequestsPanel({
         : 1;
 
   return (
-    <section className="ops-panel" id="maintenance-requests">
+    <section className="ops-panel [&_.ops-form-actions]:sticky [&_.ops-form-actions]:bottom-0 [&_.ops-form-actions]:z-10 [&_.ops-form-actions]:bg-[var(--hodi-surface)] [&_.ops-form-actions]:p-2 md:[&_.ops-form-actions]:static md:[&_.ops-form-actions]:bg-transparent md:[&_.ops-form-actions]:p-0" id="maintenance-requests">
       <div className="ops-heading">
         <div>
           <span className="ops-kicker">MAINTENANCE</span>
@@ -862,7 +865,7 @@ export default function MaintenanceRequestsPanel({
         </div>
       )}
       {selected && (
-        <div className="ops-detail">
+        <div className="ops-detail border-l-4 border-sky-700">
           <div className="ops-heading">
             <div>
               <span className="ops-kicker">REQUEST {selected.id}</span>
@@ -975,6 +978,9 @@ export default function MaintenanceRequestsPanel({
           {(canWrite || selected.work_order?.assigned_to_me) && (
             <section className="ops-form" aria-labelledby="job-materials-heading">
               <h3 id="job-materials-heading">Job materials and recorded costs</h3>
+              {selected.work_order?.assigned_to_me && requiresApproval && (
+                <p className="ops-pill is-hot" role="status">Awaiting Supervisor Approval</p>
+              )}
               {purchaseLoading && <p className="ops-status">Loading purchase and receipt records…</p>}
               {purchaseError && <p className="ops-alert" role="alert">{purchaseError}</p>}
               {purchaseNotice && <p className="ops-status" role="status">{purchaseNotice}</p>}
@@ -1044,7 +1050,10 @@ export default function MaintenanceRequestsPanel({
                 </form>
               )}
               {materialPurchases?.can_record_purchase && latestQuotation && latestQuotation.status !== "APPROVED" && (
-                <p className="ops-note">Purchases are paused until the latest quotation revision is approved.</p>
+                <div>
+                  <p className="ops-note">Purchases are paused until the latest quotation revision is approved.</p>
+                  <button type="button" className="ops-button" disabled>Log materials</button>
+                </div>
               )}
             </section>
           )}
@@ -1063,15 +1072,19 @@ export default function MaintenanceRequestsPanel({
             </form>
           )}
           {selected.work_order?.assigned_to_me && selected.work_order.status === "ASSIGNED" && (selected.work_order.assignment_status === "ACCEPTED" || selected.work_order.assignment_status === "NOT_REQUIRED" || !selected.work_order.assignment_status) && (
+            <>
+            {requiresApproval && <p className="ops-pill is-hot" role="status">Awaiting Supervisor Approval</p>}
             <div className="ops-form-actions">
-              <button type="button" className="ops-button ops-button--primary" disabled={busy} onClick={() => void startWork()}>
+              <button type="button" className="ops-button ops-button--primary" disabled={busy || requiresApproval} onClick={() => void startWork()}>
                 {busy ? "Saving…" : "Start assigned work"}
               </button>
             </div>
+            </>
           )}
           {selected.work_order?.assigned_to_me && selected.work_order.status === "IN_PROGRESS" && (
             <form className="ops-form" onSubmit={event => void submitCompletion(event)}>
               <h3>Submit repair for verification</h3>
+              {requiresApproval && <p className="ops-pill is-hot" role="status">Awaiting Supervisor Approval</p>}
               <label>Diagnosis<input name="diagnosis" required /></label>
               <div className="ops-grid">
                 <label>Failure category<input name="failure_category" required maxLength={50} /></label>
@@ -1104,7 +1117,7 @@ export default function MaintenanceRequestsPanel({
                 <label>Unit<input name="unit" defaultValue="piece" maxLength={30} /></label>
                 <label>Unit cost (KES cents)<input name="unit_cost_cents" type="number" min={0} step={1} defaultValue={0} /></label>
               </div>
-              <div className="ops-form-actions"><button className="ops-button ops-button--primary" disabled={busy}>{busy ? "Saving…" : "Submit completion"}</button></div>
+              <div className="ops-form-actions"><button className="ops-button ops-button--primary" disabled={busy || requiresApproval}>{busy ? "Saving…" : "Submit completion"}</button></div>
             </form>
           )}
           {selected.work_order?.assigned_to_me && !finished && selected.work_order.assignment_status !== "PENDING" && !selected.quotations?.some(quote => quote.status === "PENDING") && (
