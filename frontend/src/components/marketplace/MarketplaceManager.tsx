@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, asList } from "@/lib/opsApi";
@@ -38,7 +39,7 @@ function AuthThumb({ url, alt }: { url: string; alt: string }) {
     };
   }, [url]);
   if (!src) return <span role={failed ? "img" : "status"} aria-label={failed ? `Photo unavailable: ${alt}` : `Loading photo: ${alt}`} style={{ display: "inline-grid", width: 64, height: 48, placeItems: "center", borderRadius: 6, background: "var(--hodi-surface-raised)", color: "var(--hodi-muted)", fontSize: 10 }}>{failed ? "Unavailable" : "Loading…"}</span>;
-  return <img src={src} alt={alt} width={64} height={48} loading="lazy" decoding="async" style={{ width: 64, height: 48, objectFit: "cover", borderRadius: 6 }} />;
+  return <Image src={src} alt={alt} width={64} height={48} loading="lazy" decoding="async" unoptimized style={{ width: 64, height: 48, objectFit: "cover", borderRadius: 6 }} />;
 }
 
 export default function MarketplaceManager({

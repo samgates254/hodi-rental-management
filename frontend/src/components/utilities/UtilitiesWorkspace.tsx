@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ClientApiError, clientApi } from "@/lib/clientApi";
 import { formatMinor, shillingsToCents } from "@/lib/money";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 
 type UtilityAccount = {
   id: number;
@@ -220,9 +221,23 @@ export default function UtilitiesWorkspace({
       </form>}
 
       {loading ? <p className="ops-status" role="status">Loading utility records…</p> : bills.length ? (
-        <div className="ops-table-wrap"><table className="ops-table"><thead><tr><th>Service</th><th>Property / unit</th><th>Period</th><th>Responsible</th><th>Bill amount</th><th>Reading</th><th>Due</th></tr></thead><tbody>
-          {bills.map(bill => <tr key={bill.id}><td>{serviceName(bill.service_type)}<br /><span className="ops-note">{bill.account_name}</span></td><td>{bill.property_name}{bill.unit_name ? ` · ${bill.unit_name}` : ""}</td><td>{bill.period_start} – {bill.period_end}</td><td>{bill.responsible_party === "LANDLORD" ? "Landlord" : "Tenant"}</td><td>{money(bill.amount_minor, bill.currency)}</td><td>{bill.reading_start != null && bill.reading_end != null ? `${bill.reading_start} → ${bill.reading_end} ${bill.reading_unit}` : "Not recorded"}</td><td>{bill.due_date ?? "—"}</td></tr>)}
-        </tbody></table></div>
+        <ResponsiveTable
+          caption="Utility billing periods"
+          rows={bills}
+          getRowKey={bill => bill.id}
+          mobileAccordion
+          mobileColumns={["period", "units", "amount", "status"]}
+          columns={[
+            { key: "service", header: "Service", render: bill => <><strong>{serviceName(bill.service_type)}</strong><br /><span className="ops-note">{bill.account_name}</span></> },
+            { key: "property", header: "Property / unit", render: bill => `${bill.property_name}${bill.unit_name ? ` · ${bill.unit_name}` : ""}` },
+            { key: "period", header: "Period", render: bill => `${bill.period_start} – ${bill.period_end}` },
+            { key: "responsible", header: "Responsible", render: bill => bill.responsible_party === "LANDLORD" ? "Landlord" : "Tenant", mobileHidden: true },
+            { key: "amount", header: "Amount (KES)", render: bill => money(bill.amount_minor, bill.currency) },
+            { key: "units", header: "Units", render: bill => bill.reading_start != null && bill.reading_end != null ? `${(Number(bill.reading_end) - Number(bill.reading_start)).toLocaleString("en-KE", { maximumFractionDigits: 3 })} ${bill.reading_unit}` : "Not recorded" },
+            { key: "due", header: "Due", render: bill => bill.due_date ?? "—", mobileHidden: true },
+            { key: "status", header: "Status", render: () => <span className="ops-pill">Recorded</span> },
+          ]}
+        />
       ) : <div className="ops-empty"><strong>No utility bills recorded</strong><p>Record provider bills and readings as they arrive. No usage or payment is assumed.</p></div>}
       {!!accounts.length && <details className="ops-disclosure"><summary>Service accounts ({accounts.length})</summary><ul>{accounts.map(account => <li key={account.id}>{account.property_name}{account.unit_name ? ` · ${account.unit_name}` : ""} — {serviceName(account.service_type)} · {account.provider_name} · {account.responsible_party === "LANDLORD" ? "Landlord" : "Tenant"} responsible</li>)}</ul></details>}
       {!canWrite && <p className="ops-note">Accountant access is read only. Contact an organisation owner or property manager to record changes.</p>}

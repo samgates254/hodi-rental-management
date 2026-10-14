@@ -21,3 +21,6 @@ backend/.env.repair-backup-*
 *.deb
 
 /backend/.env.save
+
+# Local Python virtual environment
+backend/.venv/

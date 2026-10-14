@@ -286,11 +286,17 @@ class MaintenanceIssueApiTests(TestCase):
 
 		update_response = self.client.post(
 			f'/api/v1/maintenance/issues/{issue.pk}/updates/',
-			{'status': 'IN_PROGRESS', 'note': 'Assigned an electrician.'},
-			format='json',
+			{
+				'status': 'IN_PROGRESS',
+				'note': 'Assigned an electrician.',
+				'attachments': [SimpleUploadedFile('repair.jpg', b'photo-content', content_type='image/jpeg')],
+			},
+			format='multipart',
 		)
 		self.assertEqual(update_response.status_code, status.HTTP_201_CREATED)
 		self.assertEqual(update_response.data['author_name'], 'caretaker')
+		listed_issue = self.client.get('/api/v1/maintenance/issues/').data[0]
+		self.assertEqual([item['media_type'] for item in listed_issue['attachments']], ['IMAGE'])
 		second_update_response = self.client.post(
 			f'/api/v1/maintenance/issues/{issue.pk}/updates/',
 			{'status': 'RESOLVED', 'note': 'Replaced the bulb.'},

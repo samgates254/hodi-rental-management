@@ -26,7 +26,7 @@ import TenantProfileEditor from "./ops/TenantProfileEditor";
 import TenantWorkStatus from "./ops/TenantWorkStatus";
 import StatementPanel from "./tenant/StatementPanel";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { formatMinor, payableHalfShillings, payableWholeShillings, wholeShillingsToCents } from "@/lib/money";
+import { formatMinor, payableHalfShillings, payableWholeShillings, shillingsToCents, wholeShillingsToCents } from "@/lib/money";
 import "./client-portal.css";
 
 const MARKETPLACE_AVAILABLE = true;
@@ -488,6 +488,13 @@ function isTenancy(value: unknown): value is Tenancy {
   );
 }
 
+function daysUntil(date?: string) {
+  if (!date) return null;
+  const time = new Date(date).getTime();
+  if (!Number.isFinite(time)) return null;
+  return Math.ceil((time - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
+}
+
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -640,7 +647,7 @@ function PropertyCard({
   const rentLabel = property.rent_cents != null
     ? formatMinor(property.rent_cents, "KES", { trailingZeros: false })
     : property.rent != null || property.rent_amount != null
-      ? `KES ${money(property.rent ?? property.rent_amount)}`
+      ? formatMinor(shillingsToCents(String(property.rent ?? property.rent_amount)) ?? 0)
       : "Ask agent";
 
   return (
@@ -823,7 +830,7 @@ function IssueCard({
     <article className="dashboard-issue-card">
       <div className="dashboard-issue-heading">
         {thumbnail ? (
-          <img className="dashboard-issue-thumbnail" src={thumbnail} alt="" loading="lazy" />
+          <Image className="dashboard-issue-thumbnail" src={thumbnail} alt="" loading="lazy" unoptimized width={120} height={120} />
         ) : (
           <div className="dashboard-issue-thumbnail dashboard-issue-thumbnail-empty">
             <Icon name="home" size={21} />
@@ -864,7 +871,7 @@ function IssueCard({
         <div className="portal-issue-gallery">
           {issue.images.map((image, index) => {
             const url = typeof image === "string" ? image : image.image ?? image.url;
-            return url ? <img key={`${url}-${index}`} src={url} alt={`${issue.title ?? "Issue"} photo ${index + 1}`} loading="lazy" /> : null;
+            return url ? <Image key={`${url}-${index}`} src={url} alt={`${issue.title ?? "Issue"} photo ${index + 1}`} loading="lazy" unoptimized width={480} height={320} /> : null;
           })}
         </div>
       )}
@@ -894,7 +901,7 @@ function IssueCard({
                 {event.photos && event.photos.length > 0 && (
                   <span className="portal-event-photos">
                     {event.photos.map((photo, photoIndex) => (
-                      <img key={`${photo}-${photoIndex}`} src={photo} alt={`Update photo ${photoIndex + 1}`} loading="lazy" />
+                      <Image key={`${photo}-${photoIndex}`} src={photo} alt={`Update photo ${photoIndex + 1}`} loading="lazy" unoptimized width={480} height={320} />
                     ))}
                   </span>
                 )}
@@ -1085,7 +1092,7 @@ export default function ClientDashboard() {
     } finally {
       if (requestId === propertyRequestId.current) setIsLoadingProperties(false);
     }
-  }, [amenities, availableNow, bedrooms, location, maxPrice, propertyPage, propertySearch]);
+  }, [amenities, bedrooms, location, maxPrice, propertyPage, propertySearch]);
 
   const loadTenancy = useCallback(async () => {
     setIsLoadingTenancy(true);
@@ -1436,7 +1443,7 @@ export default function ClientDashboard() {
         if (current.status === "SUCCESSFUL") {
           window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);
           setPaymentStage("success");
-          setPageNotice("Payment confirmed. Your rent ledger is being refreshed.");
+          setPageNotice("Payment confirmed. Your rent balance is being refreshed.");
           try {
             const AudioContextConstructor = window.AudioContext;
             if (AudioContextConstructor) {
@@ -1604,7 +1611,7 @@ export default function ClientDashboard() {
     <div className={`client-dashboard portal-layout ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileMenuOpen ? "mobile-menu-open" : ""} ${mobileSearchOpen ? "mobile-search-open" : ""}`}>
       <aside className="portal-sidebar" aria-label="Tenant navigation">
         <Link className="dashboard-brand" href="/" aria-label="Hodi home">
-          <img src="/apple-touch-icon.png" alt="" />
+          <Image src="/apple-touch-icon.png" alt="" width={26} height={26} unoptimized />
           {!sidebarCollapsed && <span>hodi</span>}
         </Link>
         <button
@@ -1800,7 +1807,7 @@ export default function ClientDashboard() {
               </strong>
               <small className="portal-rent-summary-caption">
                 {rentDueCents > 0
-                  ? dueDate ? `Outstanding · due ${formatDate(dueDate)} (${dueLabel})` : "Outstanding balance · due date not available"
+                  ? dueDate ? `Amount due · ${formatDate(dueDate)} (${dueLabel})` : "Amount due · due date not available"
                   : dueDate ? `Next due ${formatDate(dueDate)}${dueInDays !== null ? ` · ${dueLabel}` : ""}` : rentOverviewStatus === "Paid" ? "Your account is up to date" : "Check your latest rent details"}
               </small>
               <Button type="button" onClick={() => scrollToSection("pay-rent")}>
@@ -1903,7 +1910,7 @@ export default function ClientDashboard() {
           {billingError && <div className="dashboard-alert" role="alert">{billingError}<Button type="button" variant="ghost" onClick={() => void loadInvoices()}>Try again</Button></div>}
           <div className="portal-rent-layout">
             <div className="portal-invoice-panel">
-              <div className="portal-panel-heading"><div><small>YOUR RENT LEDGER</small><h3>Outstanding balance</h3></div><span className={outstandingCents > 0 ? "portal-amount-due" : "portal-amount-clear"}>{outstandingCents > 0 ? formatMinor(outstandingCents) : formatMinor(0)}</span></div>
+              <div className="portal-panel-heading"><div><small>YOUR RENT BALANCE</small><h3>Amount due</h3></div><span className={outstandingCents > 0 ? "portal-amount-due" : "portal-amount-clear"}>{outstandingCents > 0 ? formatMinor(outstandingCents) : formatMinor(0)}</span></div>
               {isLoadingInvoices ? <div className="portal-inline-loading"><span className="dashboard-loading-spinner" />Loading your invoices…</div> : billingError ? (
                 <div className="portal-empty-inline"><Icon name="clock" size={20} /><strong>Invoices are unavailable</strong><span>Retry above, or contact your agent to confirm your current balance.</span></div>
               ) : invoices.length ? (
@@ -1914,11 +1921,11 @@ export default function ClientDashboard() {
                     <span className="portal-invoice-select">{PAYMENT_FLOW_AVAILABLE && active && <span />}</span>
                     <span className="portal-invoice-name"><strong>{invoice.month ?? invoice.description ?? "Rent invoice"}</strong><small>Due {formatDate(invoice.due_date)}</small></span>
                     <span className={`portal-invoice-status status-${normalizedStatus(invoice.status) || "pending"}`}>{humanizeStatus(invoice.status ?? "pending")}</span>
-                    <span className="portal-invoice-balance"><strong>Balance due: {formatMinor(balance)}</strong><small>Invoice total: {formatMinor(invoice.amount_cents ?? 0)}</small><small>Amount paid: {formatMinor(invoice.paid_cents ?? 0)}</small></span>
+                    <span className="portal-invoice-balance"><strong>Amount due: {formatMinor(balance)}</strong><small>Invoice total: {formatMinor(invoice.amount_cents ?? 0)}</small><small>Paid: {formatMinor(invoice.paid_cents ?? 0)}</small></span>
                   </button>;
                 })}</div>
               ) : <div className="portal-empty-inline"><Icon name="check" size={20} /><strong>{tenancy ? "No rent invoices yet" : "Add a tenancy to view rent"}</strong><span>When your next invoice is issued, it will show here.</span></div>}
-              {outstandingInvoices.length > 0 && <p className="portal-ledger-note"><Icon name="shield" size={14} />Your rent balance is kept against your tenant ledger.</p>}
+              {outstandingInvoices.length > 0 && <p className="portal-ledger-note"><Icon name="shield" size={14} />Your rent balance is kept with your tenancy records.</p>}
             </div>
             {PAYMENT_FLOW_AVAILABLE ? <form className="portal-payment-card" onSubmit={initiatePayment}>
               <div className="portal-payment-card-heading"><span className="portal-payment-icon"><Icon name="wallet" size={19} /></span><div><small>MAKE A PAYMENT</small><strong>{selectedInvoice?.month ?? selectedInvoice?.description ?? "Select an invoice"}</strong></div></div>
@@ -1935,7 +1942,7 @@ export default function ClientDashboard() {
               </div>
               {paymentMethod === "mpesa" && <label className="portal-phone-field">M-Pesa phone number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="07XX XXX XXX" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} required /><small>We’ll send a secure payment request to this phone.</small></label>}
               {paymentError && <p className="dashboard-form-error" role="alert">{paymentError}</p>}
-              <Button type="submit" disabled={!selectedInvoice || !Number(paymentAmount) || isInitiatingPayment} className="portal-pay-button">{isInitiatingPayment ? "Starting secure payment…" : `Pay KES ${money(paymentAmount)}`}<Icon name="arrow" size={17} /></Button>
+              <Button type="submit" disabled={!selectedInvoice || !Number(paymentAmount) || isInitiatingPayment} className="portal-pay-button">{isInitiatingPayment ? "Starting secure payment…" : `Pay ${formatMinor(wholeShillingsToCents(paymentAmount) ?? 0)}`}<Icon name="arrow" size={17} /></Button>
               <p className="portal-secure-note"><Icon name="shield" size={13} />Encrypted payment · Your details stay protected</p>
             </form> : (
               <div className="portal-payment-unavailable" role="status">

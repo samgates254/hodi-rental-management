@@ -19,8 +19,11 @@ import NotificationBell from "@/components/ops/NotificationBell";
 import SubscriptionPanel from "@/components/SubscriptionPanel";
 import UtilitiesWorkspace from "@/components/utilities/UtilitiesWorkspace";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { formatMinor, shillingsToCents } from "@/lib/money";
+import { shillingsToCents } from "@/lib/money";
 import { rentalBusinessDate } from "@/lib/rentalDate";
+import { CurrencyText } from "@/components/ui/CurrencyText";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import { ORGANIZATION_STAFF_ROLES, staffLoginKindForRole } from "@/lib/organizationRoles";
 import "./landlord-dashboard.css";
 import "@/components/ops/ops.css";
@@ -274,10 +277,6 @@ async function apiRequest<T>(
 
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
-}
-
-function formatMoney(minorUnits: number) {
-  return formatMinor(minorUnits);
 }
 
 function formatDate(value: string | null) {
@@ -947,7 +946,7 @@ export default function LandlordDashboard() {
               </article>
               <article className="landlord-metric-card landlord-metric-card--accent">
                 <span>Monthly rent on active leases</span>
-                <strong>{formatMoney(monthlyRentMinor)}</strong>
+                <strong><CurrencyText amount={monthlyRentMinor / 100} /></strong>
                 <small>{activeLeases.length} active lease{activeLeases.length === 1 ? "" : "s"}</small>
               </article>
             </section>}
@@ -1048,10 +1047,12 @@ export default function LandlordDashboard() {
                   })}
                 </div>
               ) : (
-                <div className="landlord-empty-state">
-                  <h3>No properties yet</h3>
-                  <p>Add a property to start organizing buildings and units in your portfolio.</p>
-                </div>
+                <EmptyState
+                  icon={<Icon name="building" />}
+                  title="No properties yet"
+                  description="Add a property to start organizing buildings and units in your portfolio."
+                  cta={{ label: "Add property", onClick: () => setPropertyFormOpen(true) }}
+                />
               )}
             </section>
 
@@ -1109,26 +1110,17 @@ export default function LandlordDashboard() {
               {isLoadingTeam ? (
                 <div className="landlord-empty-state">Loading team members…</div>
               ) : teamMembers.length ? (
-                <div className="landlord-table-wrap" role="region" aria-label="Organization team" tabIndex={0}>
-                  <table className="landlord-table">
-                    <thead><tr><th>Team member</th><th>Login</th><th>Role</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {teamMembers.map(member => (
-                        <tr key={member.id}>
-                          <td>
-                            <div className="landlord-person">
-                              <span className="landlord-avatar">{member.first_name.slice(0, 1).toUpperCase()}</span>
-                              <span><strong>{`${member.first_name} ${member.last_name}`.trim() || member.username}</strong><small>{member.phone_number || "No phone number"}</small></span>
-                            </div>
-                          </td>
-                          <td><strong>{member.username}</strong><br /><small>{member.email}</small></td>
-                          <td>{displayStatus(member.role)}</td>
-                          <td><span className={`landlord-status ${member.is_active ? "is-active" : ""}`}>{member.is_active ? "Active" : "Inactive"}</span></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <ResponsiveTable
+                  caption="Organization team"
+                  rows={teamMembers}
+                  getRowKey={member => member.id}
+                  columns={[
+                    { key: "member", header: "Team member", render: member => <div className="landlord-person"><span className="landlord-avatar">{member.first_name.slice(0, 1).toUpperCase()}</span><span><strong>{`${member.first_name} ${member.last_name}`.trim() || member.username}</strong><small>{member.phone_number || "No phone number"}</small></span></div> },
+                    { key: "login", header: "Login", render: member => <><strong>{member.username}</strong><br /><small>{member.email}</small></> },
+                    { key: "role", header: "Role", render: member => displayStatus(member.role) },
+                    { key: "status", header: "Status", render: member => <span className={`landlord-status ${member.is_active ? "is-active" : ""}`}>{member.is_active ? "Active" : "Inactive"}</span> },
+                  ]}
+                />
               ) : (
                 <div className="landlord-empty-state">
                   <h3>No team members yet</h3>
@@ -1169,37 +1161,28 @@ export default function LandlordDashboard() {
                 </form>
               )}
               {organizationData.tenants.length ? (
-                <div className="landlord-table-wrap" role="region" aria-label="Organization tenants" tabIndex={0}>
-                  <table className="landlord-table">
-                    <thead><tr><th>Tenant</th><th>Contact</th><th>Lease</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {organizationData.tenants.map(tenant => {
-                        const tenantLeases = organizationData.leases.filter(
-                          lease => String(lease.tenant) === String(tenant.id),
-                        );
-                        const currentLease = tenantLeases.find(lease => lease.status === "ACTIVE");
-                        return (
-                          <tr key={tenant.id}>
-                            <td>
-                              <div className="landlord-person">
-                                <span className="landlord-avatar">{tenant.first_name.slice(0, 1).toUpperCase()}</span>
-                                <span><strong>{tenant.full_name || `${tenant.first_name} ${tenant.last_name}`}</strong><small>{tenant.email || "No email provided"}</small></span>
-                              </div>
-                            </td>
-                            <td>{tenant.phone_number}</td>
-                            <td>{currentLease ? currentLease.reference : tenantLeases.length ? "No active lease" : "Not assigned"}</td>
-                            <td><span className={`landlord-status ${tenant.is_active ? "is-active" : ""}`}>{tenant.is_active ? "Active" : "Inactive"}</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <ResponsiveTable
+                  caption="Organization tenants"
+                  rows={organizationData.tenants}
+                  getRowKey={tenant => tenant.id}
+                  columns={[
+                    { key: "tenant", header: "Tenant", render: tenant => <div className="landlord-person"><span className="landlord-avatar">{tenant.first_name.slice(0, 1).toUpperCase()}</span><span><strong>{tenant.full_name || `${tenant.first_name} ${tenant.last_name}`}</strong><small>{tenant.email || "No email provided"}</small></span></div> },
+                    { key: "contact", header: "Contact", render: tenant => tenant.phone_number },
+                    { key: "lease", header: "Lease", render: tenant => {
+                      const tenantLeases = organizationData.leases.filter(lease => String(lease.tenant) === String(tenant.id));
+                      const currentLease = tenantLeases.find(lease => lease.status === "ACTIVE");
+                      return currentLease ? currentLease.reference : tenantLeases.length ? "No active lease" : "Not assigned";
+                    } },
+                    { key: "status", header: "Status", render: tenant => <span className={`landlord-status ${tenant.is_active ? "is-active" : ""}`}>{tenant.is_active ? "Active" : "Inactive"}</span> },
+                  ]}
+                />
               ) : (
-                <div className="landlord-empty-state">
-                  <h3>No tenant records yet</h3>
-                  <p>Add a tenant here. Lease and unit assignment can be managed through the Hodi API.</p>
-                </div>
+                <EmptyState
+                  icon={<Icon name="people" />}
+                  title="No tenant records yet"
+                  description="Add your first tenant, then create a lease to connect them to a unit."
+                  cta={{ label: "Add tenant", onClick: () => setTenantFormOpen(true) }}
+                />
               )}
             </section>
 
@@ -1264,64 +1247,95 @@ export default function LandlordDashboard() {
                 </form>
               )}
               {organizationData.leases.length ? (
-                <div className="landlord-table-wrap" role="region" aria-label="Lease records" tabIndex={0}>
-                  <table className="landlord-table">
-                    <thead><tr><th>Lease</th><th>Tenant</th><th>Unit</th><th>Monthly rent</th><th>Dates</th><th>Status</th>{canWritePortfolio && !previewMode && <th>Actions</th>}</tr></thead>
-                    <tbody>
-                      {organizationData.leases.map(lease => {
-                        const tenant = organizationData.tenants.find(item => String(item.id) === String(lease.tenant));
-                        const unit = organizationData.units.find(item => String(item.id) === String(lease.unit));
-                        const building = organizationData.buildings.find(item => String(item.id) === String(unit?.building));
-                        const property = organizationData.properties.find(item => String(item.id) === String(building?.property));
-                        return (
-                          <tr key={lease.id}>
-                            <td><strong>{lease.reference}</strong></td>
-                            <td>{tenant?.full_name ?? "Tenant unavailable"}</td>
-                            <td>{unit ? `${property?.name ?? building?.name ?? "Property"} · ${unit.name}` : "Unit unavailable"}</td>
-                            <td>{formatMoney(lease.monthly_rent_minor)}</td>
-                            <td>{formatDate(lease.start_date)} – {formatDate(lease.end_date)}</td>
-                            <td><span className={`landlord-status ${lease.status === "ACTIVE" ? "is-active" : ""}`}>
-                              {lease.status === "ACTIVE" && lease.end_date === rentalBusinessDate()
-                                ? "Active through today"
-                                : displayStatus(lease.status)}
-                            </span></td>
-                            {canWritePortfolio && !previewMode && (
-                              <td>
-                                {lease.status === "ACTIVE" ? (
-                                  <div className="landlord-section-actions">
-                                    <button
-                                      type="button"
-                                      className="landlord-button landlord-button--quiet"
-                                      onClick={() => {
-                                        setLeaseEndDate(rentalBusinessDate());
-                                        setLeaseReason("");
-                                        setLeaseAction({ id: lease.id, reference: lease.reference, mode: "terminate" });
-                                      }}
-                                    >
-                                      Terminate
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="landlord-button landlord-button--quiet"
-                                      onClick={() => setLeaseAction({ id: lease.id, reference: lease.reference, mode: "expire" })}
-                                    >
-                                      Expire
-                                    </button>
-                                  </div>
-                                ) : "—"}
-                              </td>
-                            )}
-                          </tr>
+<ResponsiveTable
+                  caption="Lease records"
+                  rows={organizationData.leases}
+                  getRowKey={lease => lease.id}
+                  columns={[
+                    { key: "lease", header: "Lease", render: lease => <strong>{lease.reference}</strong> },
+                    {
+                      key: "tenant",
+                      header: "Tenant",
+                      render: lease => organizationData.tenants.find(
+                        item => String(item.id) === String(lease.tenant),
+                      )?.full_name ?? "Tenant unavailable",
+                    },
+                    {
+                      key: "unit",
+                      header: "Unit",
+                      render: lease => {
+                        const unit = organizationData.units.find(
+                          item => String(item.id) === String(lease.unit),
                         );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        const building = organizationData.buildings.find(
+                          item => String(item.id) === String(unit?.building),
+                        );
+                        const property = organizationData.properties.find(
+                          item => String(item.id) === String(building?.property),
+                        );
+                        return unit
+                          ? `${property?.name ?? building?.name ?? "Property"} · ${unit.name}`
+                          : "Unit unavailable";
+                      },
+                    },
+                    {
+                      key: "rent",
+                      header: "Monthly rent",
+                      render: lease => <CurrencyText amount={lease.monthly_rent_minor / 100} />,
+                    },
+                    {
+                      key: "dates",
+                      header: "Dates",
+                      render: lease => `${formatDate(lease.start_date)} – ${formatDate(lease.end_date)}`,
+                    },
+                    {
+                      key: "status",
+                      header: "Status",
+                      render: lease => (
+                        <span className={`landlord-status ${lease.status === "ACTIVE" ? "is-active" : ""}`}>
+                          {lease.status === "ACTIVE" && lease.end_date === rentalBusinessDate()
+                            ? "Active through today"
+                            : displayStatus(lease.status)}
+                        </span>
+                      ),
+                    },
+                    ...(canWritePortfolio && !previewMode
+                      ? [{
+                          key: "actions",
+                          header: "Actions",
+                          render: (lease: Lease) => lease.status === "ACTIVE" ? (
+                            <div className="landlord-section-actions">
+                              <button
+                                type="button"
+                                className="landlord-button landlord-button--quiet min-h-11"
+                                onClick={() => {
+                                  setLeaseEndDate(rentalBusinessDate());
+                                  setLeaseReason("");
+                                  setLeaseAction({ id: lease.id, reference: lease.reference, mode: "terminate" });
+                                }}
+                              >
+                                Terminate
+                              </button>
+                              <button
+                                type="button"
+                                className="landlord-button landlord-button--quiet min-h-11"
+                                onClick={() => setLeaseAction({ id: lease.id, reference: lease.reference, mode: "expire" })}
+                              >
+                                Expire
+                              </button>
+                            </div>
+                          ) : "—",
+                        }]
+                      : []),
+                  ]}
+                />
               ) : (
-                <div className="landlord-empty-state">
-                  <h3>No leases recorded</h3>
-                  <p>Create a lease when an active tenant and available unit are ready.</p>
-                </div>
+                <EmptyState
+                  icon={<Icon name="lease" />}
+                  title="No leases recorded"
+                  description="Create a lease when an active tenant and available unit are ready."
+                  cta={{ label: "Create lease", onClick: () => setLeaseFormOpen(true) }}
+                />
               )}
             </section>
 
@@ -1374,32 +1388,32 @@ export default function LandlordDashboard() {
                 </form>
               )}
               {organizationData.units.length ? (
-                <div className="landlord-table-wrap" role="region" aria-label="Unit records" tabIndex={0}>
-                  <table className="landlord-table">
-                    <thead><tr><th>Unit</th><th>Property / building</th><th>Bedrooms</th><th>Rent status</th><th>Availability</th></tr></thead>
-                    <tbody>
-                      {organizationData.units.map(unit => {
-                        const building = organizationData.buildings.find(item => String(item.id) === String(unit.building));
-                        const property = organizationData.properties.find(item => String(item.id) === String(building?.property));
-                        const lease = activeLeaseByUnit.get(String(unit.id));
-                        return (
-                          <tr key={unit.id}>
-                            <td><strong>{unit.name}</strong></td>
-                            <td>{property?.name ?? "Property unavailable"} · {building?.name ?? "Building unavailable"}</td>
-                            <td>{unit.bedrooms}</td>
-                            <td>{lease ? formatMoney(lease.monthly_rent_minor) : "—"}</td>
-                            <td><span className={`landlord-status ${unit.status === "AVAILABLE" ? "is-active" : ""}`}>{displayStatus(unit.status)}</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <ResponsiveTable
+                  caption="Unit records"
+                  rows={organizationData.units}
+                  getRowKey={unit => unit.id}
+                  columns={[
+                    { key: "unit", header: "Unit", render: unit => <strong>{unit.name}</strong> },
+                    { key: "property", header: "Property / building", render: unit => {
+                      const building = organizationData.buildings.find(item => String(item.id) === String(unit.building));
+                      const property = organizationData.properties.find(item => String(item.id) === String(building?.property));
+                      return `${property?.name ?? "Property unavailable"} · ${building?.name ?? "Building unavailable"}`;
+                    } },
+                    { key: "bedrooms", header: "Bedrooms", render: unit => unit.bedrooms },
+                    { key: "rent", header: "Rent status", render: unit => {
+                      const lease = activeLeaseByUnit.get(String(unit.id));
+                      return lease ? <CurrencyText amount={lease.monthly_rent_minor / 100} /> : "—";
+                    } },
+                    { key: "availability", header: "Availability", render: unit => <span className={`landlord-status ${unit.status === "AVAILABLE" ? "is-active" : ""}`}>{displayStatus(unit.status)}</span> },
+                  ]}
+                />
               ) : (
-                <div className="landlord-empty-state">
-                  <h3>No units to show</h3>
-                  <p>Add a building first, then add units to track occupancy and assign leases.</p>
-                </div>
+                <EmptyState
+                  icon={<Icon name="building" />}
+                  title="No units to show"
+                  description="Add a building first, then add units to track occupancy and assign leases."
+                  cta={{ label: "Add unit", onClick: () => setUnitFormOpen(true) }}
+                />
               )}
             </section>
             </>}

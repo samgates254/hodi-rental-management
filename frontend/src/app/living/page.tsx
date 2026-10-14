@@ -186,12 +186,13 @@ export default function LivingPage() {
         <section>
           <h2>Your requests</h2>
           {orders.map((order) => (
-            <article className="hodi-record-row" key={order.id}>
+            <article className="hodi-record-row border-l-4 border-sky-700" key={order.id}>
               <div>
                 <strong>{order.listing_title}</strong>
                 <p className="hodi-record-note">
-                  {order.status.replaceAll("_", " ")} · Provider: {order.supplier_name} · Payment: not processed ({order.payment_status})
+                  {order.status.replaceAll("_", " ")} · Provider: {order.supplier_name} · Payment: <strong className={order.payment_status === "VERIFIED" ? "text-emerald-800" : "text-amber-900"}>{order.payment_status === "VERIFIED" ? "Verified" : "Pending"}</strong>
                 </p>
+                {order.payment_status !== "VERIFIED" && <p role="status" className="mt-2 border-l-4 border-amber-500 bg-amber-50 p-2 text-sm text-amber-950">Payment is pending verification. Do not treat this request as paid.</p>}
               </div>
               {order.status === "REQUESTED" && (
                 <button type="button" className="secondary" onClick={() => void cancel(order.id)}>Cancel request</button>

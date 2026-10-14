@@ -25,13 +25,62 @@ VIDEO_TYPES = {
 }
 
 
+def validate_issue_attachments(files, current_count=0):
+	if current_count + len(files) > MAX_ISSUE_ATTACHMENTS:
+		raise serializers.ValidationError(f'Attach no more than {MAX_ISSUE_ATTACHMENTS} photos or videos.')
+	for uploaded in files:
+		content_type = uploaded.content_type or ''
+		extension = uploaded.name.rsplit('.', 1)[-1].lower() if '.' in uploaded.name else ''
+		if content_type in IMAGE_TYPES and extension in IMAGE_TYPES[content_type]:
+			max_bytes = MAX_IMAGE_BYTES
+		elif content_type in VIDEO_TYPES and extension in VIDEO_TYPES[content_type]:
+			max_bytes = MAX_VIDEO_BYTES
+		else:
+			raise serializers.ValidationError(
+				'Attachments must be supported photo or video files (JPEG, PNG, WebP, GIF, HEIC, HEIF, MP4, WebM, MOV, or 3GP).',
+			)
+		if uploaded.size > max_bytes:
+			limit_mb = max_bytes // (1024 * 1024)
+			raise serializers.ValidationError(
+				f'{uploaded.name} exceeds the {limit_mb} MB limit for this media type.',
+			)
+	return files
+
+
+def create_issue_attachments(issue, files):
+	for uploaded in files:
+		content_type = uploaded.content_type
+		media_type = (
+			MaintenanceIssueAttachment.MediaType.IMAGE
+			if content_type.startswith('image/')
+			else MaintenanceIssueAttachment.MediaType.VIDEO
+		)
+		MaintenanceIssueAttachment.objects.create(
+			issue=issue,
+			file=uploaded,
+			file_name=uploaded.name[:255],
+			content_type=content_type,
+			media_type=media_type,
+		)
+
+
 class MaintenanceIssueUpdateSerializer(serializers.ModelSerializer):
 	author_name = serializers.SerializerMethodField()
+	attachments = serializers.ListField(
+		child=serializers.FileField(),
+		write_only=True,
+		required=False,
+		allow_empty=True,
+	)
 
 	class Meta:
 		model = MaintenanceIssueUpdate
-		fields = ('id', 'note', 'status', 'author_name', 'created_at')
+		fields = ('id', 'note', 'status', 'author_name', 'created_at', 'attachments')
 		read_only_fields = ('id', 'author_name', 'created_at')
+
+	def validate_attachments(self, files):
+		issue = self.context.get('issue')
+		return validate_issue_attachments(files, issue.attachments.count() if issue else 0)
 
 	def get_author_name(self, update):
 		return update.author.get_full_name() or update.author.get_username()
@@ -124,43 +173,12 @@ class MaintenanceIssueCreateSerializer(serializers.ModelSerializer):
 		read_only_fields = ('id',)
 
 	def validate_attachments(self, files):
-		if len(files) > MAX_ISSUE_ATTACHMENTS:
-			raise serializers.ValidationError(f'Attach no more than {MAX_ISSUE_ATTACHMENTS} photos or videos.')
-		for uploaded in files:
-			content_type = uploaded.content_type or ''
-			extension = uploaded.name.rsplit('.', 1)[-1].lower() if '.' in uploaded.name else ''
-			if content_type in IMAGE_TYPES and extension in IMAGE_TYPES[content_type]:
-				max_bytes = MAX_IMAGE_BYTES
-			elif content_type in VIDEO_TYPES and extension in VIDEO_TYPES[content_type]:
-				max_bytes = MAX_VIDEO_BYTES
-			else:
-				raise serializers.ValidationError(
-					'Attachments must be supported photo or video files (JPEG, PNG, WebP, GIF, HEIC, HEIF, MP4, WebM, MOV, or 3GP).',
-				)
-			if uploaded.size > max_bytes:
-				limit_mb = max_bytes // (1024 * 1024)
-				raise serializers.ValidationError(
-					f'{uploaded.name} exceeds the {limit_mb} MB limit for this media type.',
-				)
-		return files
+		return validate_issue_attachments(files)
 
 	def create(self, validated_data):
 		attachments = validated_data.pop('attachments', [])
 		issue = super().create(validated_data)
-		for uploaded in attachments:
-			content_type = uploaded.content_type
-			media_type = (
-				MaintenanceIssueAttachment.MediaType.IMAGE
-				if content_type.startswith('image/')
-				else MaintenanceIssueAttachment.MediaType.VIDEO
-			)
-			MaintenanceIssueAttachment.objects.create(
-				issue=issue,
-				file=uploaded,
-				file_name=uploaded.name[:255],
-				content_type=content_type,
-				media_type=media_type,
-			)
+		create_issue_attachments(issue, attachments)
 		return issue
 
 	def validate_unit(self, unit):

@@ -271,7 +271,7 @@
 .caretaker-issue form select,
 .caretaker-issue form input,
 .caretaker-issue form textarea {
-  min-height: 40px;
+  min-height: 44px;
   border: 1px solid var(--caretaker-line);
   border-radius: 8px;
   background: var(--hodi-surface);
@@ -421,8 +421,23 @@
 
 .caretaker-update-form button {
   width: fit-content;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 14px;
+}
+
+.caretaker-evidence-previews {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.caretaker-evidence-previews img {
+  width: 72px;
+  aspect-ratio: 1;
+  border: 1px solid var(--caretaker-line);
+  border-radius: 6px;
+  object-fit: cover;
 }
 
 .caretaker-updates {
@@ -628,6 +643,13 @@
 
   .caretaker-update-form button {
     width: 100%;
+  }
+
+  .caretaker-update-form .caretaker-sticky-submit {
+    position: sticky;
+    z-index: 5;
+    bottom: 0;
+    box-shadow: 0 -8px 18px rgb(255 255 255 / .85);
   }
 }
 
