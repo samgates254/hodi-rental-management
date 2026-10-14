@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, asList, formatWhen, getList, humanize, type ListPayload } from "@/lib/opsApi";
 import { MAINTENANCE_ASSIGNEE_STAFF_ROLES } from "@/lib/organizationRoles";
+import { rentalBusinessDate } from "@/lib/rentalDate";
 import "./ops.css";
 
 type UnitRow = { id: number | string; building: number | string; name: string };
@@ -1036,7 +1037,7 @@ export default function MaintenanceRequestsPanel({
                     <label>Supplier reference (optional)<input name="supplier_reference" maxLength={200} /></label>
                     <label>Quantity purchased<input name="quantity" type="number" min="0.001" step="0.001" required /></label>
                     <label>Actual unit price (KES cents)<input name="unit_price_cents" type="number" min={0} step={1} required /></label>
-                    <label>Purchase date<input name="purchase_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></label>
+                    <label>Purchase date<input name="purchase_date" type="date" defaultValue={rentalBusinessDate()} required /></label>
                   </div>
                   <label className="ops-check"><input name="authorize_overrun" type="checkbox" /> Authorize a material budget overrun</label>
                   <label>Overrun reason<textarea value={purchaseOverrunReason} onChange={event => setPurchaseOverrunReason(event.target.value)} maxLength={2000} /></label>

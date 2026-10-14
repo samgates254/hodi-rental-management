@@ -20,6 +20,7 @@ import SubscriptionPanel from "@/components/SubscriptionPanel";
 import UtilitiesWorkspace from "@/components/utilities/UtilitiesWorkspace";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { formatMinor, shillingsToCents } from "@/lib/money";
+import { rentalBusinessDate } from "@/lib/rentalDate";
 import { ORGANIZATION_STAFF_ROLES, staffLoginKindForRole } from "@/lib/organizationRoles";
 import "./landlord-dashboard.css";
 import "@/components/ops/ops.css";
@@ -431,7 +432,6 @@ export default function LandlordDashboard() {
   const canReadBilling = isOwner || isManager || isAccountant;
   const canReadUtilities = isOwner || isManager || isAccountant;
   const canWriteLedger = (isOwner || isAccountant) && !previewMode;
-  const canWriteRentLog = (isOwner || isManager || isAccountant) && !previewMode;
   const canMaintenance = isOwner || isManager;
   const canAudit = isOwner || isManager || isAccountant;
 
@@ -699,11 +699,15 @@ export default function LandlordDashboard() {
     setPageError("");
     try {
       if (leaseAction.mode === "terminate") {
-        await apiRequest<Lease>(`/leases/${leaseAction.id}/terminate/`, token, {
+        const updatedLease = await apiRequest<Lease>(`/leases/${leaseAction.id}/terminate/`, token, {
           method: "POST",
           body: JSON.stringify({ end_date: leaseEndDate, reason: leaseReason }),
         });
-        setNotice("Lease terminated. If nothing else occupies the unit, it becomes available.");
+        setNotice(
+          updatedLease.status === "ACTIVE" && updatedLease.end_date === rentalBusinessDate()
+            ? `Lease remains active through ${formatDate(updatedLease.end_date)}.`
+            : "Lease terminated. If nothing else occupies the unit, it becomes available.",
+        );
       } else {
         await apiRequest<Lease>(`/leases/${leaseAction.id}/expire/`, token, { method: "POST" });
         setNotice("Lease expired. If nothing else occupies the unit, it becomes available.");
@@ -1276,7 +1280,11 @@ export default function LandlordDashboard() {
                             <td>{unit ? `${property?.name ?? building?.name ?? "Property"} · ${unit.name}` : "Unit unavailable"}</td>
                             <td>{formatMoney(lease.monthly_rent_minor)}</td>
                             <td>{formatDate(lease.start_date)} – {formatDate(lease.end_date)}</td>
-                            <td><span className={`landlord-status ${lease.status === "ACTIVE" ? "is-active" : ""}`}>{displayStatus(lease.status)}</span></td>
+                            <td><span className={`landlord-status ${lease.status === "ACTIVE" ? "is-active" : ""}`}>
+                              {lease.status === "ACTIVE" && lease.end_date === rentalBusinessDate()
+                                ? "Active through today"
+                                : displayStatus(lease.status)}
+                            </span></td>
                             {canWritePortfolio && !previewMode && (
                               <td>
                                 {lease.status === "ACTIVE" ? (
@@ -1285,7 +1293,7 @@ export default function LandlordDashboard() {
                                       type="button"
                                       className="landlord-button landlord-button--quiet"
                                       onClick={() => {
-                                        setLeaseEndDate(new Date().toISOString().slice(0, 10));
+                                        setLeaseEndDate(rentalBusinessDate());
                                         setLeaseReason("");
                                         setLeaseAction({ id: lease.id, reference: lease.reference, mode: "terminate" });
                                       }}
@@ -1419,7 +1427,6 @@ export default function LandlordDashboard() {
                 key={`billing-${selectedOrganizationId}`}
                 organizationId={selectedOrganizationId}
                 canWriteLedger={canWriteLedger}
-                canWriteRentLog={canWriteRentLog}
               />
             )}
             {canReadUtilities && !previewMode && (

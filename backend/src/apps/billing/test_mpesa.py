@@ -22,6 +22,7 @@ from apps.billing.models import (
 )
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.tenants.models import Tenant
+from common.rental_dates import rental_business_date
 from application.services.mpesa import initiate_mpesa_stk, kes_from_cents, normalize_kenya_msisdn
 from infrastructure.payments.mpesa import MpesaClient, StkPushResult
 
@@ -563,7 +564,7 @@ class MpesaInitiationConcurrencyTests(TransactionTestCase):
             last_name='Otieno',
             phone_number='+254700000010',
         )
-        today = date.today()
+        today = rental_business_date()
         invoice = Invoice.objects.create(
             organization=self.organization,
             tenant=self.tenant,

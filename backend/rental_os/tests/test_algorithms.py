@@ -17,6 +17,7 @@ from rental_os.algorithms.allocation import (
     parse_uuid,
 )
 from rental_os.algorithms.matching import (
+    Assignment,
     Job,
     MatchingError,
     Technician,
@@ -200,6 +201,32 @@ class HungarianTests(unittest.TestCase):
 
 
 class MatchingTests(unittest.TestCase):
+    @staticmethod
+    def _exhaustive_maximum_weight(weights):
+        """Independent assignment oracle for small graphs.
+
+        Each row is a job and each column is a technician. ``None`` means an
+        ineligible edge. The search explicitly includes an unmatched option,
+        rather than using the production Hungarian cost matrix.
+        """
+        best = (0, 0)
+
+        def search(job_index, used, score, matched):
+            nonlocal best
+            if job_index == len(weights):
+                best = max(best, (score, matched))
+                return
+            search(job_index + 1, used, score, matched)
+            for technician_index, weight in enumerate(weights[job_index]):
+                if weight is None or technician_index in used:
+                    continue
+                used.add(technician_index)
+                search(job_index + 1, used, score + weight, matched + 1)
+                used.remove(technician_index)
+
+        search(0, set(), 0, 0)
+        return best
+
     def test_exp_zero_and_known_range(self):
         self.assertEqual(exp_decay_micro(0), 1_000_000)
         # exp(-1) ≈ 0.367879
@@ -219,6 +246,62 @@ class MatchingTests(unittest.TestCase):
         # Greedy on A alone would have taken t1.
         solo = rank_technicians(job_a, [t1, t2])
         self.assertEqual(solo[0].technician_id, "t1")
+
+    def test_scoreless_edge_does_not_displace_positive_edge(self):
+        """Regression: old dummy costs maximized cardinality before score."""
+        t1 = Technician("t1", ("A", "B"), 0, 0)
+        t2 = Technician("t2", ("A",), 0, 0)
+        job_a = Job("A", ("A",), (("t1", 0), ("t2", 75_000)))
+        job_b = Job("B", ("B",), (("t1", 75_000), ("t2", 75_000)))
+
+        result = match_jobs([job_a, job_b], [t1, t2])
+
+        self.assertEqual(
+            result.assignments,
+            (Assignment("A", "t1", 500_000),),
+        )
+        self.assertEqual(result.unmatched_job_ids, ("B",))
+
+    def test_small_graphs_match_independent_exhaustive_oracle(self):
+        technicians = [
+            Technician("t1", ("S",), 0, 0),
+            Technician("t2", ("S",), 0, 0),
+            Technician("t3", ("S",), 0, 0),
+        ]
+        jobs = [
+            Job("A", ("S",), (("t1", 0), ("t2", 75_000), ("t3", 10_000))),
+            Job("B", ("S",), (("t1", 75_000), ("t2", 0), ("t3", 75_000))),
+            Job("C", ("S",), (("t1", 10_000), ("t2", 75_000), ("t3", 75_000))),
+        ]
+        weights = [
+            [
+                edge_weight_micro(
+                    distance_m=dict(job.distance_m_by_technician)[technician.technician_id],
+                    rating_milli=technician.rating_milli,
+                    acceptance_milli=technician.acceptance_milli,
+                )
+                for technician in technicians
+            ]
+            for job in jobs
+        ]
+
+        result = match_jobs(jobs, technicians)
+        actual = (
+            sum(assignment.weight_micro for assignment in result.assignments),
+            len(result.assignments),
+        )
+        self.assertEqual(actual, self._exhaustive_maximum_weight(weights))
+        self.assertEqual(len({assignment.technician_id for assignment in result.assignments}), len(result.assignments))
+        self.assertEqual(match_jobs(jobs[::-1], technicians[::-1]), result)
+
+    def test_zero_weight_edges_lose_only_to_a_better_score_and_are_repeatable(self):
+        technician = Technician("t", ("S",), 0, 0)
+        job = Job("J", ("S",), (("t", 75_000),))
+        first = match_jobs([job], [technician])
+        second = match_jobs([job], [technician])
+        self.assertEqual(first, second)
+        self.assertEqual(first.assignments, (Assignment("J", "t", 0),))
+        self.assertEqual(first.unmatched_job_ids, ())
 
     def test_tie_lowest_technician_id(self):
         t_b = Technician("b", ("PLUMBING",), 4_000, 800)

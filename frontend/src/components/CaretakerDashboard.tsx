@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
 import { clientApi } from "@/lib/clientApi";
 import { centsToDecimal, formatMinor } from "@/lib/money";
+import { rentalBusinessDate } from "@/lib/rentalDate";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
 import MaintenanceRequestsPanel from "./ops/MaintenanceRequestsPanel";
 import NotificationBell from "./ops/NotificationBell";
@@ -113,7 +114,7 @@ function exportPayments(payments: RentPayment[]) {
   const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `rent-payments-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `rent-payments-${rentalBusinessDate()}.csv`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

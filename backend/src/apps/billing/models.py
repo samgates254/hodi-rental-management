@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import Q
 
 from apps.leases.models import Lease
+from rental_os.algorithms.money import MAX_MONEY_MINOR
 
 
 class RentPayment(models.Model):
@@ -72,6 +73,11 @@ CHARGE_TYPES = (
 # Deposits are liabilities and must not enter ordinary rent allocation. These
 # values remain accepted in historical rows so they can be reviewed safely.
 DEPOSIT_CHARGE_TYPES = ('DEPOSIT', 'SECURITY_DEPOSIT')
+
+# All persisted rental-money fields are signed PostgreSQL/SQLite big integers.
+# Keep API values within that portable storage range so an out-of-range client
+# value is rejected as validation instead of becoming a database 500.
+MAX_MONEY_CENTS = MAX_MONEY_MINOR
 
 
 class DocumentStatus(models.TextChoices):

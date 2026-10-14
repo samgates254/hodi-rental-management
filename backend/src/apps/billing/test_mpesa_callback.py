@@ -1,5 +1,6 @@
 import threading
 import time
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -22,6 +23,7 @@ from apps.billing.models import (
 from apps.notifications.models import Notification
 from apps.organizations.models import Organization
 from apps.tenants.models import Tenant
+from common.rental_dates import rental_business_date
 from infrastructure.payments.mpesa import MpesaTimeoutError
 
 CALLBACK_URL = '/api/v1/billing/mpesa/callback/path-token-secret/'
@@ -49,10 +51,12 @@ def stk_payload(
     amount=1500,
     receipt='NLJ7RT61SV',
     phone='254700000010',
-    transaction_date=20261007120000,
+    transaction_date=None,
     include_metadata=True,
     extra_body=None,
 ):
+    if transaction_date is None:
+        transaction_date = int(f'{rental_business_date():%Y%m%d}120000')
     stk = {
         'MerchantRequestID': merchant,
         'CheckoutRequestID': checkout,
@@ -111,7 +115,7 @@ class MpesaCallbackTests(APITestCase):
             last_name='Tenant',
             phone_number='+254700000099',
         )
-        today = timezone.localdate()
+        today = rental_business_date()
         self.invoice = Invoice.objects.create(
             organization=self.organization,
             tenant=self.tenant,
@@ -150,7 +154,7 @@ class MpesaCallbackTests(APITestCase):
         return self.client.post(url, payload, format='json', **kwargs)
 
     def test_valid_success_settles_ledger_and_statement(self):
-        today = timezone.localdate()
+        today = rental_business_date()
         txn = int(f'{today:%Y%m%d}120000')
         response = self.post_callback(stk_payload(transaction_date=txn))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -398,6 +402,67 @@ class MpesaCallbackTests(APITestCase):
         self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
         self.assertEqual(Payment.objects.count(), 0)
 
+    def test_impossible_transaction_dates_require_reconciliation_without_posting(self):
+        today = rental_business_date()
+        for label, transaction_day, receipt in (
+            ('year-2000', '20000101000000', 'DATE2000AA'),
+            ('before-attempt', int(f'{today - timedelta(days=1):%Y%m%d}120000'), 'DATEBEFORE'),
+            ('future', int(f'{today + timedelta(days=1):%Y%m%d}120000'), 'DATEFUTURE'),
+        ):
+            with self.subTest(label=label):
+                response = self.post_callback(stk_payload(
+                    transaction_date=transaction_day,
+                    receipt=receipt,
+                ))
+                self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+                self.assertFalse(response.data['settled'])
+                self.assertEqual(response.data['status'], 'UNRESOLVED')
+                self.assertEqual(Payment.objects.count(), 0)
+                self.attempt.refresh_from_db()
+                self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+                self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
+                self.assertTrue(AuditLog.objects.filter(
+                    action='mpesa.stk.callback_discrepancy',
+                    object_id=str(self.attempt.pk),
+                    metadata__reason='transaction_date_outside_attempt_range',
+                ).exists())
+
+    def test_delayed_callback_within_date_policy_settles(self):
+        yesterday = timezone.now() - timedelta(days=1)
+        MpesaAttempt.objects.filter(pk=self.attempt.pk).update(created_at=yesterday)
+        today = rental_business_date()
+
+        response = self.post_callback(stk_payload(
+            transaction_date=int(f'{today:%Y%m%d}120000'),
+            receipt='DELAYED12345',
+        ))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['settled'])
+        payment = Payment.objects.get()
+        self.assertEqual(payment.received_date, today)
+
+    def test_transaction_date_too_late_for_attempt_requires_reconciliation(self):
+        today = rental_business_date()
+        MpesaAttempt.objects.filter(pk=self.attempt.pk).update(
+            created_at=timezone.now() - timedelta(days=3),
+        )
+
+        response = self.post_callback(stk_payload(
+            transaction_date=int(f'{today:%Y%m%d}120000'),
+            receipt='DATE-TOO-LATE',
+        ))
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertFalse(response.data['settled'])
+        self.assertEqual(response.data['status'], 'UNRESOLVED')
+        self.assertEqual(Payment.objects.count(), 0)
+        self.assertEqual(PaymentAllocation.objects.count(), 0)
+        self.assertEqual(LedgerPosting.objects.count(), 0)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
+
     def test_correct_phone_aliases_match(self):
         response = self.post_callback(stk_payload(phone='0700000010'))
         self.assertTrue(response.data['settled'])
@@ -434,7 +499,7 @@ class MpesaCallbackTests(APITestCase):
         self.assertEqual(Payment.objects.count(), 1)
 
     def test_existing_payment_with_same_receipt_and_different_terms_stays_unresolved(self):
-        today = timezone.localdate()
+        today = rental_business_date()
         existing = Payment.objects.create(
             organization=self.organization,
             tenant=self.tenant,
@@ -564,7 +629,7 @@ class MpesaCallbackConcurrencyTests(TransactionTestCase):
             last_name='Otieno',
             phone_number='+254700000010',
         )
-        today = timezone.localdate()
+        today = rental_business_date()
         invoice = Invoice.objects.create(
             organization=self.organization,
             tenant=self.tenant,
@@ -663,7 +728,7 @@ class MpesaCallbackConcurrencyTests(TransactionTestCase):
             last_name='Tenant',
             phone_number='+254700000099',
         )
-        today = timezone.localdate()
+        today = rental_business_date()
         invoice = Invoice.objects.create(
             organization=other_org,
             tenant=other_tenant,

@@ -23,6 +23,13 @@ WRITE_ROLES = (
 
 
 class RentPaymentViewSet(viewsets.ModelViewSet):
+	"""Read-only historical pre-ledger receipt records.
+
+	New receipts must use the canonical manual-receipt endpoint so they create
+	allocations and ledger postings atomically. Historical rows remain visible
+	for audit and reporting but cannot be changed into a financial event.
+	"""
+	http_method_names = ('get', 'head', 'options')
 	serializer_class = RentPaymentSerializer
 	permission_classes = (permissions.IsAuthenticated,)
 

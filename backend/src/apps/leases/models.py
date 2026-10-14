@@ -68,12 +68,14 @@ class Lease(models.Model):
 		if not self.unit_id or not self.start_date:
 			return
 
+		# Lease dates are inclusive civil dates. If one lease ends on a given
+		# day, another lease for the unit may begin only on the following day.
 		overlapping = Lease.objects.filter(
 			unit_id=self.unit_id,
-			start_date__lt=self.end_date or date.max,
+			start_date__lte=self.end_date or date.max,
 		).filter(
 			models.Q(end_date__isnull=True)
-			| models.Q(end_date__gt=self.start_date),
+			| models.Q(end_date__gte=self.start_date),
 		)
 		if self.pk:
 			overlapping = overlapping.exclude(pk=self.pk)

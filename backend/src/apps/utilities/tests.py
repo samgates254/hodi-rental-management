@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, datetime, timezone as datetime_timezone
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -74,6 +75,27 @@ class UtilityApiTests(TestCase):
         bill = UtilityBill.objects.get(pk=bill_response.data['id'])
         self.assertEqual(bill.amount_minor, 154200)
         self.assertEqual(bill.recorded_by, self.owner)
+
+    def test_utility_bill_amount_above_storage_range_is_field_validation(self):
+        account = UtilityAccount.objects.create(
+            organization=self.organization,
+            property=self.property,
+            unit=self.unit,
+            service_type='WATER',
+            provider_name='Water provider',
+            responsible_party=UtilityAccount.ResponsibleParty.LANDLORD,
+            created_by=self.owner,
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(reverse('utilities:utility-bill-list'), {
+            'account': account.pk,
+            'period_start': '2026-09-01',
+            'period_end': '2026-09-30',
+            'amount_minor': 1 << 63,
+        }, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('amount_minor', response.data)
+        self.assertEqual(UtilityBill.objects.count(), 0)
 
     def test_accountant_can_read_but_not_write_utility_records(self):
         account = UtilityAccount.objects.create(
@@ -153,3 +175,161 @@ class UtilityApiTests(TestCase):
         self.assertEqual(response.data[0]['utility_type'], 'Water')
         self.assertNotIn('PRIVATE', str(response.data))
         self.assertNotIn('provider_name', response.data[0])
+
+    def test_consecutive_tenants_do_not_share_prior_period_utility_bill(self):
+        previous_user = get_user_model().objects.create_user(username='previous-utility-tenant', password='password')
+        current_user = get_user_model().objects.create_user(username='current-utility-tenant', password='password')
+        previous_tenant = Tenant.objects.create(
+            organization=self.organization, user=previous_user,
+            first_name='Previous', last_name='Tenant', phone_number='0700000001',
+        )
+        current_tenant = Tenant.objects.create(
+            organization=self.organization, user=current_user,
+            first_name='Current', last_name='Tenant', phone_number='0700000002',
+        )
+        Lease.objects.create(
+            tenant=previous_tenant, unit=self.unit, reference='UTILITY-PREVIOUS',
+            start_date=date(2026, 1, 1), end_date=date(2026, 9, 13),
+            monthly_rent_minor=10000, status=Lease.Status.EXPIRED,
+        )
+        Lease.objects.create(
+            tenant=current_tenant, unit=self.unit, reference='UTILITY-CURRENT',
+            start_date=date(2026, 9, 14), monthly_rent_minor=10000, status=Lease.Status.ACTIVE,
+        )
+        account = UtilityAccount.objects.create(
+            organization=self.organization, property=self.property, unit=self.unit,
+            service_type='WATER', provider_name='Water provider', responsible_party='TENANT',
+            created_by=self.owner,
+        )
+        prior_bill = UtilityBill.objects.create(
+            account=account, period_start=date(2026, 9, 1), period_end=date(2026, 9, 13),
+            amount_minor=98765, recorded_by=self.owner,
+        )
+        current_bill = UtilityBill.objects.create(
+            account=account, period_start=date(2026, 9, 14), period_end=date(2026, 9, 30),
+            amount_minor=12345, recorded_by=self.owner,
+        )
+
+        self.client.force_authenticate(current_user)
+        with patch('apps.utilities.views.rental_business_date', return_value=date(2026, 10, 14)):
+            tenant_response = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(tenant_response.status_code, 200)
+        self.assertEqual([row['id'] for row in tenant_response.data], [current_bill.pk])
+        self.assertNotIn(prior_bill.pk, [row['id'] for row in tenant_response.data])
+
+        # Staff retain access to the historical account ledger.
+        self.client.force_authenticate(self.owner)
+        staff_response = self.client.get(reverse('utilities:utility-bill-list'))
+        self.assertEqual(staff_response.status_code, 200)
+        self.assertEqual({row['id'] for row in staff_response.data}, {prior_bill.pk, current_bill.pk})
+
+        # Tenant role does not grant access to the staff utility collection.
+        self.client.force_authenticate(current_user)
+        self.assertEqual(self.client.get(reverse('utilities:utility-bill-list')).status_code, 403)
+
+    def test_bill_beginning_on_first_day_of_current_lease_is_visible(self):
+        user = get_user_model().objects.create_user(username='first-day-utility-tenant', password='password')
+        tenant = Tenant.objects.create(
+            organization=self.organization, user=user,
+            first_name='First Day', last_name='Tenant', phone_number='0700000003',
+        )
+        Lease.objects.create(
+            tenant=tenant, unit=self.unit, reference='UTILITY-FIRST-DAY',
+            start_date=date(2026, 9, 14), monthly_rent_minor=10000, status=Lease.Status.ACTIVE,
+        )
+        account = UtilityAccount.objects.create(
+            organization=self.organization, property=self.property, unit=self.unit,
+            service_type='WATER', provider_name='Water provider', responsible_party='TENANT',
+            created_by=self.owner,
+        )
+        bill = UtilityBill.objects.create(
+            account=account, period_start=date(2026, 9, 14), period_end=date(2026, 9, 30),
+            amount_minor=12345, recorded_by=self.owner,
+        )
+
+        self.client.force_authenticate(user)
+        with patch('apps.utilities.views.rental_business_date', return_value=date(2026, 10, 14)):
+            response = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.data], [bill.pk])
+
+    def test_bill_spanning_lease_transition_is_not_attributed_to_current_tenant(self):
+        previous_user = get_user_model().objects.create_user(username='span-previous-tenant', password='password')
+        current_user = get_user_model().objects.create_user(username='span-current-tenant', password='password')
+        previous_tenant = Tenant.objects.create(
+            organization=self.organization, user=previous_user,
+            first_name='Previous', last_name='Tenant', phone_number='0700000004',
+        )
+        current_tenant = Tenant.objects.create(
+            organization=self.organization, user=current_user,
+            first_name='Current', last_name='Tenant', phone_number='0700000005',
+        )
+        Lease.objects.create(
+            tenant=previous_tenant, unit=self.unit, reference='UTILITY-SPAN-PREVIOUS',
+            start_date=date(2026, 1, 1), end_date=date(2026, 9, 13),
+            monthly_rent_minor=10000, status=Lease.Status.EXPIRED,
+        )
+        Lease.objects.create(
+            tenant=current_tenant, unit=self.unit, reference='UTILITY-SPAN-CURRENT',
+            start_date=date(2026, 9, 14), monthly_rent_minor=10000, status=Lease.Status.ACTIVE,
+        )
+        account = UtilityAccount.objects.create(
+            organization=self.organization, property=self.property, unit=self.unit,
+            service_type='WATER', provider_name='Water provider', responsible_party='TENANT',
+            created_by=self.owner,
+        )
+        spanning_bill = UtilityBill.objects.create(
+            account=account, period_start=date(2026, 9, 1), period_end=date(2026, 9, 30),
+            amount_minor=11111, recorded_by=self.owner,
+        )
+
+        self.client.force_authenticate(current_user)
+        with patch('apps.utilities.views.rental_business_date', return_value=date(2026, 10, 14)):
+            response = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+        self.client.force_authenticate(self.owner)
+        staff_response = self.client.get(reverse('utilities:utility-bill-list'))
+        self.assertEqual(staff_response.status_code, 200)
+        self.assertEqual([row['id'] for row in staff_response.data], [spanning_bill.pk])
+
+    def test_bill_stays_visible_through_nairobi_lease_end_day(self):
+        user = get_user_model().objects.create_user(username='nairobi-date-tenant', password='password')
+        tenant = Tenant.objects.create(
+            organization=self.organization, user=user,
+            first_name='Nairobi', last_name='Tenant', phone_number='0700000006',
+        )
+        Lease.objects.create(
+            tenant=tenant, unit=self.unit, reference='UTILITY-NAIROBI-DATE',
+            start_date=date(2026, 10, 15), end_date=date(2026, 10, 16),
+            monthly_rent_minor=10000, status=Lease.Status.ACTIVE,
+        )
+        account = UtilityAccount.objects.create(
+            organization=self.organization, property=self.property, unit=self.unit,
+            service_type='WATER', provider_name='Water provider', responsible_party='TENANT',
+            created_by=self.owner,
+        )
+        bill = UtilityBill.objects.create(
+            account=account, period_start=date(2026, 10, 15), period_end=date(2026, 10, 16),
+            amount_minor=12345, recorded_by=self.owner,
+        )
+        self.client.force_authenticate(user)
+
+        before_utc_midnight = datetime(2026, 10, 14, 22, 30, tzinfo=datetime_timezone.utc)
+        with patch('django.utils.timezone.now', return_value=before_utc_midnight):
+            visible_on_start_day = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(visible_on_start_day.status_code, 200)
+        self.assertEqual([row['id'] for row in visible_on_start_day.data], [bill.pk])
+
+        last_minute_of_nairobi_end_day = datetime(2026, 10, 16, 20, 59, tzinfo=datetime_timezone.utc)
+        with patch('django.utils.timezone.now', return_value=last_minute_of_nairobi_end_day):
+            visible_on_end_day = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(visible_on_end_day.status_code, 200)
+        self.assertEqual([row['id'] for row in visible_on_end_day.data], [bill.pk])
+
+        after_nairobi_end_day = datetime(2026, 10, 16, 21, 30, tzinfo=datetime_timezone.utc)
+        with patch('django.utils.timezone.now', return_value=after_nairobi_end_day):
+            hidden_after_end_day = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(hidden_after_end_day.status_code, 200)
+        self.assertEqual(hidden_after_end_day.data, [])

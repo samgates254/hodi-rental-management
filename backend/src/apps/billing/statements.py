@@ -11,6 +11,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from apps.leases.models import Lease, RentSchedule
 from apps.tenants.models import Tenant
+from common.rental_dates import rental_business_date
 
 from .models import Charge, DocumentStatus, Payment, PaymentReversal
 
@@ -111,7 +112,7 @@ def build_statement(user, params):
 	tenant = tenant_for_statement(user)
 	if tenant is None:
 		raise NotFound('No tenant record is linked to this account.')
-	today = timezone.localdate()
+	today = rental_business_date()
 	lease = _lease_for(tenant)
 	period = resolve_period(params, lease, today)
 	start = period['start']
@@ -178,7 +179,7 @@ def build_statement(user, params):
 			reversal = None
 		if reversal is not None:
 			lines.append({
-				'date': timezone.localtime(reversal.created_at).date().isoformat(),
+				'date': rental_business_date(reversal.created_at).isoformat(),
 				'kind': 'payment_reversal',
 				'description': f'Payment reversal: {reversal.reason}',
 				'debit_cents': int(reversal.amount_cents) if reversal.status == 'REVERSED' else 0,

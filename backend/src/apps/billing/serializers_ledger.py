@@ -8,6 +8,7 @@ from .models import (
     DocumentStatus,
     Invoice,
     LedgerPosting,
+    MAX_MONEY_CENTS,
     Payment,
     PaymentAllocation,
     PaymentReversal,
@@ -29,7 +30,7 @@ class ChargeSerializer(serializers.ModelSerializer):
 class ChargeWriteSerializer(serializers.Serializer):
     invoice = serializers.PrimaryKeyRelatedField(queryset=Invoice.objects.all())
     charge_type = serializers.CharField()
-    amount_cents = serializers.IntegerField(min_value=1)
+    amount_cents = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_CENTS)
     due_date = serializers.DateField()
     period_start = serializers.DateField(required=False, allow_null=True)
     description = serializers.CharField(required=False, allow_blank=True)
@@ -136,11 +137,32 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 class PaymentWriteSerializer(serializers.Serializer):
     tenant = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all())
-    amount_cents = serializers.IntegerField(min_value=1)
+    amount_cents = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_CENTS)
     received_date = serializers.DateField()
     method = serializers.ChoiceField(choices=Payment.Method.choices)
     reference = serializers.CharField(required=False, allow_blank=True)
     external_id = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_method(self, method):
+        if method == Payment.Method.MPESA:
+            raise serializers.ValidationError(
+                'M-Pesa payments are recorded only after verified provider settlement.'
+            )
+        return method
+
+
+class ManualReceiptSerializer(serializers.Serializer):
+    """A staff-confirmed receipt, settled atomically by the canonical ledger."""
+
+    tenant = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all())
+    amount_cents = serializers.IntegerField(min_value=1, max_value=MAX_MONEY_CENTS)
+    received_date = serializers.DateField()
+    method = serializers.ChoiceField(choices=(
+        Payment.Method.CASH,
+        Payment.Method.BANK_TRANSFER,
+        Payment.Method.OTHER,
+    ))
+    reference = serializers.CharField(min_length=1, max_length=100, trim_whitespace=True)
 
 
 class AllocateSerializer(serializers.Serializer):
@@ -152,4 +174,4 @@ class PaymentReversalRequestSerializer(serializers.Serializer):
     reason = serializers.CharField(trim_whitespace=True, allow_blank=False, max_length=2000)
     # Partial reversals are not supported. Supplying an amount makes the
     # full-payment contract explicit and lets the endpoint reject partial asks.
-    amount_cents = serializers.IntegerField(required=False, min_value=1)
+    amount_cents = serializers.IntegerField(required=False, min_value=1, max_value=MAX_MONEY_CENTS)

@@ -1,14 +1,16 @@
 from datetime import date
 from collections import Counter
+from threading import Barrier
 from unittest import skipUnless
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
-from django.db import connection
+from django.db import close_old_connections, connection
 from django.test import TransactionTestCase
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase
 from unittest.mock import patch
 
@@ -18,16 +20,21 @@ from apps.billing.models import (
     DocumentStatus,
     Invoice,
     LedgerPosting,
+    MAX_MONEY_CENTS,
     Payment,
     PaymentAllocation,
     PaymentReversal,
     PaymentReversalAllocation,
+    RentPayment,
 )
-from apps.leases.models import Lease
+from apps.leases.models import Lease, RentSchedule
 from apps.notifications.models import Notification
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
+from application.services.billing import (
+    allocate_payment, record_manual_receipt, record_payment, rent_charge_amount,
+)
 from engines.proration.facade import prorate_move_in
 
 
@@ -103,28 +110,343 @@ class LedgerApiTests(APITestCase):
             self.assertEqual(charge_response.status_code, status.HTTP_201_CREATED)
         posted = self.client.post(f'/api/v1/billing/invoices/{invoice_id}/post/')
         self.assertEqual(posted.status_code, status.HTTP_200_OK)
-        payment_response = self.client.post('/api/v1/billing/ledger-payments/', {
-            'tenant': self.tenant.pk,
-            'amount_cents': payment_amount,
-            'received_date': '2026-10-06',
-            'method': method,
-            'reference': f'REVERSAL-{uuid4().hex}',
-        }, format='json')
-        self.assertEqual(payment_response.status_code, status.HTTP_201_CREATED)
-        allocation_response = self.client.post(
-            f"/api/v1/billing/ledger-payments/{payment_response.data['id']}/allocate/",
-            {'policy_id': 'CANONICAL_PRIORITY', 'policy_version': 2},
-            format='json',
-        )
-        self.assertEqual(allocation_response.status_code, status.HTTP_200_OK)
+        reference = f'REVERSAL-{uuid4().hex}'
+        if method == Payment.Method.MPESA:
+            # The staff payment API must not manufacture a provider payment.
+            # Build this historical settlement through the internal service so
+            # the reversal test remains focused on its provider-review rule.
+            payment = record_payment(
+                tenant=self.tenant,
+                amount_cents=payment_amount,
+                received_date=date(2026, 10, 6),
+                method=method,
+                reference=reference,
+                external_id=f'mpesa-{uuid4().hex}',
+                actor=self.accountant,
+            )
+            payment = allocate_payment(
+                payment,
+                policy_id='CANONICAL_PRIORITY',
+                policy_version=2,
+                actor=self.accountant,
+            )
+        else:
+            payment_response = self.client.post('/api/v1/billing/ledger-payments/', {
+                'tenant': self.tenant.pk,
+                'amount_cents': payment_amount,
+                'received_date': '2026-10-06',
+                'method': method,
+                'reference': reference,
+            }, format='json')
+            self.assertEqual(payment_response.status_code, status.HTTP_201_CREATED)
+            allocation_response = self.client.post(
+                f"/api/v1/billing/ledger-payments/{payment_response.data['id']}/allocate/",
+                {'policy_id': 'CANONICAL_PRIORITY', 'policy_version': 2},
+                format='json',
+            )
+            self.assertEqual(allocation_response.status_code, status.HTTP_200_OK)
+            payment = Payment.objects.get(pk=payment_response.data['id'])
         return (
             Invoice.objects.get(pk=invoice_id),
             list(Charge.objects.filter(invoice_id=invoice_id).order_by('due_date')),
-            Payment.objects.get(pk=payment_response.data['id']),
+            payment,
         )
 
     def reverse_url(self, payment):
         return f'/api/v1/billing/ledger-payments/{payment.pk}/reverse/'
+
+    def create_posted_rent_charge(self, amount_cents=10_000):
+        self.client.force_authenticate(self.accountant)
+        invoice_response = self.client.post(
+            '/api/v1/billing/invoices/',
+            self.invoice_payload(include_rent=False),
+            format='json',
+        )
+        self.assertEqual(invoice_response.status_code, status.HTTP_201_CREATED)
+        charge_response = self.client.post('/api/v1/billing/charges/', {
+            'invoice': invoice_response.data['id'],
+            'charge_type': 'RENT',
+            'amount_cents': amount_cents,
+            'due_date': '2026-10-05',
+        }, format='json')
+        self.assertEqual(charge_response.status_code, status.HTTP_201_CREATED)
+        post_response = self.client.post(f"/api/v1/billing/invoices/{invoice_response.data['id']}/post/")
+        self.assertEqual(post_response.status_code, status.HTTP_200_OK)
+        return (
+            Invoice.objects.get(pk=invoice_response.data['id']),
+            Charge.objects.get(pk=charge_response.data['id']),
+        )
+
+    def test_manual_receipt_settles_canonical_ledger_and_statement(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+
+        response = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': 4_000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'CASH-RECEIPT-001',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        payment = Payment.objects.get(pk=response.data['id'])
+        charge.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(payment.status, Payment.Status.ALLOCATED)
+        self.assertEqual(payment.recorded_by_id, self.accountant.pk)
+        self.assertEqual(payment.method, Payment.Method.CASH)
+        self.assertEqual(payment.reference, 'CASH-RECEIPT-001')
+        self.assertEqual(payment.allocated_cents, 4_000)
+        self.assertEqual(payment.overpayment_cents, 0)
+        self.assertEqual(charge.balance_cents, 6_000)
+        self.assertEqual(invoice.balance_cents, 6_000)
+        self.assertEqual(PaymentAllocation.objects.filter(payment=payment).count(), 1)
+        debits = sum(row.amount_cents for row in LedgerPosting.objects.filter(payment=payment, direction='DEBIT'))
+        credits = sum(row.amount_cents for row in LedgerPosting.objects.filter(payment=payment, direction='CREDIT'))
+        self.assertEqual((debits, credits), (4_000, 4_000))
+        self.assertTrue(AuditLog.objects.filter(action='payment.manual_receipt', object_id=str(payment.pk)).exists())
+
+        self.client.force_authenticate(self.tenant_user)
+        payment_history = self.client.get('/api/v1/billing/ledger-payments/')
+        self.assertEqual(payment_history.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['id'] for row in payment_history.data], [str(payment.pk)])
+        statement = self.client.get('/api/v1/billing/statements/me/', {
+            'from': '2026-10-01', 'to': '2026-10-31',
+        })
+        self.assertEqual(statement.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(
+            line['kind'] == 'payment' and line['credit_cents'] == 4_000
+            for line in statement.data['lines']
+        ))
+        delinquency = self.client.get('/api/v1/billing/delinquency/', {
+            'tenant': self.tenant.pk, 'as_of': '2026-10-10', 'grace_days': 0,
+        })
+        self.assertEqual(delinquency.status_code, status.HTTP_200_OK)
+        self.assertEqual(delinquency.data['delinquent_cents'], 6_000)
+
+    def test_manual_receipt_overpayment_is_canonical_tenant_credit(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+
+        response = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': 12_500,
+            'received_date': '2026-10-06',
+            'method': 'BANK_TRANSFER',
+            'reference': 'BANK-RECEIPT-OVERPAY',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        payment = Payment.objects.get(pk=response.data['id'])
+        charge.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual((payment.allocated_cents, payment.overpayment_cents), (10_000, 2_500))
+        self.assertEqual((charge.balance_cents, invoice.balance_cents), (0, 0))
+        self.assertTrue(LedgerPosting.objects.filter(
+            payment=payment, account='2020', direction='CREDIT', amount_cents=2_500,
+        ).exists())
+
+    def test_manual_receipt_retry_is_idempotent_and_rolls_back_on_failure(self):
+        _invoice, charge = self.create_posted_rent_charge(10_000)
+        payload = {
+            'tenant': self.tenant.pk,
+            'amount_cents': 4_000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'CASH-RECEIPT-IDEMPOTENT',
+        }
+        first = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', payload, format='json')
+        second = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', payload, format='json')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data['id'], second.data['id'])
+        payment = Payment.objects.get(pk=first.data['id'])
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(PaymentAllocation.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(LedgerPosting.objects.filter(payment=payment).count(), 2)
+
+        failing_payload = {**payload, 'reference': 'CASH-RECEIPT-ROLLBACK'}
+        with patch('application.services.billing.allocate_payment', side_effect=RuntimeError('test failure')):
+            with self.assertRaises(RuntimeError):
+                self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', failing_payload, format='json')
+        charge.refresh_from_db()
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(charge.balance_cents, 6_000)
+
+    def test_manual_receipt_reference_collision_with_history_requires_reconciliation(self):
+        _invoice, charge = self.create_posted_rent_charge(10_000)
+        legacy = RentPayment.objects.create(
+            lease=self.lease,
+            recorded_by=self.accountant,
+            due_date=date(2026, 10, 5),
+            amount_minor=4_000,
+            status=RentPayment.Status.PAID,
+            paid_at=timezone.now(),
+            method='CASH',
+            reference='LEGACY-RECEIPT-001',
+        )
+        original = (legacy.amount_minor, legacy.status, legacy.reference, legacy.lease_id)
+
+        response = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': 4_000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'LEGACY-RECEIPT-001',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('reference', response.data)
+        self.assertIn('Reconciliation is required', str(response.data['reference']))
+        self.assertFalse(Payment.objects.exists())
+        self.assertFalse(PaymentAllocation.objects.exists())
+        self.assertFalse(LedgerPosting.objects.exists())
+        charge.refresh_from_db()
+        legacy.refresh_from_db()
+        self.assertEqual(charge.balance_cents, 10_000)
+        self.assertEqual((legacy.amount_minor, legacy.status, legacy.reference, legacy.lease_id), original)
+
+    def test_manual_receipt_reference_collision_is_scoped_to_organization(self):
+        self.create_posted_rent_charge(10_000)
+        other_tenant = Tenant.objects.create(
+            organization=self.other,
+            first_name='Brian',
+            last_name='Mwangi',
+            phone_number='+254711111111',
+        )
+        other_property = Property.objects.create(organization=self.other, name='Other Acacia')
+        other_building = Building.objects.create(property=other_property, name='Block B')
+        other_unit = Unit.objects.create(building=other_building, name='B-1')
+        other_lease = Lease.objects.create(
+            tenant=other_tenant,
+            unit=other_unit,
+            reference='OTHER-LEASE-1',
+            start_date=date(2026, 10, 1),
+            monthly_rent_minor=100_000,
+        )
+        RentPayment.objects.create(
+            lease=other_lease,
+            recorded_by=self.outsider,
+            due_date=date(2026, 10, 5),
+            amount_minor=4_000,
+            status=RentPayment.Status.PAID,
+            reference='ORG-SCOPED-RECEIPT',
+        )
+
+        self.client.force_authenticate(self.accountant)
+        response = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': 4_000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'ORG-SCOPED-RECEIPT',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(Payment.objects.get(pk=response.data['id']).organization_id, self.organization.pk)
+
+    def test_historical_row_added_after_reconciliation_does_not_duplicate_canonical_payment(self):
+        self.create_posted_rent_charge(10_000)
+        payload = {
+            'tenant': self.tenant.pk,
+            'amount_cents': 4_000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'RECONCILED-LEGACY-REF',
+        }
+        first = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', payload, format='json')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED, first.data)
+        legacy = RentPayment.objects.create(
+            lease=self.lease,
+            recorded_by=self.accountant,
+            due_date=date(2026, 10, 5),
+            amount_minor=4_000,
+            status=RentPayment.Status.PAID,
+            reference=payload['reference'],
+        )
+
+        retry = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', payload, format='json')
+
+        self.assertEqual(retry.status_code, status.HTTP_200_OK, retry.data)
+        self.assertEqual(retry.data['id'], first.data['id'])
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(PaymentAllocation.objects.filter(payment_id=first.data['id']).count(), 1)
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.status, RentPayment.Status.PAID)
+
+    def test_manual_receipt_requires_authorized_staff_and_disallows_mpesa(self):
+        self.create_posted_rent_charge(10_000)
+        payload = {
+            'tenant': self.tenant.pk,
+            'amount_cents': 1_000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'CASH-RECEIPT-AUTH',
+        }
+        self.client.force_authenticate(self.tenant_user)
+        tenant_response = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', payload, format='json')
+        self.client.force_authenticate(self.outsider)
+        outsider_response = self.client.post('/api/v1/billing/ledger-payments/manual-receipts/', payload, format='json')
+        self.client.force_authenticate(self.accountant)
+        unverified_mpesa = self.client.post('/api/v1/billing/ledger-payments/', {
+            **payload, 'method': 'MPESA', 'reference': 'MPESA-MANUAL-BLOCKED',
+        }, format='json')
+        self.assertEqual(tenant_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(outsider_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(unverified_mpesa.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_payment_amount_database_limit_is_validated_before_persistence(self):
+        self.client.force_authenticate(self.accountant)
+        accepted = self.client.post('/api/v1/billing/ledger-payments/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': MAX_MONEY_CENTS,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'MAX-RANGE-PAYMENT',
+        }, format='json')
+        rejected = self.client.post('/api/v1/billing/ledger-payments/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': MAX_MONEY_CENTS + 1,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'OVER-RANGE-PAYMENT',
+        }, format='json')
+        self.assertEqual(accepted.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('amount_cents', rejected.data)
+
+    def test_canonical_payment_service_rejects_amount_above_storage_range(self):
+        with self.assertRaises(ValidationError):
+            record_payment(
+                tenant=self.tenant,
+                amount_cents=MAX_MONEY_CENTS + 1,
+                received_date=date(2026, 10, 6),
+                method=Payment.Method.CASH,
+                actor=self.accountant,
+            )
+        self.assertFalse(Payment.objects.exists())
+
+    def test_invoice_aggregate_cannot_overflow_database_money_range(self):
+        self.client.force_authenticate(self.accountant)
+        invoice_response = self.client.post(
+            '/api/v1/billing/invoices/', self.invoice_payload(include_rent=False), format='json',
+        )
+        self.assertEqual(invoice_response.status_code, status.HTTP_201_CREATED)
+        invoice_id = invoice_response.data['id']
+        first = self.client.post('/api/v1/billing/charges/', {
+            'invoice': invoice_id, 'charge_type': 'RENT', 'amount_cents': MAX_MONEY_CENTS,
+            'due_date': '2026-10-05',
+        }, format='json')
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        overflow = self.client.post('/api/v1/billing/charges/', {
+            'invoice': invoice_id, 'charge_type': 'RENT', 'amount_cents': 1,
+            'due_date': '2026-10-05',
+        }, format='json')
+        self.assertEqual(overflow.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('amount_cents', overflow.data)
+        self.assertEqual(Charge.objects.filter(invoice_id=invoice_id).count(), 1)
+        self.assertEqual(Invoice.objects.get(pk=invoice_id).total_cents, MAX_MONEY_CENTS)
 
     def test_generic_rent_allocation_does_not_consume_security_deposit(self):
         self.client.force_authenticate(self.accountant)
@@ -385,9 +707,9 @@ class LedgerApiTests(APITestCase):
             'tenant': self.tenant.pk,
             'amount_cents': 80000,
             'received_date': '2026-11-02',
-            'method': 'MPESA',
-            'reference': 'MPESA-1',
-            'external_id': 'txn-1',
+            'method': 'BANK_TRANSFER',
+            'reference': 'BANK-1',
+            'external_id': 'bank-txn-1',
         }, format='json')
         self.assertEqual(paid.status_code, status.HTTP_201_CREATED)
         payment_id = paid.data['id']
@@ -444,6 +766,39 @@ class LedgerApiTests(APITestCase):
             'external_id': 'txn-1',
         }, format='json')
         self.assertEqual(duplicate.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_current_rent_generation_uses_start_rate_and_ignores_schedule_frequency(self):
+        # Characterizes the existing behavior pending an approved rental
+        # billing policy: schedule frequency is stored but not interpreted,
+        # and a mid-period rate change does not split the generated charge.
+        RentSchedule.objects.create(
+            lease=self.lease,
+            effective_from=date(2026, 10, 1),
+            effective_to=date(2026, 10, 15),
+            amount_minor=70_000,
+            frequency=RentSchedule.Frequency.WEEKLY,
+        )
+        RentSchedule.objects.create(
+            lease=self.lease,
+            effective_from=date(2026, 10, 15),
+            amount_minor=210_000,
+            frequency=RentSchedule.Frequency.QUARTERLY,
+        )
+
+        actual = rent_charge_amount(self.lease, date(2026, 10, 1), date(2026, 10, 31))
+
+        self.assertEqual(actual, prorate_move_in(70_000, date(2026, 10, 15)).charge_cents)
+
+    def test_current_rent_generation_does_not_prorate_a_mid_period_move_out(self):
+        # Characterizes the existing full-rate result without choosing the
+        # disputed future move-out proration rule.
+        self.lease.start_date = date(2026, 10, 1)
+        self.lease.end_date = date(2026, 10, 15)
+        self.lease.save(update_fields=('start_date', 'end_date'))
+
+        actual = rent_charge_amount(self.lease, date(2026, 10, 1), date(2026, 10, 31))
+
+        self.assertEqual(actual, self.lease.monthly_rent_minor)
 
     def test_void_posted_invoice_without_allocations(self):
         self.client.force_authenticate(self.owner)
@@ -708,3 +1063,60 @@ class PaymentReversalConcurrencyTests(TransactionTestCase):
         payment.refresh_from_db()
         self.assertEqual(PaymentReversal.objects.filter(payment=payment).count(), 1)
         self.assertEqual(LedgerPosting.objects.filter(payment=payment).count(), 4)
+
+
+@skipUnless(connection.vendor == 'postgresql', 'Concurrent receipt test requires PostgreSQL.')
+class ManualReceiptConcurrencyTests(TransactionTestCase):
+    def test_two_identical_concurrent_receipts_create_one_payment_and_allocation(self):
+        user_model = get_user_model()
+        actor = user_model.objects.create_user(username='manual-receipt-concurrency', password='test')
+        organization = Organization.objects.create(name='Manual Receipt Concurrency Homes')
+        OrganizationMembership.objects.create(
+            organization=organization, user=actor, role=OrganizationMembership.Role.ACCOUNTANT,
+        )
+        tenant = Tenant.objects.create(
+            organization=organization,
+            first_name='Concurrent',
+            last_name='Receipt',
+            phone_number='+254700000091',
+        )
+        invoice = Invoice.objects.create(
+            organization=organization, tenant=tenant,
+            period_start=date(2026, 10, 1), period_end=date(2026, 10, 31),
+            due_date=date(2026, 10, 5), status=DocumentStatus.POSTED,
+            total_cents=5_000, balance_cents=5_000,
+        )
+        charge = Charge.objects.create(
+            invoice=invoice, organization=organization, tenant=tenant,
+            charge_type='RENT', amount_cents=5_000, balance_cents=5_000,
+            due_date=date(2026, 10, 5), lifecycle=DocumentStatus.POSTED,
+        )
+        actor_id, tenant_id = actor.pk, tenant.pk
+        barrier = Barrier(2)
+
+        def submit_in_own_connection():
+            close_old_connections()
+            try:
+                actor_row = user_model.objects.get(pk=actor_id)
+                tenant_row = Tenant.objects.get(pk=tenant_id)
+                barrier.wait(timeout=10)
+                payment, duplicate = record_manual_receipt(
+                    tenant=tenant_row, amount_cents=3_000,
+                    received_date=date(2026, 10, 6), method=Payment.Method.CASH,
+                    reference='CONCURRENT-RECEIPT-001', actor=actor_row,
+                )
+                return str(payment.pk), duplicate
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _index: submit_in_own_connection(), range(2)))
+
+        self.assertEqual(results[0][0], results[1][0])
+        self.assertEqual(sorted(duplicate for _payment_id, duplicate in results), [False, True])
+        self.assertEqual(Payment.objects.count(), 1)
+        payment = Payment.objects.get()
+        self.assertEqual(PaymentAllocation.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(LedgerPosting.objects.filter(payment=payment).count(), 2)
+        charge.refresh_from_db()
+        self.assertEqual(charge.balance_cents, 2_000)

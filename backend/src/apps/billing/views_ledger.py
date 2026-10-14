@@ -15,6 +15,7 @@ from application.services.billing import (
     assess_tenant_delinquency,
     create_invoice,
     post_invoice,
+    record_manual_receipt,
     record_payment,
     reverse_payment,
     update_draft_invoice,
@@ -33,6 +34,7 @@ from .serializers_ledger import (
     InvoiceSerializer,
     InvoiceUpdateSerializer,
     InvoiceWriteSerializer,
+    ManualReceiptSerializer,
     PaymentSerializer,
     PaymentWriteSerializer,
     PaymentReversalRequestSerializer,
@@ -196,6 +198,8 @@ class PaymentViewSet(
     def get_serializer_class(self):
         if self.action == 'create':
             return PaymentWriteSerializer
+        if self.action == 'manual_receipt':
+            return ManualReceiptSerializer
         return PaymentSerializer
 
     def create(self, request, *args, **kwargs):
@@ -214,6 +218,26 @@ class PaymentViewSet(
             request=request,
         )
         return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=('post',), url_path='manual-receipts')
+    def manual_receipt(self, request):
+        serializer = ManualReceiptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        tenant = serializer.validated_data['tenant']
+        _ensure_billing_write(request.user, tenant.organization_id)
+        payment, duplicate = record_manual_receipt(
+            tenant=tenant,
+            amount_cents=serializer.validated_data['amount_cents'],
+            received_date=serializer.validated_data['received_date'],
+            method=serializer.validated_data['method'],
+            reference=serializer.validated_data['reference'],
+            actor=request.user,
+            request=request,
+        )
+        return Response(
+            PaymentSerializer(payment).data,
+            status=status.HTTP_200_OK if duplicate else status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=('post',), url_path='allocate')
     def allocate(self, request, pk=None):

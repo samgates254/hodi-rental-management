@@ -1,4 +1,5 @@
 from django.db import IntegrityError, models, transaction
+from django.db.models import Exists, OuterRef
 from rest_framework import mixins, status, viewsets
 from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -11,6 +12,7 @@ from common.permissions import (
     organization_ids_for_resource,
     user_can_access_organization_resource,
 )
+from common.rental_dates import rental_business_date
 
 from .models import UtilityAccount, UtilityBill
 from .serializers import UtilityAccountSerializer, UtilityBillSerializer
@@ -21,18 +23,31 @@ class TenantUtilityView(APIView):
 
     def get(self, request):
         from apps.leases.models import Lease
-        from django.utils import timezone
         try:
             tenant = request.user.tenant_record
         except Exception:
             return Response([])
-        today = timezone.localdate()
-        unit_ids = Lease.objects.filter(tenant=tenant, status='ACTIVE', start_date__lte=today).filter(
+        today = rental_business_date()
+        # Utility bills are unit-level records, so only expose a bill to a
+        # tenant when its entire inclusive billing period belongs to one of
+        # that tenant's current active leases. A bill spanning a lease change
+        # cannot be safely assigned to either tenant without an allocation.
+        authorized_lease = Lease.objects.filter(
+            tenant=tenant,
+            unit_id=OuterRef('account__unit_id'),
+            status='ACTIVE',
+            start_date__lte=today,
+        ).filter(start_date__lte=OuterRef('period_start')).filter(
             models.Q(end_date__isnull=True) | models.Q(end_date__gte=today),
-        ).values_list('unit_id', flat=True)
-        bills = UtilityBill.objects.filter(account__unit_id__in=unit_ids,
+        ).filter(
+            models.Q(end_date__isnull=True) | models.Q(end_date__gte=OuterRef('period_end')),
+        )
+        bills = UtilityBill.objects.filter(
             account__responsible_party=UtilityAccount.ResponsibleParty.TENANT,
-            account__is_active=True).select_related('account__property', 'account__unit')
+            account__is_active=True,
+        ).filter(
+            Exists(authorized_lease),
+        ).select_related('account__property', 'account__unit')
         return Response([{
             'id': bill.pk, 'utility_type': bill.account.get_service_type_display(),
             'service_description': bill.account.property.name,

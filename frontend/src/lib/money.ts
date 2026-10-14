@@ -31,10 +31,20 @@ export function centsToDecimal(minor: number): string {
 
 /** Parse a shilling amount typed by a person. Rejects more than two decimal places. */
 export function shillingsToCents(raw: string): number | undefined {
-  const trimmed = raw.trim().replace(/,/g, "").replace(/ /g, "");
+  const trimmed = raw.trim();
   if (!trimmed || /[eE]/.test(trimmed)) return undefined;
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return undefined;
-  const [whole, frac = ""] = trimmed.split(".");
+
+  // Accept either plain digits or conventional thousands groups. Validate the
+  // grouping before removing separators so input such as "1,2" never becomes
+  // the materially different amount "12".
+  const plain = /^\d+(?:\.\d{1,2})?$/;
+  const commaGrouped = /^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/;
+  const spaceGrouped = /^\d{1,3}(?: \d{3})+(?:\.\d{1,2})?$/;
+  if (!plain.test(trimmed) && !commaGrouped.test(trimmed) && !spaceGrouped.test(trimmed)) {
+    return undefined;
+  }
+  const normalized = trimmed.replace(/[ ,]/g, "");
+  const [whole, frac = ""] = normalized.split(".");
   if (whole.length > 15) return undefined;
   const cents = Number(whole) * 100 + Number((frac + "00").slice(0, 2));
   if (!Number.isSafeInteger(cents) || cents > SAFE) return undefined;
@@ -43,9 +53,8 @@ export function shillingsToCents(raw: string): number | undefined {
 
 /** Whole Kenyan shillings only. Used where a rail, such as M-Pesa STK, rejects cents. */
 export function wholeShillingsToCents(raw: string): number | undefined {
-  const trimmed = raw.trim().replace(/,/g, "").replace(/ /g, "");
-  if (!/^\d+$/.test(trimmed)) return undefined;
-  return shillingsToCents(trimmed);
+  const cents = shillingsToCents(raw);
+  return cents != null && cents % 100 === 0 ? cents : undefined;
 }
 
 /** Whole-shilling payment for a cent balance. Undefined when cents remain. */

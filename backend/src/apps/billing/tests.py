@@ -151,7 +151,7 @@ class RentPaymentApiTests(TestCase):
 		self.assertEqual(len(response.data), 1)
 		self.assertEqual(response.data[0]['tenant_name'], 'Other Tenant')
 
-	def test_accountant_can_create_and_update_payment(self):
+	def test_historical_rent_payment_records_are_read_only(self):
 		self.client.force_authenticate(self.owner)
 
 		create_response = self.client.post(
@@ -159,15 +159,14 @@ class RentPaymentApiTests(TestCase):
 			self.payment_payload(),
 			format='json',
 		)
-		self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
-		payment = RentPayment.objects.get(reference='BANK-002')
-		self.assertEqual(payment.recorded_by, self.owner)
+		self.assertEqual(create_response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+		self.assertFalse(RentPayment.objects.filter(reference='BANK-002').exists())
 
 		update_response = self.client.patch(
-			f'/api/v1/billing/payments/{payment.pk}/',
+			f'/api/v1/billing/payments/{self.payment.pk}/',
 			{'status': 'OVERDUE'},
 			format='json',
 		)
-		self.assertEqual(update_response.status_code, status.HTTP_200_OK)
-		payment.refresh_from_db()
-		self.assertEqual(payment.status, RentPayment.Status.OVERDUE)
+		self.assertEqual(update_response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+		self.payment.refresh_from_db()
+		self.assertEqual(self.payment.status, RentPayment.Status.PENDING)

@@ -8,6 +8,7 @@ class Notification(models.Model):
 		MAINTENANCE_ASSIGNED = 'MAINTENANCE_ASSIGNED', 'Maintenance assigned'
 		MAINTENANCE_UPDATED = 'MAINTENANCE_UPDATED', 'Maintenance updated'
 		LEASE_ACTIVATED = 'LEASE_ACTIVATED', 'Lease activated'
+		LEASE_END_SCHEDULED = 'LEASE_END_SCHEDULED', 'Lease end scheduled'
 		LEASE_TERMINATED = 'LEASE_TERMINATED', 'Lease terminated'
 		INVOICE_POSTED = 'INVOICE_POSTED', 'Invoice posted'
 		MEMBERSHIP_CHANGED = 'MEMBERSHIP_CHANGED', 'Membership changed'

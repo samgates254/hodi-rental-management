@@ -11,6 +11,7 @@ from apps.organizations.models import OrganizationMembership
 from apps.leases.models import Lease
 from apps.tenants.models import Tenant
 from application.services.maintenance import create_request
+from common.rental_dates import rental_business_date
 
 from .models import (
 	MaintenanceComment,
@@ -94,7 +95,7 @@ class MaintenanceIssueViewSet(
 
 		data = request.data.copy()
 		if not data.get('unit'):
-			today = timezone.localdate()
+			today = rental_business_date()
 			lease = Lease.objects.filter(
 				tenant=tenant,
 				status=Lease.Status.ACTIVE,

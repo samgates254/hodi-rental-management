@@ -1,4 +1,4 @@
-"""Maximum-weight bipartite matching of work orders to technicians.
+"""Maximum-total-weight bipartite matching of work orders to technicians.
 
 Blueprint weight, with scales made explicit so a 0–5 rating cannot swamp distance:
 
@@ -11,11 +11,14 @@ technicians, and technicians missing any required skill, have no edge.
 Already-offered technicians (rejected or timed out) are excluded by the caller.
 
 exp(-d/σ) is a fixed-point series so the integer weight does not depend on
-libm. The assignment itself uses only integers. Among maximum-weight
-matchings, the solver minimizes the sum of edge indices i·|T|+j after ids
-are sorted ascending. That sum is not injective, so several optima can share
-it; the Hungarian pivot then returns one of them, and it returns the same
-one on every call. A single job still selects the lowest technician id.
+libm. The assignment itself uses only integers. Jobs may remain unmatched.
+The objective first maximizes total weight, then maximizes the number of
+assignments among equal-score solutions, then minimizes the sum of edge
+indices i·|T|+j after ids are sorted ascending. Thus a zero-score eligible
+edge is used only when it does not reduce the total score; it wins a tie
+against leaving that job unmatched. The index sum is not injective, so
+several optima can share it; the Hungarian pivot returns one of them
+deterministically. A single job still selects the lowest technician id.
 
 Greedy "best score for this job" is not optimal when several jobs share a
 pool. dispatch_candidates in maintenance_engine/dispatch.py is that greedy
@@ -210,10 +213,12 @@ def match_jobs(jobs: list[Job] | tuple[Job, ...], technicians: list[Technician] 
     Postconditions
     - each job and each technician appears at most once
     - every assignment is an eligible edge
-    - total weight is maximum; ties break by the documented index cost
+    - total assignment weight is maximum
+    - among equal scores, the assignment count is maximum
+    - remaining ties use the documented index cost
     - repeated calls return the same assignments
 
-    Complexity: O(n^3) with n = max(|J|, |T|) after square padding.
+    Complexity: O(n^3) with n = |J| + |T| after square padding.
     """
     if any(not j.job_id for j in jobs):
         raise MatchingError("job_id is required")
@@ -258,15 +263,24 @@ def match_jobs(jobs: list[Job] | tuple[Job, ...], technicians: list[Technician] 
             if w > max_w:
                 max_w = w
 
-    # Pad to square. Dummy technicians represent "unmatched".
-    # Dummy jobs exist only when there are more technicians than jobs.
-    n = max(n_j, n_t, 1)
-    tie_base = n_j * max(n_t, 1) + 1
-    # One real edge costs at most max_w * tie_base + tie_base.
-    # Dummy-tech cost is strictly worse than every real edge, including weight 0.
-    dummy_cost = max_w * tie_base + tie_base
-    # Forbidden must lose to dummy unmatched.
-    forbidden = dummy_cost * (n + 1) + 1
+    # Pad with one dummy technician for each job and one dummy job for each
+    # technician. This lets every real job remain unmatched even when there
+    # are at least as many technicians as jobs. The former max(|J|, |T|)
+    # padding had no dummy column in that case, which accidentally preferred
+    # a scoreless real assignment over an unmatched job.
+    n = n_j + n_t
+
+    # Encode the documented lexicographic objective as one integer cost:
+    # maximize score, then real assignment count, then minimize tie indices.
+    # A total tie-cost difference is at most this bound.
+    tie_limit = n_j * n_j * n_t
+    assignment_unit = tie_limit + 1
+    score_unit = n_j * assignment_unit + tie_limit + 1
+    # Each unmatched job adds one assignment_unit, so an equal-score real
+    # edge beats a dummy edge even after all tie costs are considered.
+    dummy_cost = max_w * score_unit + assignment_unit
+    # Forbidden edges must always lose to the available unmatched solution.
+    forbidden = (max_w + 1) * score_unit
 
     cost = [[forbidden] * n for _ in range(n)]
     for i in range(n_j):
@@ -274,8 +288,10 @@ def match_jobs(jobs: list[Job] | tuple[Job, ...], technicians: list[Technician] 
             w = weight[i][j]
             if w is None:
                 continue
-            tie = i * max(n_t, 1) + j
-            cost[i][j] = (max_w - w) * tie_base + tie
+            # Start at one so a zero-weight real edge is strictly worse than
+            # its dummy alternative, whose tie cost is zero.
+            tie = i * max(n_t, 1) + j + 1
+            cost[i][j] = (max_w - w) * score_unit + tie
         for j in range(n_t, n):
             cost[i][j] = dummy_cost
     for i in range(n_j, n):

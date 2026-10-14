@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from zoneinfo import ZoneInfo
 
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import ValidationError
@@ -18,10 +17,15 @@ from apps.billing.models import MpesaAttempt, Payment
 from application.services.audit import record_audit
 from application.services.billing import allocate_payment, record_payment
 from application.services.mpesa import normalize_kenya_msisdn
+from common.rental_dates import RENTAL_BUSINESS_TIME_ZONE as NAIROBI, rental_business_date
 
 logger = logging.getLogger(__name__)
 
-NAIROBI = ZoneInfo('Africa/Nairobi')
+# Daraja's callback date has civil-date precision, not a timezone-aware
+# timestamp. Accept the checkout day and the following Nairobi date to cover
+# midnight crossing; callback delivery itself may be delayed. Older or later
+# transaction dates require operator/provider reconciliation.
+MAX_STK_TRANSACTION_DATE_DELAY_DAYS = 1
 POLICY_ID = 'CANONICAL_PRIORITY'
 POLICY_VERSION = 2
 
@@ -38,6 +42,10 @@ TERMINAL_FAILURE = frozenset({
 
 class CallbackValidationError(Exception):
     """Success-callback metadata failed HODI checks. Do not create a Payment."""
+
+
+class TransactionDateValidationError(CallbackValidationError):
+    """Provider date is implausible for the stored checkout attempt."""
 
 
 class DuplicateReceiptConflict(Exception):
@@ -155,6 +163,24 @@ def _parse_transaction_date(value):
     except ValueError as error:
         raise CallbackValidationError('Callback TransactionDate is invalid.') from error
     return moment.date()
+
+
+def validate_stk_transaction_date(attempt, transaction_date):
+    """Apply the shared callback and operator-review civil-date policy.
+
+    Daraja sends only a Nairobi civil transaction date. It must be on the
+    checkout's Nairobi creation date or the following civil date, and not later
+    than today's Nairobi date. This permits midnight crossing and delayed
+    callback delivery while routing an unrelated transaction date to review.
+    """
+    attempt_date = rental_business_date(attempt.created_at)
+    today = rental_business_date()
+    latest_transaction_date = attempt_date + timedelta(days=MAX_STK_TRANSACTION_DATE_DELAY_DAYS)
+    if transaction_date < attempt_date or transaction_date > min(today, latest_transaction_date):
+        raise TransactionDateValidationError(
+            'Callback TransactionDate is outside the stored attempt date range.'
+        )
+    return transaction_date
 
 
 def _phones_match(attempt_phone: str, callback_phone) -> bool:
@@ -297,7 +323,10 @@ def _validate_success(attempt, stk) -> tuple[str, object]:
         raise CallbackValidationError('Callback Amount does not match the attempt.')
     if not _phones_match(attempt.phone_number, meta.get('PhoneNumber')):
         raise CallbackValidationError('Callback PhoneNumber does not match the attempt.')
-    received_date = _parse_transaction_date(meta.get('TransactionDate'))
+    received_date = validate_stk_transaction_date(
+        attempt,
+        _parse_transaction_date(meta.get('TransactionDate')),
+    )
     return receipt, received_date
 
 
@@ -485,7 +514,21 @@ def _settle_stk_callback_transaction(*, payload, provider_query=None, request=No
 
         try:
             receipt, received_date = _validate_success(attempt, stk)
-        except CallbackValidationError as error:
+        except TransactionDateValidationError:
+            _mark_attempt_unresolved(
+                attempt,
+                reason='transaction_date_outside_attempt_range',
+                request=request,
+            )
+            return _ack(
+                matched=True,
+                settled=False,
+                duplicate=False,
+                status='UNRESOLVED',
+                detail='Callback transaction date requires reconciliation. No payment was recorded.',
+                attempt=attempt,
+            )
+        except CallbackValidationError:
             record_audit(
                 action='mpesa.stk.callback_discrepancy',
                 object_type='MpesaAttempt',

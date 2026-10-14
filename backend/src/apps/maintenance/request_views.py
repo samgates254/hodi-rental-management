@@ -43,6 +43,7 @@ from common.permissions import (
     organization_ids_for_resource,
     user_can_access_organization_resource,
 )
+from common.rental_dates import rental_business_date
 
 from .models import (
     JobMaterialPurchase, MaintenanceRequest, RepairCompletion, RepairQuotation,
@@ -191,7 +192,7 @@ class MaintenanceRequestViewSet(
         ):
             tenant = tenant_record
             if unit is None:
-                today = timezone.localdate()
+                today = rental_business_date()
                 lease = Lease.objects.filter(
                     tenant=tenant_record,
                     status=Lease.Status.ACTIVE,

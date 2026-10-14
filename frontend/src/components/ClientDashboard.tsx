@@ -17,6 +17,7 @@ import Card from "../components/ui/Card";
 import { Container } from "../components/ui/Container";
 import SectionHead from "../components/ui/SectionHead";
 import { ClientApiError, clientApi, fetchMe } from "../lib/clientApi";
+import { daysUntilRentalDate } from "../lib/rentalDate";
 import ReportIssueModal from "./ReportIssueModal";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
 import NotificationBell from "./ops/NotificationBell";
@@ -485,13 +486,6 @@ function isTenancy(value: unknown): value is Tenancy {
     !Array.isArray(value) &&
     ("id" in value || "property" in value || "flat_number" in value),
   );
-}
-
-function daysUntil(date?: string) {
-  if (!date) return null;
-  const time = new Date(date).getTime();
-  if (!Number.isFinite(time)) return null;
-  return Math.ceil((time - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
 }
 
 function scrollToSection(id: string) {
@@ -1324,14 +1318,14 @@ export default function ClientDashboard() {
         : invoices.length || hasSharedRentStatus ? "Check status" : "No invoice";
   const nextInvoice = [...outstandingInvoices]
     .filter(invoice => invoice.due_date)
-    .sort((first, second) => new Date(first.due_date!).getTime() - new Date(second.due_date!).getTime())[0];
+    .sort((first, second) => first.due_date!.localeCompare(second.due_date!))[0];
   const nextSharedPayment = sharedUnpaidPayments
     .filter(payment => payment.due_date)
-    .sort((first, second) => new Date(first.due_date!).getTime() - new Date(second.due_date!).getTime())[0];
+    .sort((first, second) => first.due_date!.localeCompare(second.due_date!))[0];
   const dueDate = [nextInvoice?.due_date, nextSharedPayment?.due_date]
     .filter((value): value is string => Boolean(value))
-    .sort((first, second) => new Date(first).getTime() - new Date(second).getTime())[0];
-  const dueInDays = daysUntil(dueDate);
+    .sort((first, second) => first.localeCompare(second))[0];
+  const dueInDays = daysUntilRentalDate(dueDate);
   const rentDueCents = outstandingCents > 0 ? outstandingCents : sharedUnpaidCents;
   const monthlyRentCents = tenancy?.monthly_rent_cents ?? tenancyProperty?.rent_cents;
   const depositCents = tenancy?.deposit_cents;

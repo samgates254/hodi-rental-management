@@ -1,13 +1,13 @@
 """Authorized operator resolution for STK successes missing callback receipts."""
 
 from django.db import IntegrityError, transaction
-from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from apps.audit.models import AuditLog
 from apps.billing.models import MpesaAttempt, Payment
 from application.services.audit import record_audit
 from application.services.billing import allocate_payment, record_payment
+from application.services.mpesa_callback import TransactionDateValidationError, validate_stk_transaction_date
 from application.services.mpesa import normalize_kenya_msisdn
 from common.permissions import user_can_access_organization_resource
 
@@ -80,8 +80,10 @@ def resolve_mpesa_attempt_from_evidence(*, attempt_id, actor, evidence, request=
         raise ValidationError({'account_reference': 'Provider evidence account reference does not match the attempt.'})
     if phone != attempt.phone_number:
         raise ValidationError({'phone_number': 'Provider evidence phone number does not match the attempt.'})
-    if evidence['transaction_date'] < timezone.localtime(attempt.created_at).date() or evidence['transaction_date'] > timezone.localdate():
-        raise ValidationError({'transaction_date': 'Provider transaction date is outside the attempt date range.'})
+    try:
+        validate_stk_transaction_date(attempt, evidence['transaction_date'])
+    except TransactionDateValidationError as error:
+        raise ValidationError({'transaction_date': str(error)}) from error
     if not receipt or len(receipt) > 64 or any(character.isspace() for character in receipt):
         raise ValidationError({'receipt': 'Enter a valid M-Pesa receipt number.'})
     if MpesaAttempt.objects.filter(mpesa_receipt_number=receipt).exclude(pk=attempt.pk).exists():

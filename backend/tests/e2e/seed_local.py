@@ -2,14 +2,14 @@
 import json
 import os
 import tempfile
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files import File
-from django.utils import timezone
 from rest_framework.authtoken.models import Token
+from common.rental_dates import rental_business_date
 
 if settings.DJANGO_ENV == "production":
     raise RuntimeError("Refusing to seed a production database.")
@@ -60,6 +60,7 @@ OrganizationMembership.objects.get_or_create(organization=organization, user=car
 OrganizationMembership.objects.get_or_create(organization=other_organization, user=other_owner, defaults={"role": "OWNER"})
 AccountProfile.objects.filter(user=tenant_user).update(organization=organization)
 AccountProfile.objects.filter(user=other_tenant_user).update(organization=other_organization)
+today = rental_business_date()
 
 def tenancy(org, tenant_user, suffix):
     prop, _ = Property.objects.get_or_create(organization=org, name=f"E2E Property {suffix}")
@@ -68,7 +69,6 @@ def tenancy(org, tenant_user, suffix):
     tenant, _ = Tenant.objects.get_or_create(user=tenant_user, defaults={
         "organization": org, "first_name": tenant_user.first_name, "last_name": "E2E", "phone_number": "+254700000001",
     })
-    today = timezone.localdate()
     Lease.objects.get_or_create(tenant=tenant, reference=f"E2E-{suffix}", defaults={
         "unit": unit, "start_date": today - timedelta(days=30), "monthly_rent_minor": 2500000, "status": "ACTIVE",
     })
@@ -82,15 +82,15 @@ for prop_, unit_, org_, ref, amount in ((prop, unit, organization, "PRIVATE-LAND
         "provider_name": "E2E Water Utility", "service_reference": ref, "meter_reference": "PRIVATE-METER-REF",
         "responsible_party": "TENANT", "created_by": org_.memberships.get(role="OWNER").user,
     })
-    UtilityBill.objects.get_or_create(account=account, period_start=date.today().replace(day=1), period_end=date.today(), defaults={
-        "due_date": date.today() + timedelta(days=7), "amount_minor": amount, "reading_start": 10,
+    UtilityBill.objects.get_or_create(account=account, period_start=today.replace(day=1), period_end=today, defaults={
+        "due_date": today + timedelta(days=7), "amount_minor": amount, "reading_start": 10,
         "reading_end": 12, "reading_unit": "m3", "document_reference": "private-document-key", "recorded_by": owner if org_ == organization else other_owner,
     })
 # Landlord-funded bill for the same unit must remain invisible to the tenant.
 landlord_account, _ = UtilityAccount.objects.get_or_create(organization=organization, property=prop, unit=unit, service_type="ELECTRICITY", defaults={
     "provider_name": "Private Landlord Power", "service_reference": "LANDLORD-SECRET", "responsible_party": "LANDLORD", "created_by": owner,
 })
-UtilityBill.objects.get_or_create(account=landlord_account, period_start=date.today().replace(day=1), period_end=date.today(), defaults={
+UtilityBill.objects.get_or_create(account=landlord_account, period_start=today.replace(day=1), period_end=today, defaults={
     "amount_minor": 999999, "recorded_by": owner,
 })
 
@@ -136,7 +136,6 @@ for position, (filename, caption, relative_source) in enumerate(photo_sources):
             photo.image.save(filename, File(image_file), save=False)
         photo.save()
 
-today = timezone.localdate()
 invoice, _ = Invoice.objects.get_or_create(organization=organization, tenant=tenant, period_start=today.replace(day=1), defaults={
     "lease": tenant.leases.first(), "period_end": today, "due_date": today + timedelta(days=5), "status": "POSTED",
     "currency": "KES", "total_cents": 2500000, "balance_cents": 2500000,

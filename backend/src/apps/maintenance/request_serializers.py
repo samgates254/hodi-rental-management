@@ -5,6 +5,7 @@ from apps.properties.models import Unit
 from apps.organizations.models import OrganizationMembership
 from apps.tenants.models import Tenant
 from apps.marketplace.models import SupplierProfile
+from rental_os.algorithms.money import MAX_MONEY_MINOR
 
 from .models import (
     JobMaterialPurchase, JobMaterialReceipt, MaintenanceComment, MaintenanceRequest,
@@ -541,10 +542,10 @@ class TriageSerializer(serializers.Serializer):
 
 
 class QuotationWriteSerializer(serializers.Serializer):
-    labour_estimate_cents = serializers.IntegerField(min_value=0, required=False)
-    materials_estimate_cents = serializers.IntegerField(min_value=0, required=False)
-    other_estimate_cents = serializers.IntegerField(min_value=0, required=False)
-    total_estimate_cents = serializers.IntegerField(min_value=0, required=False)
+    labour_estimate_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR, required=False)
+    materials_estimate_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR, required=False)
+    other_estimate_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR, required=False)
+    total_estimate_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR, required=False)
     lines = serializers.ListField(child=serializers.DictField(), required=False, allow_empty=False, max_length=100)
     explanation = serializers.CharField()
 
@@ -597,8 +598,8 @@ class QuotationLineWriteSerializer(serializers.Serializer):
     description = serializers.CharField(max_length=240, allow_blank=False)
     quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal('0.001'))
     unit = serializers.CharField(max_length=30, allow_blank=False)
-    unit_price_cents = serializers.IntegerField(min_value=0, max_value=9223372036854775807)
-    line_total_cents = serializers.IntegerField(min_value=0, required=False)
+    unit_price_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
+    line_total_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR, required=False)
 
     def to_internal_value(self, data):
         allowed = set(self.fields)
@@ -631,7 +632,7 @@ class MaterialUsedWriteSerializer(serializers.Serializer):
     description = serializers.CharField(max_length=200)
     quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal('0.001'))
     unit = serializers.CharField(max_length=30)
-    unit_cost_cents = serializers.IntegerField(min_value=0)
+    unit_cost_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
     purchase_id = serializers.IntegerField(min_value=1, required=False)
 
 
@@ -640,9 +641,9 @@ class CompletionWriteSerializer(serializers.Serializer):
     failure_category = serializers.CharField(max_length=50)
     resolution_summary = serializers.CharField()
     outcome = serializers.ChoiceField(choices=RepairCompletion.Outcome.choices)
-    labour_cost_cents = serializers.IntegerField(min_value=0)
-    materials_cost_cents = serializers.IntegerField(min_value=0)
-    other_cost_cents = serializers.IntegerField(min_value=0, required=False, default=0)
+    labour_cost_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
+    materials_cost_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
+    other_cost_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR, required=False, default=0)
     follow_up_reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
     materials = MaterialUsedWriteSerializer(many=True, required=False, default=list)
 
@@ -678,7 +679,7 @@ class MaterialPurchaseWriteSerializer(serializers.Serializer):
     supplier_profile = serializers.PrimaryKeyRelatedField(queryset=SupplierProfile.objects.filter(is_active=True), required=False, allow_null=True)
     supplier_reference = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
     quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal('0.001'))
-    unit_price_cents = serializers.IntegerField(min_value=0, max_value=9223372036854775807)
+    unit_price_cents = serializers.IntegerField(min_value=0, max_value=MAX_MONEY_MINOR)
     purchase_date = serializers.DateField()
     idempotency_key = serializers.UUIDField()
     overrun_reason = serializers.CharField(required=False, allow_blank=True, max_length=2000)

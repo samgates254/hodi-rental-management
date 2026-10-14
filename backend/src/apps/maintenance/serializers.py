@@ -1,9 +1,9 @@
 from django.db.models import Q
-from django.utils import timezone
 from rest_framework import serializers
 
 from apps.leases.models import Lease
 from apps.properties.models import Unit
+from common.rental_dates import rental_business_date
 from .models import MaintenanceIssue, MaintenanceIssueAttachment, MaintenanceIssueUpdate, WorkOrder
 
 MAX_ISSUE_ATTACHMENTS = 5
@@ -167,7 +167,7 @@ class MaintenanceIssueCreateSerializer(serializers.ModelSerializer):
 		tenant = self.context['tenant']
 		if unit.organization_id != tenant.organization_id:
 			raise serializers.ValidationError('The unit must belong to your organization.')
-		today = timezone.localdate()
+		today = rental_business_date()
 		if not Lease.objects.filter(
 			tenant=tenant,
 			unit=unit,

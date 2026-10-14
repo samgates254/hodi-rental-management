@@ -356,6 +356,13 @@ class SubscriptionApiTests(APITestCase):
         self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
 
         self.client.force_authenticate(self.admin)
+        overflow = self.client.post(url, {
+            'organization': self.organization.pk, 'amount_minor': 1 << 63,
+            'unit_limit': 350, 'reason': 'Out of storage range for a monetary amount',
+        }, format='json')
+        self.assertEqual(overflow.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('amount_minor', overflow.data)
+
         issued = self.client.post(url, {
             'organization': self.organization.pk, 'amount_minor': 7_500_000,
             'unit_limit': 350, 'reason': 'Approved negotiated monthly scope',
