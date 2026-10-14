@@ -276,7 +276,7 @@ export default function MaintenanceRequestsPanel({
     setLoading(true);
     setError("");
     try {
-      const requestRows = await getList<MaintenanceRequestRow>("/api/v1/maintenance/requests/");
+      const requestRows = await getList<MaintenanceRequestRow>("/api/v1/maintenance/requests/queue/");
       setRequests(requestRows.filter(row => String(row.organization) === organizationId));
       if (!canWrite) return;
       const [unitRows, buildingRows, propertyRows, tenantRows] = await Promise.all([

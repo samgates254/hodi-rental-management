@@ -81,6 +81,92 @@ class MaintenanceRequestApiTests(APITestCase):
             status=Lease.Status.ACTIVE,
         )
 
+    def _create_request_for_ordering(self, title):
+        self.client.force_authenticate(self.tenant_user)
+        response = self.client.post('/api/v1/maintenance/requests/', {
+            'title': title,
+            'description': f'{title} details',
+            'hazard': 2,
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        return response.data['id']
+
+    def _set_request_ordering(self, request_id, *, priority_class, created_at):
+        MaintenanceRequest.objects.filter(pk=request_id).update(
+            priority_class=priority_class,
+            created_at=created_at,
+        )
+
+    def test_staff_queue_orders_by_priority_oldest_first_and_primary_key(self):
+        first_tied = self._create_request_for_ordering('First tied request')
+        class_one = self._create_request_for_ordering('Class one request')
+        second_tied = self._create_request_for_ordering('Second tied request')
+        newer_tie = self._create_request_for_ordering('Newer tied request')
+        older_lower_priority = self._create_request_for_ordering('Older lower priority request')
+        now = timezone.now()
+        tied_created_at = now - timedelta(days=4)
+        self._set_request_ordering(first_tied, priority_class=2, created_at=tied_created_at)
+        self._set_request_ordering(class_one, priority_class=1, created_at=now)
+        self._set_request_ordering(second_tied, priority_class=2, created_at=tied_created_at)
+        self._set_request_ordering(newer_tie, priority_class=2, created_at=now - timedelta(days=2))
+        self._set_request_ordering(older_lower_priority, priority_class=3, created_at=now - timedelta(days=10))
+
+        self.client.force_authenticate(self.owner)
+        response = self.client.get('/api/v1/maintenance/requests/queue/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [row['id'] for row in response.data],
+            [class_one, first_tied, second_tied, newer_tie, older_lower_priority],
+        )
+
+    def test_tenant_history_retains_priority_then_newest_first_ordering(self):
+        older_same_priority = self._create_request_for_ordering('Older same priority request')
+        newer_same_priority = self._create_request_for_ordering('Newer same priority request')
+        older_lower_priority = self._create_request_for_ordering('Older lower priority request')
+        now = timezone.now()
+        self._set_request_ordering(older_same_priority, priority_class=2, created_at=now - timedelta(days=4))
+        self._set_request_ordering(newer_same_priority, priority_class=2, created_at=now - timedelta(days=2))
+        self._set_request_ordering(older_lower_priority, priority_class=3, created_at=now - timedelta(days=10))
+
+        self.client.force_authenticate(self.tenant_user)
+        response = self.client.get('/api/v1/maintenance/requests/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [row['id'] for row in response.data],
+            [newer_same_priority, older_same_priority, older_lower_priority],
+        )
+
+    def test_tenant_cannot_access_staff_queue_but_can_access_tenant_history(self):
+        request_id = self._create_request_for_ordering('Tenant request')
+
+        self.client.force_authenticate(self.tenant_user)
+        queue_response = self.client.get('/api/v1/maintenance/requests/queue/')
+        history_response = self.client.get('/api/v1/maintenance/requests/')
+
+        self.assertEqual(queue_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(history_response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['id'] for row in history_response.data], [request_id])
+
+    def test_technician_visibility_only_returns_requests_assigned_to_them(self):
+        assigned_request = self._create_request_for_ordering('Assigned request')
+        unassigned_request = self._create_request_for_ordering('Unassigned request')
+        self.client.force_authenticate(self.caretaker)
+        assignment = self.client.post(
+            f'/api/v1/maintenance/requests/{assigned_request}/assign/',
+            {'user_id': self.technician.pk},
+            format='json',
+        )
+        self.assertEqual(assignment.status_code, status.HTTP_200_OK, assignment.data)
+
+        self.client.force_authenticate(self.technician)
+        response = self.client.get('/api/v1/maintenance/requests/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['id'] for row in response.data], [assigned_request])
+        self.assertNotIn(unassigned_request, [row['id'] for row in response.data])
+
     def test_emergency_request_is_priority_one_and_lifecycle_notifies(self):
         self.client.force_authenticate(self.tenant_user)
         created = self.client.post('/api/v1/maintenance/requests/', {
