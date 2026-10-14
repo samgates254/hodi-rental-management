@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
-import { DM_Sans } from "next/font/google";
+import "@fontsource/dm-sans/400.css";
+import "@fontsource/dm-sans/500.css";
+import "@fontsource/dm-sans/600.css";
+import "@fontsource/dm-sans/700.css";
+import "@fontsource/fraunces/400.css";
+import "@fontsource/fraunces/600.css";
 import Script from "next/script";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import "./globals.css";
-
-const dmSans = DM_Sans({
-  variable: "--font-dm-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: {
@@ -60,7 +59,7 @@ export default function RootLayout({
           {`try { var savedTheme = localStorage.getItem("hodi-theme"); document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light"; } catch (_) { document.documentElement.dataset.theme = "light"; }`}
         </Script>
       </head>
-      <body className={`${dmSans.variable} antialiased`}>
+      <body className="antialiased">
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

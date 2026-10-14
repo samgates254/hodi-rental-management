@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { PropertyBanner } from "@/components/ui/PropertyBanner";
 import { Logo } from "@/components/layout/Logo";
 import { clientApi } from "@/lib/clientApi";
+import { centsToDecimal, formatMinor } from "@/lib/money";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
 import MaintenanceRequestsPanel from "./ops/MaintenanceRequestsPanel";
 import NotificationBell from "./ops/NotificationBell";
@@ -66,11 +66,7 @@ function listFromResponse<T>(response: ListResponse<T> | null | undefined) {
 }
 
 function formatMoney(minor: number) {
-  return new Intl.NumberFormat("en-KE", {
-    style: "currency",
-    currency: "KES",
-    maximumFractionDigits: 0,
-  }).format(minor / 100);
+  return formatMinor(minor);
 }
 
 function formatDate(value: string | null | undefined) {
@@ -102,7 +98,7 @@ function exportPayments(payments: RentPayment[]) {
     payment.tenant_name ?? "Resident",
     payment.unit_name ?? "",
     payment.lease_reference ?? "Rent",
-    (payment.amount_minor / 100).toFixed(2),
+    centsToDecimal(payment.amount_minor),
     payment.due_date,
     payment.status,
     payment.paid_at ?? "",
@@ -290,7 +286,7 @@ export default function CaretakerDashboard() {
     return (
       <main className="caretaker-loading">
         <span className="caretaker-spinner" aria-hidden="true" />
-        <p>Opening your caretaker workspace…</p>
+        <p>Checking your Hodi account…</p>
       </main>
     );
   }
@@ -340,15 +336,10 @@ export default function CaretakerDashboard() {
 
         {pageError && <div className="caretaker-alert" role="alert">{pageError}</div>}
 
-        <div id="overview" className="caretaker-intro">
-          <PropertyBanner
-            eyebrow="Today at a glance"
-            title="Keep the day’s work moving."
-            description="Review maintenance requests, track progress and keep the property team informed."
-            imageSrc="/images/operations.jpg"
-            imageSizes="(max-width: 900px) 100vw, 75vw"
-            className="caretaker-overview-banner"
-          />
+        <div id="overview" className="ops-mast">
+          <p className="ops-mast-kicker"><span />Caretaker</p>
+          <h2>Today’s maintenance and rent status.</h2>
+          <p>Open issues, work orders, and resident balances for {organizationName}. Amounts are the records on file, not estimates.</p>
         </div>
 
         <section className="caretaker-summary" aria-label="Workspace summary">

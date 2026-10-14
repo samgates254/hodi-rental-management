@@ -3,7 +3,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, asList } from "@/lib/opsApi";
-import { rentLabel, shillingsToCents, type ManagedListing } from "./shared";
+import { minorToShillingsInput, rentLabel, shillingsToCents, type ManagedListing } from "./shared";
 
 type Id = number | string;
 
@@ -271,7 +271,7 @@ export default function MarketplaceManager({
           <h3>Edit {editing.title}</h3>
           <div className="landlord-form-grid">
             <label>Title<input name="title" required defaultValue={editing.title} /></label>
-            <label>Monthly rent (KES)<input name="rent" required defaultValue={String(editing.monthly_rent_minor / 100)} /></label>
+            <label>Monthly rent (KES)<input name="rent" required defaultValue={minorToShillingsInput(editing.monthly_rent_minor)} /></label>
             <label>Bedrooms<input name="bedrooms" type="number" min="0" defaultValue={editing.bedrooms} /></label>
             <label>Bathrooms<input name="bathrooms" type="number" min="0" defaultValue={editing.bathrooms} /></label>
             <label>Furnished

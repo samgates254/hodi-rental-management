@@ -48,7 +48,7 @@ export function AboutBuilding() {
             <p className="mt-4">
               <a
                 href="/platform"
-                className="text-sm font-medium text-teal transition-colors hover:text-charcoal"
+                className="text-sm font-medium text-[#163d32] underline decoration-[#c6a66b] underline-offset-4"
               >
                 See the platform →
               </a>
@@ -62,9 +62,9 @@ export function AboutBuilding() {
                   key={layer.id}
                   className="grid gap-3 border-b border-border py-6 sm:grid-cols-[3rem_1fr] sm:gap-6 sm:py-7"
                 >
-                  <span className="font-mono text-[13px] text-teal">{layer.id}</span>
+                  <span className="text-sm tracking-[0.14em] text-[#a8874f]">{layer.id}</span>
                   <div>
-                    <h3 className="text-lg font-semibold tracking-tight text-charcoal">
+                    <h3 className="font-[family-name:var(--hodi-editorial)] text-2xl font-normal tracking-[-0.03em] text-charcoal">
                       {layer.title}
                     </h3>
                     <p className="mt-2 max-w-md text-sm leading-relaxed text-text-secondary">

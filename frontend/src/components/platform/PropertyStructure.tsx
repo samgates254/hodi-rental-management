@@ -5,17 +5,17 @@ const levels = [
   {
     label: "Property",
     detail: "The site or portfolio asset you operate.",
-    sample: "Westlands Court",
+    sample: "The property",
   },
   {
     label: "Building",
     detail: "Blocks or structures within the property.",
-    sample: "Block B",
+    sample: "A building",
   },
   {
     label: "Unit",
     detail: "The rentable space — where tenancy and work attach.",
-    sample: "Unit B-12",
+    sample: "A unit",
   },
 ] as const;
 

@@ -51,7 +51,7 @@ export function Logo({
       {!markOnly ? (
         <span
           className={cn(
-            "font-display text-[1.125rem] font-semibold tracking-[-0.02em] text-charcoal",
+            "font-[family-name:var(--hodi-editorial)] text-[1.35rem] font-medium tracking-[-0.02em] text-charcoal",
             "transition-colors group-hover:text-charcoal/90",
             wordmarkClassName,
           )}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ClientApiError, clientApi } from "@/lib/clientApi";
+import { formatMinor, shillingsToCents } from "@/lib/money";
 
 type UtilityAccount = {
   id: number;
@@ -51,7 +52,7 @@ function message(error: unknown, fallback: string): string {
 }
 
 function money(minor: number, currency: string): string {
-  return new Intl.NumberFormat("en-KE", { style: "currency", currency }).format(minor / 100);
+  return formatMinor(minor, currency);
 }
 
 function serviceName(value: string): string {
@@ -139,9 +140,9 @@ export default function UtilitiesWorkspace({
     setSaving(true);
     setError("");
     setNotice("");
-    const amount = Number(form.get("amount"));
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Enter a bill amount greater than zero.");
+    const cents = shillingsToCents(String(form.get("amount") ?? ""));
+    if (cents == null || cents <= 0) {
+      setError("Enter a bill amount in KES greater than zero, with at most two decimal places.");
       setSaving(false);
       return;
     }
@@ -151,7 +152,7 @@ export default function UtilitiesWorkspace({
         period_start: String(form.get("period_start")),
         period_end: String(form.get("period_end")),
         due_date: String(form.get("due_date")) || null,
-        amount_minor: Math.round(amount * 100),
+        amount_minor: cents,
         currency: "KES",
         reading_start: String(form.get("reading_start")) || null,
         reading_end: String(form.get("reading_end")) || null,

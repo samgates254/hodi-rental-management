@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { clientApi, getStoredAuthToken } from "@/lib/clientApi";
+import { formatMinor } from "@/lib/money";
 
 type Plan = {
   code: string;
@@ -26,9 +27,7 @@ const features = [
   { key: "reporting", name: "Portfolio reporting", detail: "Review the reporting workflows available in HODI." },
   { key: "staff_management", name: "Team management", detail: "Manage organization membership using the existing role permissions." },
 ] as const;
-const formatMoney = (minor: number, currency: string) => new Intl.NumberFormat("en-KE", {
-  style: "currency", currency, maximumFractionDigits: 0,
-}).format(minor / 100);
+const formatMoney = (minor: number, currency: string) => formatMinor(minor, currency, { trailingZeros: false });
 
 export default function PricingExperience() {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -77,7 +76,7 @@ export default function PricingExperience() {
         <Container className="grid min-h-[480px] items-center gap-9 py-12 sm:py-16 lg:grid-cols-[0.9fr_1.1fr] lg:py-20">
           <div className="relative z-10">
             <p className="text-sm font-semibold tracking-wide text-teal">Plans for property operators</p>
-            <h1 className="mt-4 max-w-xl text-balance text-4xl font-semibold leading-[1.04] tracking-[-0.045em] text-charcoal sm:text-5xl lg:text-[3.6rem]">
+            <h1 className="mt-4 max-w-xl text-balance font-[family-name:var(--hodi-editorial)] text-4xl font-normal leading-[1.08] tracking-[-0.03em] text-charcoal sm:text-5xl lg:text-[3.6rem]">
               More clarity in every part of your portfolio.
             </h1>
             <p className="mt-5 max-w-lg text-base leading-7 text-text-secondary sm:text-lg">
@@ -90,7 +89,7 @@ export default function PricingExperience() {
             <p className="mt-5 max-w-md text-sm leading-6 text-text-secondary">Monthly plans in KES. Paid subscriptions activate only after an authorized HODI administrator verifies payment.</p>
           </div>
           <div className="relative min-h-[300px] overflow-hidden rounded-sm bg-[#18352e] sm:min-h-[390px] lg:translate-x-5">
-            <Image src="/images/hodi/apartment-building.jpg" alt="Residential apartment building in soft daylight" fill priority sizes="(max-width: 1024px) 100vw, 55vw" className="object-cover object-center" />
+            <Image src="/images/hodi/property-exterior.jpg" alt="Hillside apartment building with stacked balconies, photographed from above" fill priority sizes="(max-width: 1024px) 100vw, 55vw" className="object-cover object-[center_40%]" />
             <div className="absolute inset-0 bg-gradient-to-r from-[#10271f]/40 via-transparent to-transparent" aria-hidden="true" />
             <div className="absolute bottom-0 left-0 max-w-sm p-5 text-white sm:p-7">
               <span className="text-xs font-semibold uppercase tracking-[0.15em] text-white/80">One connected operation</span>

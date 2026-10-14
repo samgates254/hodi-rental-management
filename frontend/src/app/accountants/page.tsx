@@ -1,8 +1,211 @@
 "use client";
-import {useCallback,useEffect,useState} from "react";
-import {clientApi,fetchMe,MeResponse} from "@/lib/clientApi";
-type Invite={id:number;organization_id:number;organization_name:string;email:string;status:string;expires_at:string;can_accept:boolean};
-type Payment={id:number;organization:number;amount_cents:number;allocated_cents:number;received_date:string;method:string;status:string;reference:string;};
-type Invoice={id:number;organization:number;period_start:string;period_end:string;due_date:string;status:string;currency:string;total_cents:number;paid_cents:number;balance_cents:number};
-export default function AccountantWorkspace(){const [me,setMe]=useState<MeResponse|null>(null),[invites,setInvites]=useState<Invite[]>([]),[invoices,setInvoices]=useState<Invoice[]>([]),[payments,setPayments]=useState<Payment[]>([]),[org,setOrg]=useState(""),[error,setError]=useState("");const refresh=useCallback(async()=>{try{const [profile,inv]=await Promise.all([fetchMe(),clientApi.get<Invite[]>("/api/v1/organizations/accountant-invitations/")]);setMe(profile);setInvites(inv.data);const permitted=profile.memberships.filter(x=>x.role==="ACCOUNTANT"&&x.is_active);const selected=permitted.find(x=>String(x.organization)===org)||permitted[0];if(selected){setOrg(String(selected.organization));const [result,ledger]=await Promise.all([clientApi.get<Invoice[]>("/api/v1/billing/invoices/",{params:{organization:selected.organization}}),clientApi.get<Payment[]>("/api/v1/billing/ledger-payments/",{params:{organization:selected.organization}})]);setInvoices(result.data.filter(x=>String(x.organization)===String(selected.organization)));setPayments(ledger.data.filter(x=>String(x.organization)===String(selected.organization)))}else {setInvoices([]);setPayments([])};setError("")}catch(e){setError(e instanceof Error?e.message:"Could not load accountant records.")}},[org]);useEffect(()=>{void refresh()},[refresh]);async function action(id:number,name:string){try{await clientApi.post(`/api/v1/organizations/accountant-invitations/${id}/${name}/`,{});await refresh()}catch(e){setError(e instanceof Error?e.message:"Invitation action failed.")}}const clients=me?.memberships.filter(x=>x.role==="ACCOUNTANT"&&x.is_active)||[];return <main style={{maxWidth:1150,margin:"40px auto",padding:20}}><p>HODI FINANCE</p><h1>Accountant workspace</h1><p>Client access is granted by an organisation owner and can be revoked at any time.</p>{error&&<p role="alert">{error}</p>}{invites.filter(x=>x.status==="PENDING"&&x.can_accept).map(x=><article key={x.id} style={{padding:16,border:"1px solid #ddd",margin:"12px 0"}}><strong>Invitation to {x.organization_name}</strong><p>Expires {new Date(x.expires_at).toLocaleDateString()}</p><button onClick={()=>void action(x.id,"accept")}>Accept</button> <button onClick={()=>void action(x.id,"decline")}>Decline</button></article>)}{clients.length>0&&<><label>Client organisation <select value={org} onChange={e=>setOrg(e.target.value)}>{clients.map(x=><option key={x.organization} value={x.organization}>{x.organization_name}</option>)}</select></label><section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:12,margin:"24px 0"}}>{[["Invoices",invoices.length],["Invoiced",sum(invoices,"total_cents")],["Paid",sum(invoices,"paid_cents")],["Outstanding",sum(invoices,"balance_cents")]].map(([label,value])=><article key={String(label)} style={{padding:18,border:"1px solid #ddd",borderRadius:12}}><small>{label}</small><h2>{label==="Invoices"?value:`KES ${(Number(value)/100).toLocaleString()}`}</h2></article>)}</section><h2>Invoice report</h2>{invoices.map(x=><article key={x.id} style={{borderBottom:"1px solid #ddd",padding:12}}>Invoice {x.id} · {x.period_start}–{x.period_end} · {x.status}<p>{x.currency} {(x.total_cents/100).toLocaleString()} total · {(x.paid_cents/100).toLocaleString()} paid · {(x.balance_cents/100).toLocaleString()} outstanding</p></article>)}{!invoices.length&&<p>No invoices are recorded for this client.</p>}<h2>Recorded rent transactions</h2>{payments.map(x=><article key={x.id} style={{borderBottom:"1px solid #ddd",padding:12}}>Payment {x.id} · {x.received_date} · {x.method} · {x.status}<p>{x.reference||"No reference"} · {x.amount_cents?`KES ${(x.amount_cents/100).toLocaleString()}`:"Amount unavailable"} · allocated KES {(x.allocated_cents/100).toLocaleString()}</p></article>)}{!payments.length&&<p>No recorded payments are available for this client.</p>}</>}{clients.length===0&&!invites.some(x=>x.status==="PENDING"&&x.can_accept)&&<p>No active client access or pending invitations are linked to this account.</p>}</main>}
-function sum(rows:Invoice[],key:"total_cents"|"paid_cents"|"balance_cents"){return rows.reduce((total,row)=>total+row[key],0)}
+
+import { useCallback, useEffect, useState } from "react";
+import { clientApi, ClientApiError, fetchMe, type MeResponse } from "@/lib/clientApi";
+import { formatMinor } from "@/lib/money";
+
+type Invite = {
+  id: number;
+  organization_id: number;
+  organization_name: string;
+  email: string;
+  status: string;
+  expires_at: string;
+  can_accept: boolean;
+};
+
+type Payment = {
+  id: number;
+  organization: number;
+  amount_cents: number;
+  allocated_cents: number;
+  received_date: string;
+  method: string;
+  status: string;
+  reference: string;
+};
+
+type Invoice = {
+  id: number;
+  organization: number;
+  period_start: string;
+  period_end: string;
+  due_date: string;
+  status: string;
+  currency: string;
+  total_cents: number;
+  paid_cents: number;
+  balance_cents: number;
+};
+
+function sum(rows: Invoice[], key: "total_cents" | "paid_cents" | "balance_cents") {
+  return rows.reduce((total, row) => total + row[key], 0);
+}
+
+export default function AccountantWorkspace() {
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [org, setOrg] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [profile, invitationResponse] = await Promise.all([
+        fetchMe(),
+        clientApi.get<Invite[]>("/api/v1/organizations/accountant-invitations/"),
+      ]);
+      setMe(profile);
+      setInvites(invitationResponse.data);
+      const permitted = profile.memberships.filter((membership) => membership.role === "ACCOUNTANT" && membership.is_active);
+      const selected = permitted.find((membership) => String(membership.organization) === org) || permitted[0];
+      if (selected) {
+        setOrg(String(selected.organization));
+        const [invoiceResponse, ledgerResponse] = await Promise.all([
+          clientApi.get<Invoice[]>("/api/v1/billing/invoices/", { params: { organization: selected.organization } }),
+          clientApi.get<Payment[]>("/api/v1/billing/ledger-payments/", { params: { organization: selected.organization } }),
+        ]);
+        setInvoices(invoiceResponse.data.filter((invoice) => String(invoice.organization) === String(selected.organization)));
+        setPayments(ledgerResponse.data.filter((payment) => String(payment.organization) === String(selected.organization)));
+      } else {
+        setInvoices([]);
+        setPayments([]);
+      }
+      setError("");
+    } catch (loadError) {
+      if (loadError instanceof ClientApiError && (loadError.status === 401 || loadError.status === 403)) {
+        window.location.replace("/signin");
+        return;
+      }
+      setError(loadError instanceof Error ? loadError.message : "Could not load accountant records.");
+    } finally {
+      setLoading(false);
+    }
+  }, [org]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function action(id: number, name: string) {
+    setError("");
+    try {
+      await clientApi.post(`/api/v1/organizations/accountant-invitations/${id}/${name}/`, {});
+      await refresh();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Invitation action failed.");
+    }
+  }
+
+  const clients = me?.memberships.filter((membership) => membership.role === "ACCOUNTANT" && membership.is_active) || [];
+  const pending = invites.filter((invite) => invite.status === "PENDING" && invite.can_accept);
+  const currency = invoices[0]?.currency || "KES";
+
+  return (
+    <main className="hodi-record">
+      <div className="hodi-record-wrap">
+        <p className="hodi-record-kicker">Hodi finance</p>
+        <h1>Accountant workspace</h1>
+        <p className="hodi-record-lead">
+          Client access is granted by an organisation owner and can be revoked at any time. Figures below are recorded invoices and payments only.
+        </p>
+        {error && <p className="hodi-record-alert" role="alert">{error}</p>}
+        {loading && <p className="hodi-record-note">Loading client access…</p>}
+
+        {pending.map((invite) => (
+          <article className="hodi-record-invite" key={invite.id}>
+            <h2>Invitation to {invite.organization_name}</h2>
+            <p className="hodi-record-note">Expires {new Date(invite.expires_at).toLocaleDateString("en-KE")}</p>
+            <div className="hodi-record-actions">
+              <button type="button" onClick={() => void action(invite.id, "accept")}>Accept</button>
+              <button type="button" className="secondary" onClick={() => void action(invite.id, "decline")}>Decline</button>
+            </div>
+          </article>
+        ))}
+
+        {clients.length > 0 && (
+          <>
+            <label>
+              Client organisation
+              <select value={org} onChange={(event) => setOrg(event.target.value)}>
+                {clients.map((membership) => (
+                  <option key={membership.organization} value={membership.organization}>{membership.organization_name}</option>
+                ))}
+              </select>
+            </label>
+            <section className="hodi-record-stats" aria-label="Invoice totals">
+              <article className="hodi-record-stat"><span>Invoices</span><strong>{invoices.length}</strong></article>
+              <article className="hodi-record-stat"><span>Invoiced</span><strong>{formatMinor(sum(invoices, "total_cents"), currency)}</strong></article>
+              <article className="hodi-record-stat"><span>Paid</span><strong>{formatMinor(sum(invoices, "paid_cents"), currency)}</strong></article>
+              <article className="hodi-record-stat"><span>Outstanding</span><strong>{formatMinor(sum(invoices, "balance_cents"), currency)}</strong></article>
+            </section>
+
+            <h2>Invoice report</h2>
+            <div className="hodi-record-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Period</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Paid</th>
+                    <th>Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((invoice) => (
+                    <tr key={invoice.id}>
+                      <td>{invoice.id}</td>
+                      <td>{invoice.period_start}–{invoice.period_end}</td>
+                      <td>{invoice.status}</td>
+                      <td>{formatMinor(invoice.total_cents, invoice.currency)}</td>
+                      <td>{formatMinor(invoice.paid_cents, invoice.currency)}</td>
+                      <td>{formatMinor(invoice.balance_cents, invoice.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!invoices.length && <p className="hodi-record-note">No invoices are recorded for this client.</p>}
+
+            <h2>Recorded rent transactions</h2>
+            <div className="hodi-record-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Payment</th>
+                    <th>Received</th>
+                    <th>Method</th>
+                    <th>Status</th>
+                    <th>Amount</th>
+                    <th>Allocated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((payment) => (
+                    <tr key={payment.id}>
+                      <td>{payment.id}<p className="hodi-record-note">{payment.reference || "No reference"}</p></td>
+                      <td>{payment.received_date}</td>
+                      <td>{payment.method}</td>
+                      <td>{payment.status}</td>
+                      <td>{payment.amount_cents == null ? "Amount unavailable" : formatMinor(payment.amount_cents)}</td>
+                      <td>{formatMinor(payment.allocated_cents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!payments.length && <p className="hodi-record-note">No recorded payments are available for this client.</p>}
+          </>
+        )}
+
+        {!loading && !error && clients.length === 0 && !pending.length && (
+          <p className="hodi-record-note">No active client access or pending invitations are linked to this account.</p>
+        )}
+      </div>
+    </main>
+  );
+}

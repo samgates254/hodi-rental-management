@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { AUTH_API_PATHS, clientApi, getStoredAuthToken, setStoredAuthToken, type AuthResponse } from "@/lib/clientApi";
+import { formatMinor, wholeShillingsToCents } from "@/lib/money";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 
 type RevenueSummary = {
@@ -33,7 +34,7 @@ type PaymentReport = {
 };
 type EnterpriseOrganization = { organization: number; organization_name: string; current_plan: string; status: string };
 
-const kes = (minor: number) => new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 }).format(minor / 100);
+const kes = (minor: number) => formatMinor(minor, "KES", { trailingZeros: false });
 
 export default function RevenueDashboardPage() {
   const [summary, setSummary] = useState<RevenueSummary | null>(null);
@@ -92,9 +93,14 @@ export default function RevenueDashboardPage() {
 
   async function issueEnterpriseInvoice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setReviewError("");
+    const cents = wholeShillingsToCents(enterpriseAmount);
+    if (cents == null || cents <= 0) {
+      setReviewError("Enter a positive whole-shilling monthly price. Fractional shillings are not accepted on this invoice.");
+      return;
+    }
     try {
       await clientApi.post("/api/v1/subscriptions/admin/enterprise-invoices/", {
-        organization: Number(enterpriseOrg), amount_minor: Number(enterpriseAmount) * 100,
+        organization: Number(enterpriseOrg), amount_minor: cents,
         unit_limit: Number(enterpriseLimit), reason: enterpriseReason,
       });
       setEnterpriseAmount(""); setEnterpriseLimit(""); setEnterpriseReason("");

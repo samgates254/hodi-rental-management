@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ClientApiError, clientApi } from "@/lib/clientApi";
+import { formatMinor } from "@/lib/money";
 
 type Plan = {
   code: string;
@@ -49,9 +50,7 @@ type Subscription = {
   invoices: SubscriptionInvoice[];
 };
 
-const money = (minor: number, currency: string) => new Intl.NumberFormat("en-KE", {
-  style: "currency", currency, maximumFractionDigits: 0,
-}).format(minor / 100);
+const money = (minor: number, currency: string) => formatMinor(minor, currency, { trailingZeros: false });
 
 export default function SubscriptionPanel({ organizationId, canManage }: { organizationId: string; canManage: boolean }) {
   const [subscription, setSubscription] = useState<Subscription | null>(null);

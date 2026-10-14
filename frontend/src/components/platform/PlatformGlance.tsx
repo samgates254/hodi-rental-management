@@ -39,16 +39,16 @@ export function PlatformGlance() {
           description="Hodi is not a loose set of tools. These are the connected parts of the platform — each one feeds the next."
         />
 
-        <ol className="mt-12 divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+        <ol className="mt-12 divide-y divide-border border border-border bg-surface">
           {areas.map((area) => (
             <li
               key={area.id}
               className="grid gap-3 px-5 py-5 sm:grid-cols-12 sm:items-baseline sm:gap-6 sm:px-7 sm:py-6"
             >
-              <span className="font-display text-sm font-semibold tabular-nums text-teal sm:col-span-1">
+              <span className="font-[family-name:var(--hodi-editorial)] text-sm tabular-nums text-[#a8874f] sm:col-span-1">
                 {area.id}
               </span>
-              <h3 className="text-base font-semibold tracking-tight text-charcoal sm:col-span-3">
+              <h3 className="font-[family-name:var(--hodi-editorial)] text-xl font-normal tracking-[-0.03em] text-charcoal sm:col-span-3">
                 {area.title}
               </h3>
               <p className="text-sm leading-relaxed text-text-secondary text-pretty sm:col-span-8">

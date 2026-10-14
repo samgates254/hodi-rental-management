@@ -52,7 +52,7 @@ export function SolutionsCompare() {
           </div>
 
           <div className="border border-charcoal bg-contrast-surface p-6 text-white md:border-0 md:p-8">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-teal">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#c6a66b]">
               With Hodi
             </p>
             <ul className="mt-6 space-y-4">

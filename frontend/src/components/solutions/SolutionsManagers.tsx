@@ -12,28 +12,11 @@ const chain = [
 
 const queue = [
   {
-    unit: "B-12",
-    title: "Water leak",
-    reported: "09:42",
-    status: "In progress",
-    statusTone: "active" as const,
-    assignee: "Technician · assigned",
-  },
-  {
-    unit: "C-04",
-    title: "Electrical issue",
-    reported: "10:18",
-    status: "Awaiting visit",
+    unit: "—",
+    title: "No jobs in this preview",
+    detail: "Assigned work appears in the manager workspace. Nothing here is a live request.",
+    status: "Empty",
     statusTone: "wait" as const,
-    assignee: "Unassigned",
-  },
-  {
-    unit: "A-09",
-    title: "Gate remote",
-    reported: "Yesterday",
-    status: "Resolved",
-    statusTone: "done" as const,
-    assignee: "Closed · recorded",
   },
 ];
 
@@ -139,23 +122,16 @@ export function SolutionsManagers() {
 
               <ul className="divide-y divide-border">
                 {queue.map((item) => {
-                  const isHero = item.statusTone === "active";
                   return (
                     <li
-                      key={item.unit + item.title}
-                      className={`grid gap-3 px-5 py-4 sm:grid-cols-[4.5rem_1fr_auto] sm:items-start ${
-                        isHero ? "bg-soft-teal/50" : "bg-bg"
-                      }`}
+                      key={item.title}
+                      className="grid gap-3 bg-bg px-5 py-4 sm:grid-cols-[4.5rem_1fr_auto] sm:items-start"
                     >
                       <div>
                         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-secondary">
                           Unit
                         </p>
-                        <p
-                          className={`mt-1 font-mono text-sm font-semibold ${
-                            isHero ? "text-teal" : "text-charcoal"
-                          }`}
-                        >
+                        <p className="mt-1 font-mono text-sm font-semibold text-charcoal">
                           {item.unit}
                         </p>
                       </div>
@@ -164,7 +140,7 @@ export function SolutionsManagers() {
                           {item.title}
                         </p>
                         <p className="mt-1 text-xs text-text-secondary">
-                          Reported {item.reported} · {item.assignee}
+                          {item.detail}
                         </p>
                       </div>
                       <span

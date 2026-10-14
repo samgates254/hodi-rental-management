@@ -2,9 +2,9 @@ import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
 const chain = [
-  { label: "Unit", hint: "B-12" },
+  { label: "Unit", hint: "The home" },
   { label: "Tenant", hint: "Occupant record" },
-  { label: "Lease", hint: "Terms & dates" },
+  { label: "Lease", hint: "Terms and dates" },
   { label: "Rent schedule", hint: "What is due" },
 ] as const;
 
@@ -37,14 +37,14 @@ export function Tenancy() {
           <ol className="flex min-w-max items-stretch gap-0 sm:min-w-0 sm:flex-wrap lg:flex-nowrap lg:justify-center">
             {chain.map((item, index) => (
               <li key={item.label} className="flex items-center">
-                <div className="min-w-[8.5rem] rounded-lg border border-charcoal/15 bg-contrast-surface px-4 py-3.5 text-center shadow-soft sm:min-w-[9.5rem]">
+                <div className="min-w-[8.5rem] border border-white/15 bg-[#163d32] px-4 py-3.5 text-center sm:min-w-[9.5rem]">
                   <p className="text-sm font-semibold tracking-tight text-white">
                     {item.label}
                   </p>
                   <p className="mt-1 text-xs text-white/70">{item.hint}</p>
                 </div>
                 {index < chain.length - 1 ? (
-                  <span className="mx-2 hidden text-teal sm:inline" aria-hidden>
+                  <span className="mx-2 hidden text-[#c6a66b] sm:inline" aria-hidden>
                     →
                   </span>
                 ) : null}
@@ -57,9 +57,9 @@ export function Tenancy() {
           {points.map((point) => (
             <article
               key={point.title}
-              className="rounded-lg border border-border bg-surface p-6"
+              className="border border-border border-t-2 border-t-[#c6a66b] bg-surface p-6"
             >
-              <h3 className="text-base font-semibold tracking-tight text-charcoal">
+              <h3 className="font-[family-name:var(--hodi-editorial)] text-xl font-normal tracking-[-0.03em] text-charcoal">
                 {point.title}
               </h3>
               <p className="mt-2.5 text-sm leading-relaxed text-text-secondary text-pretty">

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ClientApiError, clientApi } from "@/lib/clientApi";
+import { formatMinor } from "@/lib/money";
 import { Button } from "@/components/ui/Button";
 
 type StatementLine = {
@@ -38,12 +39,7 @@ type Statement = {
 type PeriodChoice = "current_month" | "previous_month" | "lease" | "custom";
 
 function kes(cents: number): string {
-  const sign = cents < 0 ? "-" : "";
-  const absolute = Math.abs(cents);
-  const whole = Math.trunc(absolute / 100);
-  const fraction = absolute % 100;
-  const body = whole.toLocaleString("en-KE");
-  return fraction ? `${sign}KES ${body}.${String(fraction).padStart(2, "0")}` : `${sign}KES ${body}`;
+  return formatMinor(cents, "KES", { trailingZeros: false });
 }
 
 function statementError(error: unknown): string {

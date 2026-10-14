@@ -25,13 +25,13 @@ export function SectionHeading({
       )}
     >
       {eyebrow ? (
-        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-teal">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#a8874f]">
           {eyebrow}
         </p>
       ) : null}
       <h2
         className={cn(
-          "font-display text-3xl font-medium tracking-tight text-balance sm:text-4xl",
+          "font-[family-name:var(--hodi-editorial)] text-3xl font-normal leading-[1.15] tracking-[-0.03em] text-balance sm:text-4xl",
           light ? "text-white" : "text-charcoal",
         )}
       >

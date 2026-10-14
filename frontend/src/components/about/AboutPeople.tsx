@@ -1,7 +1,6 @@
 import Image from "next/image";
 import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { images } from "@/lib/images";
 
 const people = [
   {
@@ -30,8 +29,8 @@ export function AboutPeople() {
           <div className="order-2 lg:order-1 lg:col-span-6">
             <div className="relative aspect-[4/3] overflow-hidden bg-soft-teal shadow-soft">
               <Image
-                src={images.operations.src}
-                alt={images.operations.alt}
+                src="/images/hodi/city-balcony-living.jpg"
+                alt="Living room opening onto a city balcony"
                 fill
                 sizes="(max-width: 1024px) 100vw, 48vw"
                 className="object-cover"

@@ -47,17 +47,17 @@ export function Finance() {
                 {items.map((item, index) => (
                   <li
                     key={item.title}
-                    className="relative flex min-h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5"
+                    className="relative flex min-h-full flex-col gap-4 border border-border border-t-2 border-t-[#c6a66b] bg-surface p-5"
                   >
                     <span
-                      className="relative z-[1] flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-charcoal/15 bg-contrast-surface text-sm font-semibold tabular-nums text-white shadow-soft"
+                      className="relative z-[1] flex h-10 w-12 shrink-0 items-center justify-center border border-[#163d32]/15 bg-[#163d32] text-sm font-semibold tabular-nums text-white"
                       aria-hidden
                     >
                       {String(index + 1).padStart(2, "0")}
-                      <span className="absolute inset-x-0 bottom-0 h-1 bg-teal" aria-hidden />
+                      <span className="absolute inset-x-0 bottom-0 h-1 bg-[#c6a66b]" aria-hidden />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <h3 className="text-base font-semibold tracking-tight text-charcoal">
+                      <h3 className="font-[family-name:var(--hodi-editorial)] text-xl font-normal tracking-[-0.03em] text-charcoal">
                         {item.title}
                       </h3>
                       <p className="mt-1.5 text-[0.9375rem] leading-relaxed text-text-secondary text-pretty">

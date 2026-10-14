@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, formatCents, getList, humanize } from "@/lib/opsApi";
+import { shillingsToCents } from "@/lib/money";
 import "./ops.css";
 
 type TenantRow = { id: number | string; organization: number | string; full_name?: string; first_name: string; last_name: string };
@@ -89,10 +90,9 @@ const CHARGE_TYPES = [
 const ALLOCATION_POLICY = { policy_id: "CANONICAL_PRIORITY", policy_version: 2 };
 
 function kesToCents(value: string): number | null {
-  const trimmed = value.trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;
-  const [whole, fraction = ""] = trimmed.split(".");
-  return Number(whole) * 100 + Number((fraction + "00").slice(0, 2));
+  const cents = shillingsToCents(value);
+  if (cents == null || cents <= 0) return null;
+  return cents;
 }
 
 function today() {

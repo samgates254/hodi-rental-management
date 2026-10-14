@@ -62,7 +62,7 @@ export function Header({ variant = "default" }: { variant?: "default" | "homepag
     <header
       className={cn(
         isHomepage && "hodi-home-header",
-        "sticky top-0 z-50 border-b transition-[background-color,border-color,box-shadow] duration-200",
+        "hodi-site-header sticky top-0 z-50 border-b transition-[background-color,border-color,box-shadow] duration-200",
         !isHomepage && (scrolled || open)
           ? "border-border bg-surface/95 shadow-soft backdrop-blur-md"
           : !isHomepage && "border-transparent bg-bg/80 backdrop-blur-sm",

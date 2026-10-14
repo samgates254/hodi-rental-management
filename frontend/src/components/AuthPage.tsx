@@ -89,6 +89,44 @@ function dashboardWithPlan(kind: UserKind) {
   return `/landlords?plan=${encodeURIComponent(requestedPlan)}#subscription`;
 }
 
+function SecretField({
+  label,
+  name,
+  autoComplete,
+  className,
+}: {
+  label: string;
+  name: string;
+  autoComplete: string;
+  className: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <label className="grid gap-1.5 text-xs font-semibold text-text-secondary">
+      {label}
+      <span className="relative block">
+        <input
+          className={`${className} rounded-md border border-border px-3 pr-16 text-sm`}
+          name={name}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          required
+          minLength={8}
+        />
+        <button
+          type="button"
+          className="absolute top-1/2 right-2 -translate-y-1/2 px-1 text-xs font-semibold text-brand"
+          aria-pressed={visible}
+          aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          onClick={() => setVisible((current) => !current)}
+        >
+          {visible ? "Hide" : "Show"}
+        </button>
+      </span>
+    </label>
+  );
+}
+
 function errorText(error: unknown) {
   if (error instanceof ClientApiError) {
     const fields = error.fieldErrors();
@@ -325,7 +363,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
           </div>
           <section className="rounded-2xl border border-border bg-surface p-7 shadow-soft sm:p-10">
             <p className="text-[10px] font-bold tracking-[0.16em] text-text-secondary">SIGNED IN</p>
-            <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight">Choose a workspace</h1>
+            <h1 className="mt-3 font-[family-name:var(--hodi-editorial)] text-3xl font-normal tracking-tight">Choose a workspace</h1>
             <p className="mt-2 text-sm leading-6 text-text-secondary">
               This account has access to more than one Hodi workspace. Choose where you want to go.
             </p>
@@ -349,56 +387,50 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <main
-      className={`relative ${isSignup
-        ? "min-h-screen bg-bg px-5 pt-5 pb-6 text-text sm:px-8 sm:pt-6"
-        : "min-h-screen bg-bg px-5 py-12 text-text sm:px-8"
-      }`}
-    >
-      <div className="mx-auto flex w-full max-w-5xl flex-col">
-        <div className="flex items-center justify-between gap-3">
+    <main className="hodi-auth">
+      <section className="hodi-auth-visual">
+        <Image
+          src="/images/hodi/city-balcony-living.jpg"
+          alt="Living room opening onto a city balcony"
+          fill
+          priority
+          sizes="(max-width: 1023px) 100vw, 50vw"
+          className="object-cover object-[center_40%]"
+        />
+        <div className="hodi-auth-shade" aria-hidden="true" />
+        <div className="hodi-auth-caption">
+          <p className="hodi-editorial-kicker">
+            <span aria-hidden="true" />
+            Property operations
+          </p>
+          <h1>
+            {!isSignup
+              ? "One sign-in for every workspace you can use."
+              : userKind === "landlord"
+                ? "A calmer place to run the portfolio."
+                : "Your home, rent, and requests in one place."}
+          </h1>
+          <p>
+            {!isSignup
+              ? "Hodi opens the workspaces your organization has already granted. Nothing else is created from this screen."
+              : userKind === "landlord"
+                ? "Create an owner account and an organization. Managers, accountants, caretakers, and technicians join by invitation."
+                : "Create a tenant account. You will link it to the organization that holds your tenancy."}
+          </p>
+          <small>Illustrative photograph. Not a Hodi listing.</small>
+        </div>
+      </section>
+
+      <section className="hodi-auth-panel">
+        <div className="mb-6 flex items-center justify-between gap-3">
           <Logo size={40} className="w-fit" />
           <ThemeToggle />
         </div>
-        <div className={`grid flex-1 items-center ${isSignup
-          ? "gap-5 py-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-12 lg:py-5"
-          : "gap-12 py-12 lg:grid-cols-[1fr_440px]"
-        }`}>
-          <section key={userKind} className="auth-story hidden self-stretch lg:flex auth-role-enter">
-            <Image
-              src="/images/living.jpg"
-              alt=""
-              fill
-              sizes="(max-width: 1024px) 100vw, 52vw"
-              className="auth-story-image"
-            />
-            <div className="auth-story-shade" aria-hidden="true" />
-            <div className="auth-story-copy">
-            <p className="auth-story-eyebrow">
-              PROPERTY OPERATIONS, CONNECTED
-            </p>
-            <h1>
-              {!isSignup
-                ? "One sign-in for every Hodi workspace."
-                : userKind === "landlord"
-                  ? "Run your portfolio with clarity."
-                  : "Feel at home with Hodi."}
-            </h1>
-            <p>
-              {!isSignup
-                ? "Sign in with your account. Hodi will take you to the workspaces your organization has granted you."
-                : userKind === "landlord"
-                  ? "Bring properties, tenants, leases, and everyday operations together in one workspace."
-                  : "Keep your home, rent, and maintenance updates connected in one dependable place."}
-            </p>
-            </div>
-          </section>
-
-          <section className={`auth-form-panel w-full rounded-2xl border border-border bg-surface shadow-soft ${isSignup ? "p-4 sm:p-5" : "p-7 sm:p-10"}`}>
+        <div className="hodi-auth-card">
             <p key={userKind} className="text-[10px] font-bold tracking-[0.16em] text-text-secondary auth-role-enter">
               {!isSignup ? "HODI ACCOUNT" : userKind === "landlord" ? "LANDLORD PORTAL" : "CLIENT PORTAL"}
             </p>
-            <h2 className={`${isSignup ? "mt-2 text-2xl" : "mt-3 text-3xl"} font-display font-semibold tracking-tight`}>
+            <h2 className={`${isSignup ? "mt-2 text-2xl" : "mt-3 text-3xl"} font-[family-name:var(--hodi-editorial)] font-normal tracking-tight text-charcoal`}>
               {isSignup ? "Create your account" : "Welcome back"}
             </h2>
             <p className={`${isSignup ? "mt-1.5 text-xs leading-5 sm:text-sm" : "mt-2 text-sm leading-6"} text-text-secondary`}>
@@ -469,22 +501,13 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                 <input className={`${authInputClass} rounded-md border border-border px-3 text-sm`} name="username" autoComplete="username" required maxLength={150} />
               </label>
               {isSignup && (
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="grid gap-1.5 text-xs font-semibold text-text-secondary">
-                    Password
-                    <input className={`${authInputClass} rounded-md border border-border px-3 text-sm`} name="password" type="password" autoComplete="new-password" required minLength={8} />
-                  </label>
-                  <label className="grid gap-1.5 text-xs font-semibold text-text-secondary">
-                    Confirm password
-                    <input className={`${authInputClass} rounded-md border border-border px-3 text-sm`} name="password_confirm" type="password" autoComplete="new-password" required minLength={8} />
-                  </label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <SecretField label="Password" name="password" autoComplete="new-password" className={authInputClass} />
+                  <SecretField label="Confirm password" name="password_confirm" autoComplete="new-password" className={authInputClass} />
                 </div>
               )}
               {!isSignup && (
-                <label className="grid gap-1.5 text-xs font-semibold text-text-secondary">
-                  Password
-                  <input className={`${authInputClass} rounded-md border border-border px-3 text-sm`} name="password" type="password" autoComplete="current-password" required minLength={8} />
-                </label>
+                <SecretField label="Password" name="password" autoComplete="current-password" className={authInputClass} />
               )}
               {error && <p className="m-0 text-sm text-error" role="alert">{error}</p>}
               <button
@@ -509,9 +532,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                 {isSignup ? "Sign in" : "Create an account"}
               </Link>
             </p>
-          </section>
         </div>
-      </div>
+      </section>
     </main>
   );
 }

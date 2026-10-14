@@ -40,7 +40,10 @@ export function Footer() {
         <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-12 lg:gap-8">
           <div className="lg:col-span-4">
             <Logo size={36} />
-            <p className="mt-4 max-w-xs text-sm leading-relaxed text-text-secondary">
+            <p className="mt-4 max-w-xs font-[family-name:var(--hodi-editorial)] text-lg leading-snug text-charcoal">
+              For the places you care for.
+            </p>
+            <p className="mt-3 max-w-xs text-sm leading-relaxed text-text-secondary">
               Property operations software for owners, managers, and the people
               who live in the homes they run.
             </p>

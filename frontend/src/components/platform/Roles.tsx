@@ -30,15 +30,15 @@ export function Roles() {
           {roles.map((role, index) => (
             <article
               key={role.title}
-              className="flex h-full flex-col rounded-lg border border-border bg-surface p-6 shadow-soft"
+              className="flex h-full flex-col border border-border border-t-2 border-t-[#c6a66b] bg-surface p-6"
             >
               <span
-                className="font-display text-2xl font-semibold tabular-nums text-teal"
+                className="font-[family-name:var(--hodi-editorial)] text-3xl font-normal tabular-nums text-[#a8874f]"
                 aria-hidden
               >
                 {String(index + 1).padStart(2, "0")}
               </span>
-              <h3 className="mt-4 text-base font-semibold tracking-tight text-charcoal">
+              <h3 className="mt-4 font-[family-name:var(--hodi-editorial)] text-2xl font-normal tracking-[-0.03em] text-charcoal">
                 {role.title}
               </h3>
               <p className="mt-2.5 text-sm leading-relaxed text-text-secondary text-pretty">

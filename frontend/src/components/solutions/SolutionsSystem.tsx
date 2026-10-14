@@ -2,14 +2,14 @@ import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
 const chain = [
-  { label: "Property", sample: "Westlands Court" },
-  { label: "Building", sample: "Block B" },
-  { label: "Unit", sample: "B-12" },
-  { label: "Tenant", sample: "A. Wanjiku" },
-  { label: "Lease", sample: "Active · 12 mo" },
-  { label: "Request", sample: "Leak · B-12" },
-  { label: "Work", sample: "Assigned · open" },
-  { label: "Outcome", sample: "Resolved · logged" },
+  { label: "Property", sample: "The site" },
+  { label: "Building", sample: "A block" },
+  { label: "Unit", sample: "A unit" },
+  { label: "Tenant", sample: "Not entered" },
+  { label: "Lease", sample: "Not entered" },
+  { label: "Request", sample: "None in this preview" },
+  { label: "Work", sample: "None in this preview" },
+  { label: "Outcome", sample: "None in this preview" },
 ];
 
 export function SolutionsSystem() {

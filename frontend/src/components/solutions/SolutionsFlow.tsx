@@ -4,13 +4,13 @@ import { SectionHeading } from "@/components/ui/SectionHeading";
 const steps = [
   {
     actor: "Tenant",
-    action: "Reports a leaking tap",
-    note: "From the unit they live in",
+    action: "Reports an issue from their home",
+    note: "The request starts with the person who lives there",
   },
   {
     actor: "Hodi",
-    action: "Captures the request against Unit B-12",
-    note: "Property, unit, and tenant already linked",
+    action: "Attaches it to the unit and tenancy",
+    note: "Property, unit, and tenant stay linked",
   },
   {
     actor: "Manager",
@@ -24,7 +24,7 @@ const steps = [
   },
   {
     actor: "Property",
-    action: "Outcome returns to the operational record",
+    action: "The outcome returns to the record",
     note: "History remains on the unit",
   },
 ];
@@ -40,7 +40,7 @@ export function SolutionsFlow() {
               title="One event. One continuous thread."
               description="When something happens in a home, Hodi keeps the path intact — from the person who reported it to the record that remains."
             />
-            <p className="mt-8 max-w-sm border-l-2 border-teal pl-4 text-sm leading-relaxed text-text-secondary">
+            <p className="mt-8 max-w-sm border-l-2 border-[#c6a66b] pl-4 text-sm leading-relaxed text-text-secondary">
               Request in. Work assigned. Progress tracked. Outcome recorded.
             </p>
           </div>
@@ -56,7 +56,7 @@ export function SolutionsFlow() {
                     <span className="font-mono text-[11px] text-text-secondary">
                       {String(index + 1).padStart(2, "0")}
                     </span>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-teal sm:mt-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#a8874f] sm:mt-2">
                       {step.actor}
                     </p>
                   </div>

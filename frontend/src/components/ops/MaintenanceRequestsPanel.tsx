@@ -1144,7 +1144,7 @@ export default function MaintenanceRequestsPanel({
               <p>{selected.completion.diagnosis}</p>
               <p>{selected.completion.resolution_summary}</p>
               {selected.completion.follow_up_required && <p>Follow-up: {selected.completion.follow_up_reason}</p>}
-              {selected.completion.actual_total_cents != null && <p>Actual cost: KES {(selected.completion.actual_total_cents / 100).toFixed(2)}</p>}
+              {selected.completion.actual_total_cents != null && <p>Actual cost: {formatMinorAmount(BigInt(Math.trunc(selected.completion.actual_total_cents)))}</p>}
               {canWrite && selected.completion.status === "SUBMITTED" && selected.completion.outcome !== "NEEDS_FOLLOW_UP" && materialPurchases?.cost_overrun_authorization_required && materialPurchases.can_record_purchase && (
                 <div className="ops-form">
                   <p>This repair is over the approved estimate. An owner or property manager must authorize the recorded variance.</p>

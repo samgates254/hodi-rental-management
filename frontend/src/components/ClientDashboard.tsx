@@ -25,6 +25,7 @@ import TenantProfileEditor from "./ops/TenantProfileEditor";
 import TenantWorkStatus from "./ops/TenantWorkStatus";
 import StatementPanel from "./tenant/StatementPanel";
 import ThemeToggle from "@/components/theme/ThemeToggle";
+import { formatMinor, payableHalfShillings, payableWholeShillings, wholeShillingsToCents } from "@/lib/money";
 import "./client-portal.css";
 
 const MARKETPLACE_AVAILABLE = true;
@@ -48,6 +49,7 @@ type Property = {
   estate?: string | { name?: string };
   rent?: number | string;
   rent_amount?: number | string;
+  rent_cents?: number;
   bedrooms?: number | string;
   room_type?: string;
   house_type?: string;
@@ -83,7 +85,9 @@ type Tenancy = {
   start_date?: string;
   end_date?: string;
   monthly_rent?: number | string;
+  monthly_rent_cents?: number;
   deposit?: number | string;
+  deposit_cents?: number;
   deposit_balance?: number | string;
   agreement_url?: string;
   lease_url?: string;
@@ -197,6 +201,9 @@ type Invoice = {
   status?: string;
   due_date?: string;
   paid_amount?: number | string;
+  amount_cents?: number;
+  balance_cents?: number;
+  paid_cents?: number;
 };
 type Payment = {
   id: number | string;
@@ -205,6 +212,7 @@ type Payment = {
   date?: string;
   created_at?: string;
   amount?: number | string;
+  amount_cents?: number;
   description?: string;
   invoice?: Invoice | number | string;
   method?: string;
@@ -246,7 +254,7 @@ function fromSharedPayment(payment: SharedRentPayment): Payment {
     transaction_id: payment.external_id,
     date: payment.execution_timestamp ?? payment.received_date,
     created_at: payment.created_at,
-    amount: payment.amount_cents / 100,
+    amount_cents: payment.amount_cents,
     description: "Rent payment",
     method: payment.method,
     status: payment.status === "ALLOCATED" ? "SUCCESSFUL" : payment.status,
@@ -275,8 +283,8 @@ function fromLease(lease: LeaseRecord): Tenancy {
     unit_number: lease.unit_name,
     start_date: lease.start_date,
     end_date: lease.end_date ?? undefined,
-    monthly_rent: lease.monthly_rent_minor == null ? undefined : lease.monthly_rent_minor / 100,
-    deposit: lease.security_deposit_minor == null ? undefined : lease.security_deposit_minor / 100,
+    monthly_rent_cents: lease.monthly_rent_minor,
+    deposit_cents: lease.security_deposit_minor,
     status: lease.status,
     property: {
       id: lease.id,
@@ -290,17 +298,17 @@ function fromLease(lease: LeaseRecord): Tenancy {
 }
 
 function fromLedgerInvoice(invoice: LedgerInvoice): Invoice {
-  const total = Number(invoice.total_cents ?? 0) / 100;
-  const paid = Number(invoice.paid_cents ?? 0) / 100;
-  const balance = Number(invoice.balance_cents ?? 0) / 100;
+  const total = Math.trunc(Number(invoice.total_cents ?? 0));
+  const paid = Math.trunc(Number(invoice.paid_cents ?? 0));
+  const balance = Math.trunc(Number(invoice.balance_cents ?? 0));
   const period = [invoice.period_start, invoice.period_end].filter(Boolean).join(" – ");
   return {
     id: invoice.id,
     month: invoice.period_start,
     description: invoice.notes?.trim() || (period ? `Rent ${period}` : "Rent invoice"),
-    amount: total,
-    balance,
-    paid_amount: paid,
+    amount_cents: Number.isSafeInteger(total) ? total : 0,
+    balance_cents: Number.isSafeInteger(balance) ? balance : 0,
+    paid_cents: Number.isSafeInteger(paid) ? paid : 0,
     status: invoice.status,
     due_date: invoice.due_date,
   };
@@ -394,9 +402,14 @@ function money(value: number | string | undefined) {
     : "Ask agent";
 }
 
-function amount(value: number | string | undefined) {
-  const numeric = Number(value ?? 0);
-  return Number.isFinite(numeric) ? numeric : 0;
+function centsOf(value: number | null | undefined): number {
+  const numeric = Math.trunc(Number(value ?? 0));
+  return Number.isSafeInteger(numeric) ? numeric : 0;
+}
+
+function invoiceBalanceCents(invoice: Invoice): number {
+  if (invoice.balance_cents != null) return centsOf(invoice.balance_cents);
+  return Math.max(0, centsOf(invoice.amount_cents) - centsOf(invoice.paid_cents));
 }
 
 function formatDateTime(date?: string) {
@@ -630,7 +643,11 @@ function PropertyCard({
   const image = images[imageIndex % Math.max(images.length, 1)] ?? propertyImage(property);
   const location = displayLocation(property);
   const title = property.title ?? property.name ?? `${property.room_type ?? property.house_type ?? "Room"} in ${location}`;
-  const rent = property.rent ?? property.rent_amount;
+  const rentLabel = property.rent_cents != null
+    ? formatMinor(property.rent_cents, "KES", { trailingZeros: false })
+    : property.rent != null || property.rent_amount != null
+      ? `KES ${money(property.rent ?? property.rent_amount)}`
+      : "Ask agent";
 
   return (
     <article
@@ -691,7 +708,7 @@ function PropertyCard({
           {location}
         </p>
         <p className="dashboard-rent">
-          <strong>KES {money(rent)}</strong>
+          <strong>{rentLabel}</strong>
           <span>/ month</span>
         </p>
         <div className="dashboard-agent-row">
@@ -1047,7 +1064,7 @@ export default function ClientDashboard() {
       if (requestId !== propertyRequestId.current) return;
       const responseProperties = listFromResponse(response.data).map(item => ({
         ...item,
-        rent: item.monthly_rent_minor == null ? undefined : item.monthly_rent_minor / 100,
+        rent_cents: item.monthly_rent_minor,
         location: [item.area, item.city].filter(Boolean).join(", "),
         name: item.title,
         image_url: item.photos?.[0] && typeof item.photos[0] === "object" ? item.photos[0].url : undefined,
@@ -1161,10 +1178,10 @@ export default function ClientDashboard() {
   const filteredProperties = useMemo(
     () =>
       properties.filter(property => {
-        const rent = Number(property.rent ?? property.rent_amount ?? 0);
+        const rentCents = property.rent_cents;
         const propertyLocation = displayLocation(property);
         const matchesLocation = location === "all" || propertyLocation.toLowerCase().includes(location.toLowerCase());
-        const matchesRent = !rent || rent <= maxPrice;
+        const matchesRent = rentCents == null || rentCents <= maxPrice * 100;
         const matchesBedrooms =
           bedrooms === "all" ||
           (bedrooms === "bedsitter"
@@ -1250,9 +1267,8 @@ export default function ClientDashboard() {
 
   function selectInvoice(invoice: Invoice) {
     setSelectedInvoiceId(String(invoice.id));
-    setPaymentAmount(String(invoice.balance !== undefined
-      ? amount(invoice.balance)
-      : Math.max(0, amount(invoice.amount) - amount(invoice.paid_amount))));
+    const whole = payableWholeShillings(invoiceBalanceCents(invoice));
+    setPaymentAmount(whole == null ? "" : String(whole));
     scrollToSection("pay-rent");
   }
 
@@ -1271,38 +1287,31 @@ export default function ClientDashboard() {
     tenancy?.rent_status ?? (tenancy?.rent_paid ? "Paid" : "Check with landlord");
   const outstandingInvoices = invoices.filter(invoice => {
     const status = normalizedStatus(invoice.status);
-    return !["paid", "successful", "completed"].includes(status) &&
-      (invoice.balance !== undefined
-        ? amount(invoice.balance) > 0
-        : amount(invoice.amount) > amount(invoice.paid_amount));
+    return !["paid", "successful", "completed"].includes(status) && invoiceBalanceCents(invoice) > 0;
   });
-  const outstandingTotal = outstandingInvoices.reduce(
-    (total, invoice) => total + (invoice.balance !== undefined
-      ? amount(invoice.balance)
-      : Math.max(0, amount(invoice.amount) - amount(invoice.paid_amount))),
+  const outstandingCents = outstandingInvoices.reduce(
+    (total, invoice) => total + invoiceBalanceCents(invoice),
     0,
   );
   const selectedInvoice = invoices.find(invoice => String(invoice.id) === selectedInvoiceId) ??
     outstandingInvoices[0] ?? null;
-  const selectedBalance = selectedInvoice
-    ? selectedInvoice.balance !== undefined
-      ? amount(selectedInvoice.balance)
-      : Math.max(0, amount(selectedInvoice.amount) - amount(selectedInvoice.paid_amount))
-    : 0;
+  const selectedBalanceCents = selectedInvoice ? invoiceBalanceCents(selectedInvoice) : 0;
+  const payableFull = payableWholeShillings(selectedBalanceCents);
+  const payableHalf = payableHalfShillings(selectedBalanceCents);
   const sharedUnpaidPayments = payments.filter(payment =>
     ["pending", "overdue"].includes(normalizedStatus(payment.status)),
   );
   const sharedOverduePayments = payments.filter(
     payment => normalizedStatus(payment.status) === "overdue",
   );
-  const sharedUnpaidTotal = sharedUnpaidPayments.reduce(
-    (total, payment) => total + amount(payment.amount),
+  const sharedUnpaidCents = sharedUnpaidPayments.reduce(
+    (total, payment) => total + centsOf(payment.amount_cents),
     0,
   );
   const allRentInvoicesPaid = invoices.length > 0 &&
     invoices.every(invoice => isPaymentSuccessful(invoice.status));
   const hasSharedRentStatus = payments.length > 0;
-  const rentOverviewStatus = outstandingTotal > 0 ||
+  const rentOverviewStatus = outstandingCents > 0 ||
     invoices.some(invoice => normalizedStatus(invoice.status) === "overdue") ||
     sharedOverduePayments.length > 0
     ? "Payment due"
@@ -1323,9 +1332,9 @@ export default function ClientDashboard() {
     .filter((value): value is string => Boolean(value))
     .sort((first, second) => new Date(first).getTime() - new Date(second).getTime())[0];
   const dueInDays = daysUntil(dueDate);
-  const rentDueTotal = outstandingTotal > 0 ? outstandingTotal : sharedUnpaidTotal;
-  const monthlyRent = tenancy?.monthly_rent ?? tenancyProperty?.rent ?? tenancyProperty?.rent_amount;
-  const depositBalance = tenancy?.deposit_balance ?? tenancy?.deposit;
+  const rentDueCents = outstandingCents > 0 ? outstandingCents : sharedUnpaidCents;
+  const monthlyRentCents = tenancy?.monthly_rent_cents ?? tenancyProperty?.rent_cents;
+  const depositCents = tenancy?.deposit_cents;
   const activeIssuesCount = issues.filter(issue => issueStep(issue.status) < 4).length;
   const leaseStart = tenancy?.lease_start ?? tenancy?.start_date;
   const leaseEnd = tenancy?.lease_end ?? tenancy?.end_date;
@@ -1378,8 +1387,8 @@ export default function ClientDashboard() {
   useEffect(() => {
     if (selectedInvoiceIdFromData === undefined) return;
     setSelectedInvoiceId(String(selectedInvoiceIdFromData));
-    setPaymentAmount(String(selectedBalance));
-  }, [selectedInvoiceIdFromData, selectedBalance]);
+    setPaymentAmount(payableFull == null ? "" : String(payableFull));
+  }, [selectedInvoiceIdFromData, payableFull]);
 
   useEffect(() => {
     if (!pageNotice) return;
@@ -1427,7 +1436,7 @@ export default function ClientDashboard() {
         if (cancelled) return;
         setPaymentRequest({
           ...current,
-          amount: current.amount_cents == null ? undefined : current.amount_cents / 100,
+          amount_cents: current.amount_cents,
           reference: current.receipt ?? undefined,
         });
         if (current.status === "SUCCESSFUL") {
@@ -1489,14 +1498,14 @@ export default function ClientDashboard() {
   async function initiatePayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPaymentError("");
-    const parsedAmount = Number(paymentAmount);
+    const parsedCents = wholeShillingsToCents(paymentAmount);
     const normalizedPhone = phoneNumber.replace(/[^\d+]/g, "");
     if (!selectedInvoice) {
       setPaymentError("There are no outstanding invoices to pay.");
       return;
     }
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isInteger(parsedAmount)) {
-      setPaymentError("Enter a positive whole number of Kenyan shillings for M-Pesa.");
+    if (parsedCents == null || parsedCents <= 0) {
+      setPaymentError("Enter a positive whole number of Kenyan shillings. M-Pesa does not accept cents, and extra decimal places are not rounded.");
       return;
     }
     if (paymentMethod === "mpesa" && !/^(?:\+?254|0)?[17]\d{8}$/.test(normalizedPhone)) {
@@ -1511,7 +1520,7 @@ export default function ClientDashboard() {
         "/api/v1/billing/mpesa/initiate/",
         {
           invoice: selectedInvoice.id,
-          amount_cents: parsedAmount * 100,
+          amount_cents: parsedCents,
           phone_number: normalizedPhone,
           idempotency_key: idempotencyKey,
         },
@@ -1538,8 +1547,8 @@ export default function ClientDashboard() {
         void loadInvoices();
         void loadPayments();
       }
-      if (parsedAmount > outstandingTotal) {
-        setPageNotice(`KES ${money(parsedAmount - outstandingTotal)} will be credited to your next rent.`);
+      if (parsedCents > outstandingCents) {
+        setPageNotice(`${formatMinor(parsedCents - outstandingCents)} will be credited to your next rent.`);
       }
     } catch (error) {
       if (error instanceof ClientApiError && error.status >= 400 && error.status < 500 && error.status !== 429) {
@@ -1787,21 +1796,21 @@ export default function ClientDashboard() {
             <span className="portal-overview-date"><Icon name="calendar" size={16} />{new Intl.DateTimeFormat("en-KE", { weekday: "long", day: "numeric", month: "long" }).format(new Date())}</span>
           </div>
           <div className="portal-kpi-grid">
-            <article className={`portal-rent-summary ${rentDueTotal > 0 ? dueInDays !== null && dueInDays < 0 ? "is-overdue" : "is-due" : rentOverviewStatus === "Paid" ? "is-clear" : ""}`}>
+            <article className={`portal-rent-summary ${rentDueCents > 0 ? dueInDays !== null && dueInDays < 0 ? "is-overdue" : "is-due" : rentOverviewStatus === "Paid" ? "is-clear" : ""}`}>
               <div className="portal-rent-summary-heading">
                 <div><small>RENT AT A GLANCE</small><span>{rentOverviewStatus}</span></div>
                 <span className="portal-kpi-icon"><Icon name="wallet" size={19} /></span>
               </div>
               <strong className="portal-rent-summary-value">
-                {rentDueTotal > 0 ? `KES ${money(rentDueTotal)}` : rentOverviewStatus === "Paid" ? "All clear" : rentOverviewStatus}
+                {rentDueCents > 0 ? formatMinor(rentDueCents) : rentOverviewStatus === "Paid" ? "All clear" : rentOverviewStatus}
               </strong>
               <small className="portal-rent-summary-caption">
-                {rentDueTotal > 0
+                {rentDueCents > 0
                   ? dueDate ? `Outstanding · due ${formatDate(dueDate)} (${dueLabel})` : "Outstanding balance · due date not available"
                   : dueDate ? `Next due ${formatDate(dueDate)}${dueInDays !== null ? ` · ${dueLabel}` : ""}` : rentOverviewStatus === "Paid" ? "Your account is up to date" : "Check your latest rent details"}
               </small>
               <Button type="button" onClick={() => scrollToSection("pay-rent")}>
-                {rentDueTotal > 0 ? "Pay rent" : "View rent"}<Icon name="arrow" size={15} />
+                {rentDueCents > 0 ? "Pay rent" : "View rent"}<Icon name="arrow" size={15} />
               </Button>
             </article>
             <SummaryCard
@@ -1813,7 +1822,7 @@ export default function ClientDashboard() {
             />
             <SummaryCard
               label="Deposit balance"
-              value={depositBalance !== undefined ? `KES ${money(depositBalance)}` : "Not available"}
+              value={depositCents != null ? formatMinor(depositCents) : "Not available"}
               caption="Held against your tenancy"
               icon="shield"
               tone="green"
@@ -1841,7 +1850,7 @@ export default function ClientDashboard() {
               <span className="portal-activity-icon"><Icon name="receipt" size={18} /></span>
               <div>
                 <small>Latest payment</small>
-                <strong>{isLoadingPayments ? "Loading payments…" : receiptError ? "Activity unavailable" : latestPayment ? `KES ${money(latestPayment.amount)}` : "No payment recorded"}</strong>
+                <strong>{isLoadingPayments ? "Loading payments…" : receiptError ? "Activity unavailable" : latestPayment?.amount_cents != null ? formatMinor(latestPayment.amount_cents) : "No payment recorded"}</strong>
                 <span>{receiptError ? "Open receipts to retry." : latestPayment ? `${humanizeStatus(latestPayment.status)} · ${formatDate(latestPayment.date ?? latestPayment.created_at)}` : "Your recent rent payments will appear here."}</span>
               </div>
               <button type="button" onClick={() => scrollToSection("receipts")}>View</button>
@@ -1864,11 +1873,11 @@ export default function ClientDashboard() {
                 <div className="portal-tenancy-art"><Icon name="building" size={30} /></div>
                 <div className="portal-tenancy-primary"><small>CURRENT RESIDENCE</small><h3>{propertyTitle}</h3><p><Icon name="pin" size={14} />{estate} <span>·</span> House {flatNumber}</p></div>
                 <div className="portal-tenancy-landlord"><small>LANDLORD / AGENT</small><strong>{landlord}</strong><span><Icon name="shield" size={14} /> Verified tenancy</span></div>
-                <div className={`dashboard-rent-status ${/paid|clear/i.test(rentStatus) && outstandingTotal <= 0 ? "is-paid" : ""}`}><span className="dashboard-rent-status-dot" /><span>Rent status</span><strong>{outstandingTotal > 0 ? "Due" : rentStatus}</strong></div>
+                <div className={`dashboard-rent-status ${/paid|clear/i.test(rentStatus) && outstandingCents <= 0 ? "is-paid" : ""}`}><span className="dashboard-rent-status-dot" /><span>Rent status</span><strong>{outstandingCents > 0 ? "Due" : rentStatus}</strong></div>
               </div>
               <div className="portal-tenancy-facts">
-                <div><small>MONTHLY RENT</small><strong>KES {money(monthlyRent)}</strong></div>
-                <div><small>SECURITY DEPOSIT</small><strong>KES {money(depositBalance)}</strong></div>
+                <div><small>MONTHLY RENT</small><strong>{monthlyRentCents != null ? formatMinor(monthlyRentCents) : "Not listed"}</strong></div>
+                <div><small>SECURITY DEPOSIT</small><strong>{depositCents != null ? formatMinor(depositCents) : "Not listed"}</strong></div>
                 <div><small>LEASE START</small><strong>{formatDate(leaseStart)}</strong></div>
                 <div><small>LEASE END</small><strong>{formatDate(leaseEnd)}</strong></div>
               </div>
@@ -1900,18 +1909,18 @@ export default function ClientDashboard() {
           {billingError && <div className="dashboard-alert" role="alert">{billingError}<Button type="button" variant="ghost" onClick={() => void loadInvoices()}>Try again</Button></div>}
           <div className="portal-rent-layout">
             <div className="portal-invoice-panel">
-              <div className="portal-panel-heading"><div><small>YOUR RENT LEDGER</small><h3>Outstanding balance</h3></div><span className={outstandingTotal > 0 ? "portal-amount-due" : "portal-amount-clear"}>KES {money(outstandingTotal)}</span></div>
+              <div className="portal-panel-heading"><div><small>YOUR RENT LEDGER</small><h3>Outstanding balance</h3></div><span className={outstandingCents > 0 ? "portal-amount-due" : "portal-amount-clear"}>{outstandingCents > 0 ? formatMinor(outstandingCents) : formatMinor(0)}</span></div>
               {isLoadingInvoices ? <div className="portal-inline-loading"><span className="dashboard-loading-spinner" />Loading your invoices…</div> : billingError ? (
                 <div className="portal-empty-inline"><Icon name="clock" size={20} /><strong>Invoices are unavailable</strong><span>Retry above, or contact your agent to confirm your current balance.</span></div>
               ) : invoices.length ? (
                 <div className="portal-invoice-list">{invoices.map(invoice => {
-                  const balance = invoice.balance !== undefined ? amount(invoice.balance) : Math.max(0, amount(invoice.amount) - amount(invoice.paid_amount));
+                  const balance = invoiceBalanceCents(invoice);
                   const active = String(invoice.id) === (selectedInvoice?.id === undefined ? "" : String(selectedInvoice.id));
                   return <button type="button" key={invoice.id} className={`portal-invoice-row ${PAYMENT_FLOW_AVAILABLE && active ? "is-selected" : ""}`} onClick={() => selectInvoice(invoice)} disabled={!PAYMENT_FLOW_AVAILABLE}>
                     <span className="portal-invoice-select">{PAYMENT_FLOW_AVAILABLE && active && <span />}</span>
                     <span className="portal-invoice-name"><strong>{invoice.month ?? invoice.description ?? "Rent invoice"}</strong><small>Due {formatDate(invoice.due_date)}</small></span>
                     <span className={`portal-invoice-status status-${normalizedStatus(invoice.status) || "pending"}`}>{humanizeStatus(invoice.status ?? "pending")}</span>
-                    <span className="portal-invoice-balance"><strong>Balance due: KES {money(balance)}</strong><small>Invoice total: KES {money(invoice.amount)}</small><small>Amount paid: KES {money(invoice.paid_amount)}</small></span>
+                    <span className="portal-invoice-balance"><strong>Balance due: {formatMinor(balance)}</strong><small>Invoice total: {formatMinor(invoice.amount_cents ?? 0)}</small><small>Amount paid: {formatMinor(invoice.paid_cents ?? 0)}</small></span>
                   </button>;
                 })}</div>
               ) : <div className="portal-empty-inline"><Icon name="check" size={20} /><strong>{tenancy ? "No rent invoices yet" : "Add a tenancy to view rent"}</strong><span>When your next invoice is issued, it will show here.</span></div>}
@@ -1921,10 +1930,11 @@ export default function ClientDashboard() {
               <div className="portal-payment-card-heading"><span className="portal-payment-icon"><Icon name="wallet" size={19} /></span><div><small>MAKE A PAYMENT</small><strong>{selectedInvoice?.month ?? selectedInvoice?.description ?? "Select an invoice"}</strong></div></div>
               <label className="portal-payment-amount">Amount to pay (KES)<span className="portal-currency-input"><span>KES</span><input inputMode="numeric" type="number" min="1" step="1" max="99999999" value={paymentAmount} onChange={event => setPaymentAmount(event.target.value)} disabled={!selectedInvoice} required /></span></label>
               <div className="portal-amount-chips">
-                <button type="button" disabled={!selectedInvoice} onClick={() => setRentAmount(selectedBalance)}>Full balance <strong>KES {money(selectedBalance)}</strong></button>
-                <button type="button" disabled={!selectedInvoice} onClick={() => setRentAmount(Math.max(1, Math.round(selectedBalance / 2)))}>Pay half <strong>KES {money(Math.round(selectedBalance / 2))}</strong></button>
+                <button type="button" disabled={payableFull == null} onClick={() => payableFull != null && setRentAmount(payableFull)}>Full balance <strong>{payableFull == null ? "Not a whole shilling" : formatMinor(payableFull * 100, "KES", { trailingZeros: false })}</strong></button>
+                <button type="button" disabled={payableHalf == null} onClick={() => payableHalf != null && setRentAmount(payableHalf)}>Pay half <strong>{payableHalf == null ? "Not an even split" : formatMinor(payableHalf * 100, "KES", { trailingZeros: false })}</strong></button>
               </div>
-              {Number(paymentAmount) > outstandingTotal && outstandingTotal > 0 && <p className="portal-credit-note"><Icon name="check" size={15} />KES {money(Number(paymentAmount) - outstandingTotal)} will be credited to next month.</p>}
+              {selectedInvoice && selectedBalanceCents > 0 && payableFull == null && <p className="portal-credit-note">This balance includes cents. M-Pesa accepts whole shillings only, so the exact balance cannot be sent in one prompt. Enter a whole-shilling amount; the remainder stays on the invoice.</p>}
+              {wholeShillingsToCents(paymentAmount) != null && (wholeShillingsToCents(paymentAmount) ?? 0) > outstandingCents && outstandingCents > 0 && <p className="portal-credit-note"><Icon name="check" size={15} />{formatMinor((wholeShillingsToCents(paymentAmount) ?? 0) - outstandingCents)} will be credited to next month.</p>}
               <div className="portal-method-select">
                 <span>Payment method</span>
                 <div className="portal-method-select is-selected"><span className="portal-method-logo">M</span><span><strong>M-Pesa</strong><small>STK push · confirmation shown after provider settlement</small></span><i /></div>
@@ -2261,7 +2271,7 @@ export default function ClientDashboard() {
                       <td><strong className="portal-reference">{payment.reference ?? payment.transaction_id ?? `HOD-${payment.id}`}</strong></td>
                       <td>{invoice?.month ?? invoice?.description ?? payment.description ?? "Rent payment"}</td>
                       <td>{humanizeStatus(payment.method ?? "M-Pesa")}</td>
-                      <td><strong>KES {money(payment.amount)}</strong></td>
+                      <td><strong>{payment.amount_cents != null ? formatMinor(payment.amount_cents) : "—"}</strong></td>
                       <td>
                         <span className={`portal-payment-status ${normalizedStatus(payment.status) === "reversed" ? "is-reversed" : isPaymentSuccessful(payment.status) ? "is-success" : isPaymentFailed(payment.status) ? "is-failed" : normalizedStatus(payment.status) === "overdue" ? "is-overdue" : "is-pending"}`}>{humanizeStatus(payment.status ?? "pending")}</span>
                         {payment.reversal && <small className="portal-reversal-note">{humanizeStatus(payment.reversal.status)}: {payment.reversal.reason}</small>}
@@ -2344,7 +2354,7 @@ export default function ClientDashboard() {
                 <div className="portal-success-confetti" aria-hidden="true"><span /><span /><span /><span /><span /><span /></div>
                 <p className="portal-modal-eyebrow">PAYMENT CONFIRMED</p>
                 <h2 id="payment-status-title">Asante, {clientName.split(" ")[0]}!</h2>
-                <p>Your payment of <strong>KES {money(paymentRequest.amount ?? paymentAmount)}</strong> has been received.</p>
+                <p>Your payment of <strong>{paymentRequest.amount_cents != null ? formatMinor(paymentRequest.amount_cents) : formatMinor(wholeShillingsToCents(paymentAmount) ?? 0)}</strong> has been received.</p>
                 <div className="portal-success-receipt"><span>M-Pesa receipt</span><strong>{paymentRequest.receipt ?? paymentRequest.reference ?? "Not available"}</strong></div>
                 <Button type="button" onClick={() => {
                   window.sessionStorage.removeItem(MPESA_ATTEMPT_STORAGE_KEY);

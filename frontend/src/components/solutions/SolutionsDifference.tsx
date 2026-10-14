@@ -39,10 +39,10 @@ export function SolutionsDifference() {
               className="grid gap-4 border-b border-white/10 py-8 md:grid-cols-12 md:gap-8 md:py-10"
             >
               <div className="md:col-span-2">
-                <span className="font-mono text-sm text-teal">{item.id}</span>
+                <span className="text-sm tracking-[0.14em] text-[#c6a66b]">{item.id}</span>
               </div>
               <div className="md:col-span-4">
-                <h3 className="text-xl font-semibold tracking-tight text-white md:text-2xl">
+                <h3 className="font-[family-name:var(--hodi-editorial)] text-2xl font-normal tracking-[-0.03em] text-white">
                   {item.title}
                 </h3>
               </div>

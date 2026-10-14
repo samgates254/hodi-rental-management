@@ -2566,3 +2566,53 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+.portal-page-heading h1,
+.portal-section h2,
+.portal-section h3 {
+  font-family: Fraunces, "Iowan Old Style", Georgia, serif;
+  font-weight: 460;
+  letter-spacing: -0.03em;
+}
+
+.portal-payments-table th,
+.portal-invoice-row,
+.portal-bottom-nav button {
+  overflow-wrap: anywhere;
+}
+
+.portal-sidebar nav a:focus-visible,
+.portal-bottom-nav button:focus-visible,
+.portal-amount-chips button:focus-visible {
+  outline: 2px solid #c6a66b;
+  outline-offset: 2px;
+}
+
+
+.portal-section-heading h2,
+.portal-panel-heading h3,
+.portal-payment-card-heading strong {
+  font-family: var(--hodi-editorial), Fraunces, Georgia, serif;
+  font-weight: 460;
+  letter-spacing: -0.03em;
+}
+
+.portal-payment-card,
+.portal-invoice-panel,
+.dashboard-no-tenancy,
+.portal-empty-inline {
+  border-radius: 0;
+  border-top: 2px solid #c6a66b;
+}
+
+.portal-invoice-list,
+.portal-payments-table {
+  overflow-x: auto;
+}
+
+.portal-payment-card input,
+.portal-payment-card select,
+.portal-payment-card button,
+.portal-amount-chips button {
+  min-height: 44px;
+}

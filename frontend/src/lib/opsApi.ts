@@ -1,4 +1,5 @@
 import { ClientApiError, clientApi } from "./clientApi";
+import { formatMinor } from "./money";
 
 export type ListPayload<T> = T[] | { results?: T[]; data?: T[] };
 
@@ -18,14 +19,9 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function formatCents(cents: number | null | undefined): string {
-  const value = Number(cents ?? 0);
-  const kes = new Intl.NumberFormat("en-KE", {
-    style: "currency",
-    currency: "KES",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value / 100);
-  return `${kes} (${new Intl.NumberFormat("en-KE").format(value)} cents)`;
+  const value = Math.trunc(Number(cents ?? 0));
+  const safe = Number.isFinite(value) ? value : 0;
+  return `${formatMinor(safe)} (${new Intl.NumberFormat("en-KE").format(safe)} cents)`;
 }
 
 export function formatWhen(value: string | null | undefined): string {

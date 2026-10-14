@@ -9,7 +9,6 @@ import {
 } from "react";
 import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
-import { PropertyBanner } from "@/components/ui/PropertyBanner";
 import AuditLogPanel from "@/components/ops/AuditLogPanel";
 import BillingWorkspace from "@/components/ops/BillingWorkspace";
 import MaintenanceRequestsPanel from "@/components/ops/MaintenanceRequestsPanel";
@@ -19,7 +18,7 @@ import NotificationBell from "@/components/ops/NotificationBell";
 import SubscriptionPanel from "@/components/SubscriptionPanel";
 import UtilitiesWorkspace from "@/components/utilities/UtilitiesWorkspace";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { AUTH_API_PATHS } from "@/lib/clientApi";
+import { formatMinor, shillingsToCents } from "@/lib/money";
 import { ORGANIZATION_STAFF_ROLES, staffLoginKindForRole } from "@/lib/organizationRoles";
 import "./landlord-dashboard.css";
 import "@/components/ops/ops.css";
@@ -276,14 +275,7 @@ async function apiRequest<T>(
 }
 
 function formatMoney(minorUnits: number) {
-  const amount = Number(minorUnits);
-  return Number.isFinite(amount)
-    ? new Intl.NumberFormat("en-KE", {
-        style: "currency",
-        currency: "KES",
-        maximumFractionDigits: 2,
-      }).format(amount / 100)
-    : "KES 0";
+  return formatMinor(minorUnits);
 }
 
 function formatDate(value: string | null) {
@@ -329,61 +321,6 @@ function Icon({ name }: { name: "overview" | "building" | "people" | "lease" | "
   );
 }
 
-function LoginForm({
-  error,
-  isSubmitting,
-  onSubmit,
-}: {
-  error: string;
-  isSubmitting: boolean;
-  onSubmit: (username: string, password: string) => Promise<void>;
-}) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await onSubmit(username.trim(), password);
-  }
-
-  return (
-    <main className="landlord-login">
-      <Logo size={40} className="landlord-login-logo" wordmarkClassName="text-charcoal" />
-      <section className="landlord-login-card">
-        <span className="landlord-eyebrow">PROPERTY OPERATIONS</span>
-        <h1>Welcome back</h1>
-        <p>Sign in with your Hodi account to manage your properties and tenancies.</p>
-        <form onSubmit={submit} className="landlord-form">
-          <label>
-            Username
-            <input
-              autoComplete="username"
-              required
-              value={username}
-              onChange={event => setUsername(event.target.value)}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              autoComplete="current-password"
-              type="password"
-              required
-              value={password}
-              onChange={event => setPassword(event.target.value)}
-            />
-          </label>
-          {error && <p className="landlord-error" role="alert">{error}</p>}
-          <button className="landlord-button landlord-button--primary" disabled={isSubmitting}>
-            {isSubmitting ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
-        <p className="landlord-login-note">Owners, property managers, and accountants sign in here. Caretakers use caretaker access.</p>
-      </section>
-    </main>
-  );
-}
-
 export default function LandlordDashboard() {
   const [token, setToken] = useState("");
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
@@ -391,7 +328,7 @@ export default function LandlordDashboard() {
   const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [sessionState, setSessionState] = useState<"checking" | "guest" | "ready">("checking");
   const [pageError, setPageError] = useState("");
   const [notice, setNotice] = useState("");
   const [organizationFormOpen, setOrganizationFormOpen] = useState(false);
@@ -410,6 +347,7 @@ export default function LandlordDashboard() {
   const [leaseAction, setLeaseAction] = useState<null | { id: Identifier; reference: string; mode: "terminate" | "expire" }>(null);
   const [leaseEndDate, setLeaseEndDate] = useState("");
   const [leaseReason, setLeaseReason] = useState("");
+  const [activeSection, setActiveSection] = useState("overview");
 
   const loadDashboard = useCallback(async (authToken: string) => {
     setIsLoading(true);
@@ -443,7 +381,8 @@ export default function LandlordDashboard() {
       setPageError(message);
       if (error instanceof ApiError && error.status === 401) {
         sessionStorage.removeItem(TOKEN_KEY);
-        setToken("");
+        setSessionState("guest");
+        window.location.replace("/signin?type=landlord");
       }
     } finally {
       setIsLoading(false);
@@ -458,10 +397,12 @@ export default function LandlordDashboard() {
       setMemberships([{ organization_id: 1, organization_name: "Hodi Demo Properties", role: "OWNER" }]);
       setSelectedOrganizationId(String(PREVIEW_DATA.organizations[0].id));
       setToken("preview");
+      setSessionState("ready");
       return;
     }
     const savedToken = sessionStorage.getItem(TOKEN_KEY);
     if (!savedToken) {
+      setSessionState("guest");
       window.location.replace("/signin?type=landlord");
       return;
     }
@@ -473,6 +414,7 @@ export default function LandlordDashboard() {
       setMemberships([]);
     }
     setToken(savedToken);
+    setSessionState("ready");
     void loadDashboard(savedToken);
   }, [loadDashboard]);
 
@@ -562,33 +504,6 @@ export default function LandlordDashboard() {
     0,
   );
 
-  async function signIn(username: string, password: string) {
-    setIsSigningIn(true);
-    setPageError("");
-    try {
-      const response = await apiRequest<{
-        token: string;
-        account_type?: string;
-        memberships?: OrganizationMembership[];
-      }>(AUTH_API_PATHS.login, undefined, {
-        method: "POST",
-        body: JSON.stringify({ username, password }),
-      });
-      if (!response.token) throw new Error("The API didn’t return an authentication token.");
-      sessionStorage.setItem(TOKEN_KEY, response.token);
-      sessionStorage.setItem("hodi_account_type", response.account_type ?? "");
-      sessionStorage.setItem("hodi_memberships", JSON.stringify(response.memberships ?? []));
-      setAccountType(response.account_type ?? "");
-      setMemberships(response.memberships ?? []);
-      setToken(response.token);
-      await loadDashboard(response.token);
-    } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Sign in failed. Please try again.");
-    } finally {
-      setIsSigningIn(false);
-    }
-  }
-
   async function signOut() {
     const activeToken = token;
     sessionStorage.removeItem(TOKEN_KEY);
@@ -598,18 +513,17 @@ export default function LandlordDashboard() {
     sessionStorage.removeItem("hodi_email");
     sessionStorage.removeItem("hodi_phone_number");
     sessionStorage.removeItem("hodi_memberships");
-    setToken("");
     setData(EMPTY_DATA);
     setSelectedOrganizationId("");
     setMemberships([]);
     setPageError("");
+    setSessionState("guest");
     try {
       await apiRequest<void>("/accounts/logout/", activeToken, { method: "POST" });
-    } catch (error) {
-      setPageError(error instanceof Error
-        ? `You were signed out on this device, but the API token could not be revoked: ${error.message}`
-        : "You were signed out on this device, but the API token could not be revoked.");
+    } catch {
+      // Local session is already cleared. Sign-in is the next step either way.
     }
+    window.location.assign("/signin");
   }
 
   async function createProperty(event: FormEvent<HTMLFormElement>) {
@@ -741,6 +655,14 @@ export default function LandlordDashboard() {
     const form = new FormData(event.currentTarget);
     setIsSaving(true);
     setPageError("");
+    const rent = shillingsToCents(String(form.get("monthly_rent") ?? ""));
+    const depositRaw = String(form.get("security_deposit") ?? "").trim();
+    const deposit = depositRaw === "" ? 0 : shillingsToCents(depositRaw);
+    if (rent == null || rent <= 0 || deposit == null) {
+      setPageError("Enter rent and deposit in KES with at most two decimal places. Rent must be greater than zero. Extra precision is not rounded.");
+      setIsSaving(false);
+      return;
+    }
     try {
       const requestedStatus = String(form.get("status") ?? "DRAFT");
       const created = await apiRequest<Lease>("/leases/", token, {
@@ -751,8 +673,8 @@ export default function LandlordDashboard() {
           reference: String(form.get("reference") ?? "").trim(),
           start_date: String(form.get("start_date") ?? ""),
           end_date: String(form.get("end_date") ?? "") || null,
-          monthly_rent_minor: Math.round(Number(form.get("monthly_rent")) * 100),
-          security_deposit_minor: Math.round(Number(form.get("security_deposit") || 0) * 100),
+          monthly_rent_minor: rent,
+          security_deposit_minor: deposit,
           status: "DRAFT",
         }),
       });
@@ -860,13 +782,13 @@ export default function LandlordDashboard() {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  if (!token) {
+  const sectionClass = (id: string) => (activeSection === id ? "is-active" : undefined);
+
+  if (sessionState !== "ready" || !token) {
     return (
-      <LoginForm
-        error={pageError}
-        isSubmitting={isSigningIn}
-        onSubmit={signIn}
-      />
+      <main className="hodi-session-gate" aria-live="polite">
+        <p>{sessionState === "guest" ? "Taking you to sign in…" : "Checking your Hodi account…"}</p>
+      </main>
     );
   }
 
@@ -875,21 +797,28 @@ export default function LandlordDashboard() {
       <aside className="landlord-sidebar">
         <Logo size={36} className="landlord-sidebar-logo" wordmarkClassName="text-white" />
         <span className="landlord-sidebar-label">WORKSPACE</span>
-        <nav className="landlord-nav" aria-label="Landlord dashboard">
-          <a className="is-active" href="#overview"><Icon name="overview" />Overview</a>
-          {showPortfolio && <a href="#properties"><Icon name="building" />Properties</a>}
-          {showPortfolio && <a href="#units"><Icon name="building" />Units</a>}
-          {showPortfolio && <a href="#tenants"><Icon name="people" />Tenants</a>}
-          {showPortfolio && <a href="#leases"><Icon name="lease" />Leases</a>}
-          {canWritePortfolio && <a href="#marketplace"><Icon name="building" />Listings</a>}
+        <nav
+          className="landlord-nav"
+          aria-label="Landlord dashboard"
+          onClick={event => {
+            const href = (event.target as HTMLElement).closest("a")?.getAttribute("href") ?? "";
+            if (href.startsWith("#")) setActiveSection(href.slice(1));
+          }}
+        >
+          <a className={sectionClass("overview")} href="#overview" aria-current={activeSection === "overview" ? "page" : undefined}><Icon name="overview" />Overview</a>
+          {showPortfolio && <a className={sectionClass("properties")} href="#properties" aria-current={activeSection === "properties" ? "page" : undefined}><Icon name="building" />Properties</a>}
+          {showPortfolio && <a className={sectionClass("units")} href="#units"><Icon name="building" />Units</a>}
+          {showPortfolio && <a className={sectionClass("tenants")} href="#tenants"><Icon name="people" />Tenants</a>}
+          {showPortfolio && <a className={sectionClass("leases")} href="#leases"><Icon name="lease" />Leases</a>}
+          {canWritePortfolio && <a className={sectionClass("marketplace")} href="#marketplace"><Icon name="building" />Listings</a>}
           <Link href="/marketplace">Marketplace</Link>
           {canManageTeam && <Link href="/accountants">Accountants</Link>}
-          {canReadBilling && <a href="#billing"><Icon name="lease" />Billing</a>}
-          {canReadBilling && <a href="#subscription"><Icon name="lease" />Subscription</a>}
-          {canReadUtilities && <a href="#utilities"><Icon name="building" />Utilities</a>}
-          {canMaintenance && <a href="#maintenance-requests"><Icon name="building" />Maintenance</a>}
-          {canManageTeam && <a href="#team"><Icon name="people" />Team</a>}
-          {canAudit && !previewMode && <a href="#audit"><Icon name="overview" />Audit</a>}
+          {canReadBilling && <a className={sectionClass("billing")} href="#billing"><Icon name="lease" />Billing</a>}
+          {canReadBilling && <a className={sectionClass("subscription")} href="#subscription"><Icon name="lease" />Subscription</a>}
+          {canReadUtilities && <a className={sectionClass("utilities")} href="#utilities"><Icon name="building" />Utilities</a>}
+          {canMaintenance && <a className={sectionClass("maintenance-requests")} href="#maintenance-requests"><Icon name="building" />Maintenance</a>}
+          {canManageTeam && <a className={sectionClass("team")} href="#team"><Icon name="people" />Team</a>}
+          {canAudit && !previewMode && <a className={sectionClass("audit")} href="#audit"><Icon name="overview" />Audit</a>}
         </nav>
         <div className="landlord-sidebar-bottom">
           <span className="landlord-sidebar-label">HODI PROPERTY OPERATIONS</span>
@@ -986,15 +915,10 @@ export default function LandlordDashboard() {
                 {isLoading && <span className="landlord-loading-label">Syncing with Hodi…</span>}
               </section>
             ) : (
-              <div id="overview" className="landlord-overview-banner-wrap">
-                <PropertyBanner
-                  eyebrow="Your portfolio"
-                  title="A clear view of the places you manage."
-                  description="Properties, homes, tenants and active leases, held together in one operating space."
-                  imageSrc="/images/hodi/apartment-building.jpg"
-                  imageSizes="(max-width: 900px) 100vw, 75vw"
-                  className="landlord-overview-banner"
-                />
+              <div id="overview" className="ops-mast">
+                <p className="ops-mast-kicker"><span />{isManager ? "Property manager" : "Landlord"}</p>
+                <h2>{organization?.name ?? "Portfolio"}</h2>
+                <p>Properties, units, tenants, and leases for this organization. Counts and rent totals come from saved records.</p>
                 {isLoading && <span className="landlord-banner-sync" role="status">Syncing with HODI…</span>}
               </div>
             )}
@@ -1060,7 +984,7 @@ export default function LandlordDashboard() {
                   <h3>Add a property</h3>
                   <div className="landlord-form-grid">
                     <label>Property name<input name="name" required maxLength={200} /></label>
-                    <label>City<input name="city" required defaultValue="Ongata Rongai" maxLength={100} /></label>
+                    <label>City<input name="city" required maxLength={100} placeholder="City" /></label>
                     <label className="landlord-form-wide">Address<input name="address" /></label>
                     <label>Country<input name="country" required defaultValue="Kenya" maxLength={100} /></label>
                   </div>
@@ -1324,8 +1248,8 @@ export default function LandlordDashboard() {
                     </label>
                     <label>Start date<input name="start_date" type="date" required /></label>
                     <label>End date <span className="landlord-optional">(optional)</span><input name="end_date" type="date" /></label>
-                    <label>Monthly rent (KES)<input name="monthly_rent" type="number" min="0.01" step="0.01" required /></label>
-                    <label>Security deposit (KES)<input name="security_deposit" type="number" min="0" step="0.01" defaultValue="0" required /></label>
+                    <label>Monthly rent (KES)<input name="monthly_rent" type="text" inputMode="decimal" autoComplete="off" required placeholder="45000.00" /></label>
+                    <label>Security deposit (KES)<input name="security_deposit" type="text" inputMode="decimal" autoComplete="off" defaultValue="0" required placeholder="0.00" /></label>
                   </div>
                   <div className="landlord-form-actions">
                     <button type="button" className="landlord-button landlord-button--quiet" onClick={() => setLeaseFormOpen(false)}>Cancel</button>

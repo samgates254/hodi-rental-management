@@ -1,7 +1,6 @@
 import Image from "next/image";
 import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { images } from "@/lib/images";
 
 export function SolutionsTenants() {
   return (
@@ -13,8 +12,8 @@ export function SolutionsTenants() {
             <div className="grid gap-4 sm:grid-cols-12 sm:gap-5">
               <div className="relative hidden overflow-hidden bg-soft-teal shadow-soft sm:col-span-5 sm:block sm:min-h-[22rem]">
                 <Image
-                  src={images.living.src}
-                  alt={images.living.alt}
+                  src="/images/hodi/open-living-dining.jpg"
+                  alt="Open-plan living and dining room with a glazed wall"
                   fill
                   sizes="(max-width: 1024px) 40vw, 22vw"
                   className="object-cover"
@@ -22,10 +21,10 @@ export function SolutionsTenants() {
                 <div className="absolute inset-0 bg-contrast-surface/20" aria-hidden />
                 <div className="absolute bottom-0 left-0 right-0 p-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                    Home
+                    Illustrative interior
                   </p>
                   <p className="mt-1 text-sm font-medium text-white">
-                    Unit B-12 · Westlands Court
+                    Not a Hodi tenancy
                   </p>
                 </div>
               </div>
@@ -41,11 +40,11 @@ export function SolutionsTenants() {
                       aria-hidden
                     />
                   </div>
-                  <h3 className="mt-1 text-lg font-semibold tracking-tight text-charcoal">
-                    Unit B-12
+                  <h3 className="mt-1 font-[family-name:var(--hodi-editorial)] text-lg font-normal text-charcoal">
+                    Unit not assigned
                   </h3>
                   <p className="mt-0.5 text-sm text-text-secondary">
-                    Westlands Court
+                    No property in this preview
                   </p>
                 </div>
 
@@ -55,17 +54,17 @@ export function SolutionsTenants() {
                       Rent
                     </p>
                     <p className="mt-2 text-xl font-semibold tracking-tight text-charcoal">
-                      KES 35,000
+                      KES —
                     </p>
-                    <p className="mt-1 text-xs text-text-secondary">Due 5 Oct</p>
+                    <p className="mt-1 text-xs text-text-secondary">Not loaded</p>
                   </div>
                   <div className="bg-soft-teal/50 px-5 py-4">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-secondary">
                       Status
                     </p>
-                    <p className="mt-2 text-sm font-medium text-teal">Current</p>
+                    <p className="mt-2 text-sm font-medium text-teal">No record</p>
                     <p className="mt-1 text-xs text-text-secondary">
-                      Lease active
+                      Lease not loaded
                     </p>
                   </div>
                 </div>
@@ -78,14 +77,14 @@ export function SolutionsTenants() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium text-charcoal">
-                          Water leak
+                          No request in this preview
                         </p>
                         <p className="mt-1 text-xs text-text-secondary">
-                          Latest update · Technician assigned
+                          Real requests appear in the tenant workspace
                         </p>
                       </div>
-                      <span className="shrink-0 border border-teal/30 bg-soft-teal px-2 py-1 text-[11px] font-medium text-charcoal">
-                        In progress
+                      <span className="shrink-0 border border-border px-2 py-1 text-[11px] font-medium text-charcoal">
+                        Empty
                       </span>
                     </div>
                   </div>

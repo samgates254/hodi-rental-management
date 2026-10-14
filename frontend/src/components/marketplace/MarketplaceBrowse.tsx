@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
 import { Container } from "@/components/ui/Container";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, asList } from "@/lib/opsApi";
 import { locationLabel, primaryPhoto, rentLabel, shillingsToCents, type PublicListing } from "./shared";
+import { RemotePhoto } from "./RemotePhoto";
 
 type Filters = {
   location: string;
@@ -27,18 +29,17 @@ function BrowseListingCard({ listing }: { listing: PublicListing }) {
     <li>
       <Link
         href={`/marketplace/${listing.id}`}
-        className="group block overflow-hidden rounded-2xl border border-border bg-surface shadow-soft transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
+        className="group block overflow-hidden border border-border bg-surface transition duration-200 hover:-translate-y-0.5"
       >
         <div className="relative aspect-[16/10] overflow-hidden bg-soft-teal">
           {photo && !failed ? (
-            <img
+            <RemotePhoto
               src={photo.url}
               alt={photo.caption || listing.title}
-              loading="lazy"
-              decoding="async"
+              fill
               sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-              onError={() => setFailed(true)}
-              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+              className="object-cover transition duration-200 group-hover:scale-[1.02]"
+              onFail={() => setFailed(true)}
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-text-secondary" aria-label={`No listing photo available for ${listing.title}`}>
@@ -52,8 +53,8 @@ function BrowseListingCard({ listing }: { listing: PublicListing }) {
         </div>
         <div className="space-y-2 p-4">
           <div className="flex items-start justify-between gap-3">
-            <h2 className="text-lg leading-snug text-charcoal">{listing.title}</h2>
-            <span className="shrink-0 rounded-full bg-soft-teal px-2 py-1 text-xs font-semibold text-charcoal">{listing.available ? "Available" : "Unavailable"}</span>
+            <h2 className="font-[family-name:var(--hodi-editorial)] text-xl font-normal leading-snug text-charcoal">{listing.title}</h2>
+            <span className="shrink-0 border border-border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-charcoal">{listing.available ? "Available" : "Unavailable"}</span>
           </div>
           <p className="text-sm text-text-secondary">{[listing.property_name, listing.unit_label, locationLabel(listing)].filter(Boolean).join(" · ")}</p>
           <p className="text-base font-semibold text-charcoal">{rentLabel(listing.monthly_rent_minor)} <span className="font-normal text-text-secondary">/ month</span></p>
@@ -130,16 +131,18 @@ export function MarketplaceBrowse() {
     <>
       <Header />
       <main id="main" className="bg-bg">
-        <section className="border-b border-border bg-contrast-surface text-white">
-          <Container className="py-14 md:py-20">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal">Hodi marketplace</p>
-            <h1 className="mt-3 max-w-2xl text-4xl leading-tight text-white md:text-5xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>
-              Homes ready to rent
-            </h1>
-            <p className="mt-4 max-w-xl text-base leading-relaxed text-white/75">
-              Published listings from Hodi organizations. An available card means the unit is open and has no active lease. Sending an inquiry does not reserve it.
+        <section className="hodi-market-hero">
+          <div className="hodi-market-hero-copy">
+            <p className="hodi-editorial-kicker"><span aria-hidden="true" />Marketplace</p>
+            <h1>Homes organizations have published.</h1>
+            <p>
+              These cards come from the live marketplace. An available listing has no active lease. Sending an inquiry does not reserve the home.
             </p>
-          </Container>
+          </div>
+          <figure>
+            <Image src="/images/hodi/tower-balconies.jpg" alt="White residential tower with stacked balconies" fill priority sizes="(max-width: 800px) 100vw, 42vw" className="object-cover" />
+            <figcaption>Illustrative architecture. Not a listing on this page.</figcaption>
+          </figure>
         </section>
 
         <Container className="py-8 md:py-12">

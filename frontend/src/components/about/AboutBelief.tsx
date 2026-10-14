@@ -13,8 +13,8 @@ export function AboutBelief() {
     <section id="belief" className="section-pad bg-contrast-surface text-white">
       <Container>
         <div className="mx-auto max-w-3xl text-center lg:mx-0 lg:max-w-3xl lg:text-left">
-          <p className="text-sm font-medium tracking-wide text-teal">The belief</p>
-          <h2 className="mt-5 font-display text-3xl font-semibold leading-[1.12] tracking-[-0.02em] text-white text-balance sm:text-4xl lg:text-[2.85rem]">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#c6a66b]">The belief</p>
+          <h2 className="mt-5 font-[family-name:var(--hodi-editorial)] text-3xl font-normal leading-[1.12] tracking-[-0.03em] text-white text-balance sm:text-4xl lg:text-[2.85rem]">
             Running property is an operational problem.
           </h2>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-white/65 text-pretty sm:text-lg lg:mx-0">

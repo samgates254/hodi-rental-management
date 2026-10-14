@@ -21,18 +21,18 @@ export function ConnectedOps() {
           description="Hodi’s value is not a longer feature list. It is that property work shares one record — so a payment, a lease change, or a repair still points back to the same unit and people."
         />
 
-        <div className="mt-12 rounded-lg bg-contrast-surface p-6 sm:p-8 lg:p-10">
-          <p className="text-center text-[0.6875rem] font-medium uppercase tracking-[0.08em] text-white/60">
+        <div className="mt-12 bg-[#163d32] p-6 text-white sm:p-8 lg:p-10">
+          <p className="text-center text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-[#c6a66b]">
             One connected path
           </p>
           <ol className="mt-6 flex flex-wrap items-center justify-center gap-x-1 gap-y-3">
             {chain.map((item, index) => (
               <li key={item} className="flex items-center gap-1 sm:gap-2">
-                <span className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium tracking-tight text-white">
+                <span className="border border-white/15 px-3 py-2 text-sm font-medium tracking-tight text-white">
                   {item}
                 </span>
                 {index < chain.length - 1 ? (
-                  <span className="px-0.5 text-teal" aria-hidden>
+                  <span className="px-0.5 text-[#c6a66b]" aria-hidden>
                     →
                   </span>
                 ) : null}

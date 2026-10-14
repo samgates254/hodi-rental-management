@@ -1,7 +1,6 @@
 import Image from "next/image";
 import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { images } from "@/lib/images";
 
 const flow = [
   { step: "1", title: "Report", body: "Issue raised against the unit." },
@@ -60,8 +59,8 @@ export function Maintenance() {
           <div className="lg:col-span-6">
             <div className="relative aspect-[4/5] overflow-hidden rounded-lg border border-border bg-soft-teal shadow-soft sm:aspect-[5/4] lg:aspect-[4/5]">
               <Image
-                src={images.operations.src}
-                alt={images.operations.alt}
+                src="/images/hodi/property-exterior.jpg"
+                alt="Hillside apartment block with stacked balconies, photographed from above"
                 fill
                 sizes="(max-width: 1024px) 100vw, 50vw"
                 className="object-cover object-center"

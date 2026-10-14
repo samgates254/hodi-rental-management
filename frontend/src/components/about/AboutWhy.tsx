@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
@@ -41,7 +42,7 @@ export function AboutWhy() {
               {pieces.map((item) => (
                 <li
                   key={item}
-                  className="border border-border bg-bg px-3.5 py-2 text-sm text-charcoal"
+                  className="border border-border border-t-2 border-t-[#c6a66b] bg-bg px-3.5 py-2 text-sm text-charcoal"
                 >
                   {item}
                 </li>
@@ -51,6 +52,18 @@ export function AboutWhy() {
               Individually familiar. Collectively scattered — until they share
               one thread.
             </p>
+            <figure className="relative mt-10 aspect-[16/9] overflow-hidden bg-[#163d32]">
+              <Image
+                src="/images/hodi/mixed-use-block.jpg"
+                alt="Street-front apartment building with timber balconies"
+                fill
+                sizes="(max-width: 1024px) 100vw, 50vw"
+                className="object-cover"
+              />
+              <figcaption className="absolute bottom-3 left-3 right-3 bg-[#f7f5f0] px-3 py-2 text-xs text-[#163d32]">
+                A street-front block. The photograph is the building, not a listing.
+              </figcaption>
+            </figure>
           </div>
         </div>
       </Container>

@@ -1,3 +1,5 @@
+import { formatMinor, minorToShillingsInput, shillingsToCents } from "@/lib/money";
+
 export type ListingPhoto = {
   id: number;
   url: string;
@@ -38,23 +40,10 @@ export type ManagedListing = PublicListing & {
   updated_at: string;
 };
 
-export function rentLabel(cents: number | null | undefined): string {
-  const value = Number(cents ?? 0);
-  const fraction = value % 100 === 0 ? 0 : 2;
-  return new Intl.NumberFormat("en-KE", {
-    style: "currency",
-    currency: "KES",
-    minimumFractionDigits: fraction,
-    maximumFractionDigits: fraction,
-  }).format(value / 100);
-}
+export { minorToShillingsInput, shillingsToCents };
 
-export function shillingsToCents(raw: string): number | undefined {
-  const trimmed = raw.trim();
-  if (!trimmed) return undefined;
-  const amount = Number(trimmed);
-  if (!Number.isFinite(amount) || amount < 0) return undefined;
-  return Math.round(amount * 100);
+export function rentLabel(cents: number | null | undefined): string {
+  return formatMinor(cents, "KES", { trailingZeros: false });
 }
 
 export function primaryPhoto(photos: ListingPhoto[]): ListingPhoto | undefined {

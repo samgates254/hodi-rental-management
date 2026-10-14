@@ -2,35 +2,19 @@ import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
 const portfolio = {
-  name: "Westlands Court",
-  units: 24,
-  occupied: 21,
-  rent: "KES 1.84M",
-  open: 3,
-  collection: "98%",
+  name: "Illustrative property",
+  units: "—",
+  occupied: "—",
+  rent: "KES —",
+  open: "—",
+  collection: "—",
 };
 
 const activity = [
-  {
-    label: "Rent received",
-    detail: "Unit A-07 · KES 42,000",
-    time: "Today",
-  },
-  {
-    label: "Request opened",
-    detail: "Unit B-12 · Water leak",
-    time: "09:42",
-  },
-  {
-    label: "Work completed",
-    detail: "Unit C-03 · Door lock",
-    time: "Yesterday",
-  },
-  {
-    label: "Lease renewed",
-    detail: "Unit D-01 · 12 months",
-    time: "Mon",
-  },
+  { label: "Rent records", detail: "None in this preview", time: "—" },
+  { label: "Open requests", detail: "None in this preview", time: "—" },
+  { label: "Work completed", detail: "None in this preview", time: "—" },
+  { label: "Lease activity", detail: "None in this preview", time: "—" },
 ];
 
 export function SolutionsOwners() {

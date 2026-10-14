@@ -105,8 +105,8 @@ export function HomepageExperience() {
           <div className="hodi-hero-signature"><span>For the places you care for.</span><i aria-hidden="true" /></div>
         </div>
         <figure className="hodi-home-hero-visual">
-          <Image src="/images/hodi/homepage-nairobi-residence.jpg" alt="Sunlit Nairobi residence with planted balconies and a landscaped courtyard" fill priority sizes="(max-width: 800px) 100vw, 55vw" />
-          <figcaption><span>A better way to care for property.</span><small>ILLUSTRATIVE IMAGE</small></figcaption>
+          <Image src="/images/hodi/modern-block.jpg" alt="Modern multi-storey apartment building photographed from above" fill priority sizes="(max-width: 800px) 100vw, 55vw" className="hodi-home-hero-image" />
+          <figcaption><span>Property, tenancy and everyday work in one record.</span><small>ILLUSTRATIVE PHOTOGRAPH</small></figcaption>
         </figure>
       </section>
 
@@ -133,7 +133,7 @@ export function HomepageExperience() {
       <section className="hodi-feature-section hodi-feature-maintenance" aria-labelledby="maintenance-title">
         <Container className="hodi-feature-grid hodi-feature-reverse">
           <div className="hodi-feature-copy"><SectionLabel>Maintenance &amp; care</SectionLabel><h2 id="maintenance-title">Small issues deserve<br />a clear next step.</h2><p>A repair is easier to manage when the request, the conversation and the follow-through stay connected. Give every issue a place, from first note to resolution.</p><ul><li>Capture requests with the right context</li><li>Keep updates against the relevant property</li><li>Follow progress in one shared record</li></ul><a className="hodi-text-link" href="/platform#maintenance">Explore maintenance <span aria-hidden="true">→</span></a></div>
-          <div className="hodi-maintenance-visual"><Image src="/images/hodi/homepage-sunlit-interior.jpg" alt="Sunlit apartment living room with timber details and leafy indoor plants" fill sizes="(max-width: 800px) 100vw, 50vw" /><div className="hodi-request-note"><small>ILLUSTRATIVE REQUEST</small><strong>A place for every repair.</strong><span>Property not selected</span><em>Draft</em><p>Add details and photos to create a clear record.</p></div></div>
+          <div className="hodi-maintenance-visual"><Image src="/images/hodi/open-living-dining.jpg" alt="Open-plan living and dining room with a glazed wall" fill sizes="(max-width: 800px) 100vw, 50vw" className="object-cover" /><div className="hodi-request-note"><small>ILLUSTRATIVE REQUEST</small><strong>A place for every repair.</strong><span>Property not selected</span><em>Draft</em><p>Add details and photos to create a clear record.</p></div></div>
         </Container>
       </section>
 
@@ -155,9 +155,9 @@ export function HomepageExperience() {
         <Container>
           <div className="hodi-properties-heading"><div><SectionLabel>Spaces, connected</SectionLabel><h2 id="properties-title">Different properties.<br />The same thoughtful approach.</h2></div><p>From a single home to a growing portfolio, bring the everyday work of property management together.</p></div>
           <div className="hodi-property-gallery">
-            <article><Image src="/images/hodi/design-gallery-1.jpeg" alt="Contemporary Nairobi apartment building framed by mature trees" width={1152} height={928} sizes="(max-width: 700px) 90vw, 33vw" /><div><strong>Urban apartments</strong><span>Property records, brought together</span></div></article>
-            <article><Image src="/images/hodi/design-gallery-3.jpeg" alt="Garden residence with a stone and timber facade" width={1152} height={928} sizes="(max-width: 700px) 90vw, 33vw" /><div><strong>Garden residences</strong><span>Room for the details that matter</span></div></article>
-            <article><Image src="/images/hodi/design-gallery-5.jpeg" alt="Multi-unit residence around a landscaped courtyard" width={1152} height={928} sizes="(max-width: 700px) 90vw, 33vw" /><div><strong>Multi-unit homes</strong><span>A thoughtful approach to care</span></div></article>
+            <article><Image src="/images/hodi/tower-balconies.jpg" alt="White residential tower with stacked balconies" width={451} height={679} sizes="(max-width: 700px) 90vw, 33vw" /><div><strong>Residential towers</strong><span>A record for every unit</span></div></article>
+            <article><Image src="/images/hodi/mixed-use-block.jpg" alt="Street-front apartment building with timber balconies" width={460} height={305} sizes="(max-width: 700px) 90vw, 33vw" /><div><strong>Street-front blocks</strong><span>Shared buildings, separate tenancies</span></div></article>
+            <article><Image src="/images/hodi/city-balcony-living.jpg" alt="Living room opening onto a city balcony" width={571} height={536} sizes="(max-width: 700px) 90vw, 33vw" /><div><strong>Lived-in homes</strong><span>The rooms people actually use</span></div></article>
           </div>
           <p className="hodi-property-disclaimer">Illustrative property imagery and settings. These are not HODI customer properties or listings; no availability or pricing is represented.</p>
         </Container>
