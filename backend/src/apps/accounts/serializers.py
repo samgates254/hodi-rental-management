@@ -174,7 +174,8 @@ class SignupSerializer(serializers.Serializer):
 				phone_number=phone_number,
 				email=user.email,
 			)
-		Token.objects.get_or_create(user=user)
+		if account_type != AccountProfile.AccountType.PROPERTY_AGENT:
+			Token.objects.get_or_create(user=user)
 		return user
 
 
@@ -207,6 +208,17 @@ class LoginSerializer(serializers.Serializer):
 
 class PasswordResetRequestSerializer(serializers.Serializer):
 	email = serializers.EmailField()
+
+
+class EmailVerificationRequestSerializer(serializers.Serializer):
+	email = serializers.EmailField(max_length=254)
+
+	def validate_email(self, email):
+		return email.strip().casefold()
+
+
+class EmailVerificationConfirmSerializer(serializers.Serializer):
+	token = serializers.CharField(max_length=4096, trim_whitespace=True)
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):

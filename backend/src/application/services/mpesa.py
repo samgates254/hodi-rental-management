@@ -12,11 +12,19 @@ import hashlib
 import json
 
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 
 from rest_framework.exceptions import APIException, NotFound, ValidationError
 
-from apps.billing.models import DocumentStatus, Invoice, MpesaAttempt
+from apps.billing.models import (
+    DEPOSIT_CHARGE_TYPES,
+    Charge,
+    DocumentStatus,
+    Invoice,
+    MpesaAttempt,
+)
 from apps.billing.statements import tenant_for_statement
+from apps.tenants.models import Tenant
 from application.services.audit import record_audit
 from infrastructure.payments.mpesa import (
     MpesaAuthError,
@@ -99,6 +107,37 @@ def _load_invoice(*, invoice_id, tenant):
     return invoice
 
 
+def _available_stk_balance(*, tenant):
+    """Return rent-ledger due not already reserved by an open STK attempt.
+
+    Allocation is tenant-wide under CANONICAL_PRIORITY v2, so a selected
+    invoice is descriptive and does not change which posted charge settles
+    first. Deposit charges are excluded because the rent ledger cannot post
+    their liability treatment.
+    """
+    outstanding = sum(
+        int(value)
+        for value in Charge.objects.select_for_update()
+        .filter(
+            tenant_id=tenant.pk,
+            organization_id=tenant.organization_id,
+            lifecycle=DocumentStatus.POSTED,
+            balance_cents__gt=0,
+            currency='KES',
+        )
+        .exclude(charge_type__in=DEPOSIT_CHARGE_TYPES)
+        .order_by('due_date', 'created_at', 'pk')
+        .values_list('balance_cents', flat=True)
+    )
+    reserved = MpesaAttempt.objects.filter(
+        tenant_id=tenant.pk,
+        organization_id=tenant.organization_id,
+        currency='KES',
+        status__in=(MpesaAttempt.Status.INITIATED, MpesaAttempt.Status.STK_SENT),
+    ).aggregate(total=Sum('amount_cents'))['total'] or 0
+    return max(0, outstanding - int(reserved))
+
+
 def _mark_failed(attempt, description: str) -> MpesaAttempt:
     attempt.status = MpesaAttempt.Status.FAILED
     attempt.result_description = description
@@ -125,21 +164,6 @@ def initiate_mpesa_stk(
     amount_kes = kes_from_cents(amount_cents)
     cents = amount_kes * 100
     phone = normalize_kenya_msisdn(phone_number or tenant.phone_number)
-    invoice = _load_invoice(invoice_id=invoice_id, tenant=tenant)
-    account_reference = _account_reference(tenant=tenant, invoice=invoice)
-    fingerprint = hashlib.sha256(json.dumps({
-        'tenant': tenant.pk,
-        'invoice': invoice.pk if invoice is not None else None,
-        'amount_cents': cents,
-        'phone_number': phone,
-    }, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
-
-    if idempotency_key:
-        existing = MpesaAttempt.objects.filter(tenant=tenant, idempotency_key=idempotency_key).first()
-        if existing is not None:
-            if existing.request_fingerprint != fingerprint:
-                raise ValidationError({'idempotency_key': 'This key was already used for a different payment request.'})
-            return existing
     client = client or MpesaClient.from_settings()
     try:
         client.require_configured()
@@ -147,6 +171,46 @@ def initiate_mpesa_stk(
         raise ValidationError({'detail': str(error)}) from error
     try:
         with transaction.atomic():
+            # This stable per-tenant row lock serializes independent requests
+            # while their pending attempts reserve the same billing balance.
+            tenant = Tenant.objects.select_for_update(of=('self',)).select_related(
+                'organization',
+            ).get(pk=tenant.pk)
+            if tenant.organization_id is None or not tenant.organization.is_active:
+                raise NotFound('No active tenant record is linked to this account.')
+            invoice = _load_invoice(invoice_id=invoice_id, tenant=tenant)
+            account_reference = _account_reference(tenant=tenant, invoice=invoice)
+            fingerprint = hashlib.sha256(json.dumps({
+                'tenant': tenant.pk,
+                'invoice': invoice.pk if invoice is not None else None,
+                'amount_cents': cents,
+                'phone_number': phone,
+            }, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+
+            if idempotency_key:
+                existing = MpesaAttempt.objects.filter(
+                    tenant=tenant,
+                    idempotency_key=idempotency_key,
+                ).first()
+                if existing is not None:
+                    if existing.request_fingerprint != fingerprint:
+                        raise ValidationError({
+                            'idempotency_key': 'This key was already used for a different payment request.',
+                        })
+                    return existing
+
+            available_cents = _available_stk_balance(tenant=tenant)
+            if available_cents <= 0:
+                raise ValidationError({
+                    'amount_cents': 'There is no outstanding rent-ledger balance available for an M-Pesa payment.',
+                })
+            if cents > available_cents:
+                raise ValidationError({
+                    'amount_cents': (
+                        'Amount exceeds the outstanding balance available after pending M-Pesa requests.'
+                    ),
+                })
+
             attempt = MpesaAttempt.objects.create(
                 organization=tenant.organization,
                 tenant=tenant,

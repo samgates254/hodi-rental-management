@@ -28,6 +28,10 @@ def photo_file(name='room.png', content_type='image/png', body=PNG):
 	return SimpleUploadedFile(name, body, content_type=content_type)
 
 
+def public_results(response):
+	return response.data.get('results', []) if isinstance(response.data, dict) else response.data
+
+
 @override_settings(MEDIA_ROOT=MEDIA_ROOT)
 class MarketplaceApiTests(APITestCase):
 	def setUp(self):
@@ -102,13 +106,13 @@ class MarketplaceApiTests(APITestCase):
 	def test_unauthenticated_browse_is_empty_until_a_listing_is_published(self):
 		response = self.client.get(reverse('marketplace:public-listing-list'))
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
-		self.assertEqual(response.data, [])
+		self.assertEqual(public_results(response), [])
 
 		created = self._create()
 		self.assertEqual(created.status_code, status.HTTP_201_CREATED)
 		self.client.force_authenticate(None)
 		hidden = self.client.get(reverse('marketplace:public-listing-list'))
-		self.assertEqual(hidden.data, [])
+		self.assertEqual(public_results(hidden), [])
 		detail = self.client.get(
 			reverse('marketplace:public-listing-detail', kwargs={'pk': created.data['id']}),
 		)
@@ -119,8 +123,8 @@ class MarketplaceApiTests(APITestCase):
 		self.assertEqual(published.data['status'], Listing.Status.PUBLISHED)
 		self.client.force_authenticate(None)
 		visible = self.client.get(reverse('marketplace:public-listing-list'))
-		self.assertEqual(len(visible.data), 1)
-		row = visible.data[0]
+		self.assertEqual(len(public_results(visible)), 1)
+		row = public_results(visible)[0]
 		self.assertEqual(row['title'], 'Bright one-bedroom in Kilimani')
 		self.assertTrue(row['available'])
 		self.assertNotIn('unit', row)
@@ -141,21 +145,21 @@ class MarketplaceApiTests(APITestCase):
 		self.client.force_authenticate(None)
 
 		by_city = self.client.get(reverse('marketplace:public-listing-list'), {'location': 'mombasa'})
-		self.assertEqual([row['title'] for row in by_city.data], ['Furnished two-bed'])
+		self.assertEqual([row['title'] for row in public_results(by_city)], ['Furnished two-bed'])
 
 		by_rent = self.client.get(reverse('marketplace:public-listing-list'), {'min_rent': 3000000, 'max_rent': 9000000})
-		self.assertEqual([row['title'] for row in by_rent.data], ['Furnished two-bed'])
+		self.assertEqual([row['title'] for row in public_results(by_rent)], ['Furnished two-bed'])
 
 		by_rooms = self.client.get(reverse('marketplace:public-listing-list'), {'bedrooms': 0, 'bathrooms': 1, 'furnished': 'false'})
-		self.assertEqual([row['title'] for row in by_rooms.data], ['Cheaper studio'])
+		self.assertEqual([row['title'] for row in public_results(by_rooms)], ['Cheaper studio'])
 
 		by_amenity = self.client.get(reverse('marketplace:public-listing-list'), {'amenity': 'Parking'})
-		self.assertEqual([row['title'] for row in by_amenity.data], ['Furnished two-bed'])
+		self.assertEqual([row['title'] for row in public_results(by_amenity)], ['Furnished two-bed'])
 
 		ordered = self.client.get(reverse('marketplace:public-listing-list'), {'ordering': 'rent'})
-		self.assertEqual([row['monthly_rent_minor'] for row in ordered.data], [2500000, 8000000])
+		self.assertEqual([row['monthly_rent_minor'] for row in public_results(ordered)], [2500000, 8000000])
 		desc = self.client.get(reverse('marketplace:public-listing-list'), {'ordering': '-rent'})
-		self.assertEqual([row['monthly_rent_minor'] for row in desc.data], [8000000, 2500000])
+		self.assertEqual([row['monthly_rent_minor'] for row in public_results(desc)], [8000000, 2500000])
 
 		invalid = self.client.get(reverse('marketplace:public-listing-list'), {'ordering': 'title'})
 		self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
@@ -176,7 +180,7 @@ class MarketplaceApiTests(APITestCase):
 		self.unit.status = Unit.Status.OCCUPIED
 		self.unit.save(update_fields=('status',))
 		self.client.force_authenticate(None)
-		self.assertEqual(self.client.get(reverse('marketplace:public-listing-list')).data, [])
+		self.assertEqual(public_results(self.client.get(reverse('marketplace:public-listing-list'))), [])
 		self.assertEqual(
 			self.client.get(reverse('marketplace:public-listing-detail', kwargs={'pk': created.data['id']})).status_code,
 			status.HTTP_404_NOT_FOUND,
@@ -193,7 +197,7 @@ class MarketplaceApiTests(APITestCase):
 			monthly_rent_minor=4500000,
 			status=Lease.Status.ACTIVE,
 		)
-		self.assertEqual(self.client.get(reverse('marketplace:public-listing-list')).data, [])
+		self.assertEqual(public_results(self.client.get(reverse('marketplace:public-listing-list'))), [])
 
 	def test_manager_can_update_unpublish_and_cannot_duplicate(self):
 		created = self._create(user=self.manager)
@@ -219,7 +223,7 @@ class MarketplaceApiTests(APITestCase):
 		self.assertEqual(draft.data['status'], Listing.Status.DRAFT)
 		self.assertFalse(draft.data['is_publicly_available'])
 		self.client.force_authenticate(None)
-		self.assertEqual(self.client.get(reverse('marketplace:public-listing-list')).data, [])
+		self.assertEqual(public_results(self.client.get(reverse('marketplace:public-listing-list'))), [])
 
 	def test_disallowed_roles_and_other_organizations_cannot_manage(self):
 		created = self._create()
@@ -263,6 +267,12 @@ class MarketplaceApiTests(APITestCase):
 		self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
 		mismatch = self.client.post(upload_url, {'image': photo_file('room.jpg', 'image/png')}, format='multipart')
 		self.assertEqual(mismatch.status_code, status.HTTP_400_BAD_REQUEST)
+		spoofed = self.client.post(
+			upload_url,
+			{'image': photo_file('room.png', 'image/png', b'<html>not a PNG image</html>')},
+			format='multipart',
+		)
+		self.assertEqual(spoofed.status_code, status.HTTP_400_BAD_REQUEST)
 
 		stored = ListingPhoto.objects.get(pk=photo['id'])
 		stored_path = Path(stored.image.path)

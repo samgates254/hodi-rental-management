@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -182,7 +183,21 @@ def _photo_response(photo):
 
 
 def _apply_public_filters(queryset, params):
+	keyword = (params.get('q') or '').strip()
+	if len(keyword) > 100:
+		raise ValidationError({'q': 'Use 100 characters or fewer.'})
+	if keyword:
+		queryset = queryset.filter(
+			Q(title__icontains=keyword)
+			| Q(description__icontains=keyword)
+			| Q(area__icontains=keyword)
+			| Q(city__icontains=keyword)
+			| Q(unit__name__icontains=keyword)
+			| Q(unit__building__property__name__icontains=keyword)
+		)
 	location = (params.get('location') or '').strip()
+	if len(location) > 100:
+		raise ValidationError({'location': 'Use 100 characters or fewer.'})
 	if location:
 		queryset = queryset.filter(Q(city__icontains=location) | Q(area__icontains=location))
 	min_rent = params.get('min_rent')
@@ -191,6 +206,9 @@ def _apply_public_filters(queryset, params):
 		queryset = queryset.filter(monthly_rent_minor__gte=_rent_bound(min_rent, 'min_rent'))
 	if max_rent not in (None, ''):
 		queryset = queryset.filter(monthly_rent_minor__lte=_rent_bound(max_rent, 'max_rent'))
+	if min_rent not in (None, '') and max_rent not in (None, ''):
+		if _rent_bound(min_rent, 'min_rent') > _rent_bound(max_rent, 'max_rent'):
+			raise ValidationError({'max_rent': 'Maximum rent must be at least the minimum rent.'})
 	for field in ('bedrooms', 'bathrooms'):
 		raw = params.get(field)
 		if raw not in (None, ''):
@@ -202,24 +220,35 @@ def _apply_public_filters(queryset, params):
 		queryset = queryset.filter(furnished=False)
 	elif furnished:
 		raise ValidationError({'furnished': 'Use true or false.'})
-	for amenity in params.getlist('amenity'):
+	amenities = params.getlist('amenity')
+	if len(amenities) > 10:
+		raise ValidationError({'amenity': 'Choose 10 amenities or fewer.'})
+	for amenity in amenities:
 		label = amenity.strip()
 		if not label:
 			continue
+		if len(label) > 40:
+			raise ValidationError({'amenity': 'Use 40 characters or fewer.'})
 		if any(char in label for char in '"\\%_'):
 			raise ValidationError({'amenity': 'Amenity filters cannot include quotes or wildcards.'})
 		# JSON containment is unsupported on SQLite. Match the encoded string instead.
 		queryset = queryset.filter(amenities__icontains=f'"{label}"')
 	ordering = (params.get('ordering') or 'newest').strip()
 	if ordering == 'rent':
-		queryset = queryset.order_by('monthly_rent_minor', '-created_at')
+		queryset = queryset.order_by('monthly_rent_minor', '-created_at', '-pk')
 	elif ordering == '-rent':
-		queryset = queryset.order_by('-monthly_rent_minor', '-created_at')
+		queryset = queryset.order_by('-monthly_rent_minor', '-created_at', '-pk')
 	elif ordering == 'newest':
-		queryset = queryset.order_by('-published_at', '-created_at')
+		queryset = queryset.order_by('-published_at', '-created_at', '-pk')
 	else:
 		raise ValidationError({'ordering': 'Use newest, rent, or -rent.'})
 	return queryset
+
+
+class PublicListingPagination(PageNumberPagination):
+	page_size = 12
+	page_size_query_param = 'page_size'
+	max_page_size = 48
 
 
 def _rent_bound(raw, name):
@@ -229,6 +258,8 @@ def _rent_bound(raw, name):
 		raise ValidationError({name: 'Rent filters must be integer cents.'}) from error
 	if value < 0:
 		raise ValidationError({name: 'Rent filters cannot be negative.'})
+	if value > 9_223_372_036_854_775_807:
+		raise ValidationError({name: 'Rent filter is too large.'})
 	return value
 
 
@@ -239,6 +270,8 @@ def _count_bound(raw, name):
 		raise ValidationError({name: 'Use a whole number.'}) from error
 	if value < 0:
 		raise ValidationError({name: 'Use a whole number.'})
+	if value > 30:
+		raise ValidationError({name: 'Use a whole number from 0 to 30.'})
 	return value
 
 
@@ -250,6 +283,7 @@ class PublicListingViewSet(
 	authentication_classes = ()
 	permission_classes = (AllowAny,)
 	serializer_class = PublicListingSerializer
+	pagination_class = PublicListingPagination
 
 	def get_queryset(self):
 		queryset = publicly_available_queryset().select_related(
@@ -375,11 +409,14 @@ class ManagedListingViewSet(viewsets.ModelViewSet):
 def _agent_profile_for(user):
 	if not user.is_authenticated or not user.is_active:
 		raise PermissionDenied('An active property-agent account is required.')
-	if not AccountProfile.objects.filter(
+	account = AccountProfile.objects.filter(
 		user=user,
 		account_type=AccountProfile.AccountType.PROPERTY_AGENT,
-	).exists():
+	).first()
+	if account is None:
 		raise PermissionDenied('A property-agent account is required.')
+	if account.email_verified_at is None:
+		raise PermissionDenied('Verify your email address before using the agent workspace.')
 	try:
 		profile = AgentProfile.objects.get(user=user)
 	except AgentProfile.DoesNotExist as error:
@@ -522,6 +559,12 @@ class AgentAuthorizationView(APIView):
 			raise ValidationError({'agent_email': 'A registered active property-agent account is required.'}) from error
 		if agent.account_status != AgentProfile.AccountStatus.ACTIVE:
 			raise ValidationError({'agent_email': 'This property-agent account is suspended.'})
+		if not AccountProfile.objects.filter(
+			user=agent_user,
+			account_type=AccountProfile.AccountType.PROPERTY_AGENT,
+			email_verified_at__isnull=False,
+		).exists():
+			raise ValidationError({'agent_email': 'The agent must verify ownership of their email address first.'})
 		active = AgentUnitAuthorization.objects.filter(
 			unit=unit,
 			status=AgentUnitAuthorization.Status.ACTIVE,
@@ -558,7 +601,7 @@ class AgentAuthorizationView(APIView):
 	@transaction.atomic
 	def delete(self, request, authorization_id):
 		try:
-			authorization = AgentUnitAuthorization.objects.select_for_update().select_related(
+			authorization = AgentUnitAuthorization.objects.select_for_update(of=('self',)).select_related(
 				'agent', 'unit__building__property__organization',
 			).get(pk=authorization_id)
 		except AgentUnitAuthorization.DoesNotExist as error:
@@ -639,7 +682,13 @@ class AgentListingViewSet(viewsets.ModelViewSet):
 			raise PermissionDenied('This listing is no longer authorized for editing.')
 		serializer = ListingUpdateSerializer(data=request.data, partial=True)
 		serializer.is_valid(raise_exception=True)
-		listing = update_listing(listing, actor=request.user, data=serializer.validated_data, request=request)
+		listing = update_listing(
+			listing,
+			actor=request.user,
+			data=serializer.validated_data,
+			request=request,
+			agent_profile=profile,
+		)
 		return Response(ManagedListingSerializer(self.get_queryset().get(pk=listing.pk)).data)
 
 	@action(detail=True, methods=('post',))
@@ -650,7 +699,12 @@ class AgentListingViewSet(viewsets.ModelViewSet):
 			raise PermissionDenied('Your agent profile must be verified before you can publish listings.')
 		if listing.agent_profile_id != profile.pk or not _active_agent_authorization(profile, listing.unit_id):
 			raise PermissionDenied('An active owner authorization is required to publish this listing.')
-		listing = publish_listing(listing, actor=request.user, request=request)
+		listing = publish_listing(
+			listing,
+			actor=request.user,
+			request=request,
+			agent_profile=profile,
+		)
 		return Response(ManagedListingSerializer(self.get_queryset().get(pk=listing.pk)).data)
 
 	@action(detail=True, methods=('post',))
@@ -659,7 +713,7 @@ class AgentListingViewSet(viewsets.ModelViewSet):
 		listing = self.get_object()
 		if listing.agent_profile_id != profile.pk or not _active_agent_authorization(profile, listing.unit_id):
 			raise PermissionDenied('This listing is no longer authorized for management.')
-		listing = pause_listing(listing, actor=request.user, request=request)
+		listing = pause_listing(listing, actor=request.user, request=request, agent_profile=profile)
 		return Response(ManagedListingSerializer(self.get_queryset().get(pk=listing.pk)).data)
 
 	@action(detail=True, methods=('post',))
@@ -668,7 +722,7 @@ class AgentListingViewSet(viewsets.ModelViewSet):
 		listing = self.get_object()
 		if listing.agent_profile_id != profile.pk or not _active_agent_authorization(profile, listing.unit_id):
 			raise PermissionDenied('This listing is no longer authorized for management.')
-		listing = archive_listing(listing, actor=request.user, request=request)
+		listing = archive_listing(listing, actor=request.user, request=request, agent_profile=profile)
 		return Response(ManagedListingSerializer(self.get_queryset().get(pk=listing.pk)).data)
 
 	@action(detail=True, methods=('post',), url_path='photos')
@@ -681,7 +735,8 @@ class AgentListingViewSet(viewsets.ModelViewSet):
 			raise ValidationError({'image': 'Choose a photo to upload.'})
 		make_primary = str(request.data.get('is_primary', '')).lower() in {'1', 'true', 'yes'}
 		add_photo(listing, uploaded=uploaded, caption=request.data.get('caption', ''),
-			make_primary=make_primary, actor=request.user, request=request)
+			make_primary=make_primary, actor=request.user, request=request,
+			agent_profile=self.profile())
 		return Response(ManagedListingSerializer(self.get_queryset().get(pk=listing.pk)).data, status=status.HTTP_201_CREATED)
 
 

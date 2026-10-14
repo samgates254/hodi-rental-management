@@ -957,6 +957,61 @@ main .auth-form-panel {
   padding: 2.25rem 0 4.5rem;
 }
 
+.hodi-record-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--hodi-border);
+}
+
+.hodi-record-nav,
+.hodi-record-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hodi-record-nav a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  color: var(--hodi-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hodi-record-nav a:hover,
+.hodi-record-nav a:focus-visible {
+  color: var(--hodi-brand);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.hodi-record-header-actions button {
+  white-space: nowrap;
+}
+
+@media (max-width: 46rem) {
+  .hodi-record-topbar {
+    flex-wrap: wrap;
+  }
+
+  .hodi-record-nav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    border-top: 1px solid var(--hodi-border);
+  }
+
+  .hodi-record-header-actions {
+    margin-left: auto;
+  }
+}
+
 .hodi-record-back {
   color: var(--hodi-brand);
   font-size: 0.875rem;

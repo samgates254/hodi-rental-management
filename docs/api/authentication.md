@@ -1,6 +1,6 @@
 # API Authentication
 
-The API uses DRF token authentication. Email verification is currently disabled; signup activates the account and returns a token immediately.
+The API uses DRF token authentication. Owner, tenant, and service-professional signup retains the existing immediate token flow. Property-agent signup creates an independent agent account but does not issue a session token until the agent proves email ownership.
 
 ## Signup Profiles
 
@@ -12,7 +12,11 @@ Tenant signup may include `organization_id` from `GET /api/v1/accounts/organizat
 
 Service-professional signup must include `professional_trade` (`ELECTRICIAN`, `CARPENTER`, `PLUMBER`, `PAINTER`, `MASON`, or `OTHER`).
 
-Signup and login responses include `token`, `account_type`, `organization_id`, and `professional_trade` where applicable so a client can route by profile. Signup returns `201` and activates the account immediately.
+Property-agent signup sends a single-use verification link to the submitted email and returns `email_verification_required: true` with no session token. The link expires after `EMAIL_VERIFICATION_TOKEN_MAX_AGE` seconds (default `86400`) and its token is carried in the URL fragment, so it is not sent to the web server in the initial request. Confirm it with `POST /api/v1/accounts/verify-email/`; the frontend confirmation page submits the token and establishes the agent session only after the backend accepts it. Unverified agents cannot sign in, manage protected agent information, or receive owner advertising authorization. Email confirmation does not itself verify an agent's professional status or authorize any listing.
+
+To resend, call `POST /api/v1/accounts/email-verification/request/` with `{"email":"agent@example.com"}`. It always returns the same `202` response for eligible and unknown addresses and is limited per address and by the normal API throttle. Configure `ACCOUNT_FRONTEND_URL` as the public frontend origin (HTTPS in production), and configure SMTP (`DJANGO_EMAIL_HOST`, `DJANGO_DEFAULT_FROM_EMAIL`, plus provider credentials) before production signup. When local development has no SMTP, Django's console email backend prints the link only in the developer's local console; production email failures are logged without the token or address.
+
+Signup and login responses include `token`, `account_type`, `organization_id`, and `professional_trade` where applicable so a client can route by profile. Signup returns `201`; owners, tenants, and service professionals receive a session token immediately, while property agents receive one only after email confirmation.
 
 ## Forgot Password
 
@@ -82,4 +86,4 @@ Authorization: Token <token>
 
 A successful logout returns `204` and revokes the token. Use HTTPS outside local development and never commit real credentials or tokens.
 
-Signup is limited to 5 requests per hour, login to 10 per minute, organization lookup to 60 per minute, password-reset requests to 3 per hour, and reset confirmations to 5 per hour. Production throttling requires a shared cache. Production startup also requires explicit secret and host settings, TLS-protected SMTP, and HTTPS CORS origins. See [backend/.env.example](../../backend/.env.example) for configuration names. Use HTTPS outside local development.
+In production, signup is limited to 5 requests per hour, login to 10 per minute, organization lookup to 60 per minute, password-reset requests to 3 per hour, reset confirmations to 5 per hour, email-verification resend requests to 5 per hour per source, and verification confirmations to 10 per hour per source. Resends are additionally limited to three deliveries per email per hour. Production throttling requires a shared cache. Production startup requires explicit environment, secret, and host settings, TLS-protected SMTP, and HTTPS CORS origins. See [backend/.env.example](../../backend/.env.example) for configuration names. Use HTTPS outside local development.

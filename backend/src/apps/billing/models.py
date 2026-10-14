@@ -69,6 +69,10 @@ CHARGE_TYPES = (
 	'OTHER',
 )
 
+# Deposits are liabilities and must not enter ordinary rent allocation. These
+# values remain accepted in historical rows so they can be reviewed safely.
+DEPOSIT_CHARGE_TYPES = ('DEPOSIT', 'SECURITY_DEPOSIT')
+
 
 class DocumentStatus(models.TextChoices):
 	DRAFT = 'DRAFT', 'Draft'

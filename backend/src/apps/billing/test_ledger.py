@@ -126,6 +126,65 @@ class LedgerApiTests(APITestCase):
     def reverse_url(self, payment):
         return f'/api/v1/billing/ledger-payments/{payment.pk}/reverse/'
 
+    def test_generic_rent_allocation_does_not_consume_security_deposit(self):
+        self.client.force_authenticate(self.accountant)
+        invoice_response = self.client.post(
+            '/api/v1/billing/invoices/',
+            self.invoice_payload(include_rent=False),
+            format='json',
+        )
+        self.assertEqual(invoice_response.status_code, status.HTTP_201_CREATED)
+        invoice = Invoice.objects.get(pk=invoice_response.data['id'])
+        rent_response = self.client.post('/api/v1/billing/charges/', {
+            'invoice': invoice.pk,
+            'charge_type': 'RENT',
+            'amount_cents': 10000,
+            'due_date': '2026-10-05',
+        }, format='json')
+        self.assertEqual(rent_response.status_code, status.HTTP_201_CREATED)
+        deposit = Charge.objects.create(
+            invoice=invoice,
+            organization=self.organization,
+            tenant=self.tenant,
+            charge_type='SECURITY_DEPOSIT',
+            amount_cents=50000,
+            balance_cents=50000,
+            due_date=date(2026, 10, 5),
+            lifecycle=DocumentStatus.DRAFT,
+            currency='KES',
+        )
+        posted = self.client.post(f'/api/v1/billing/invoices/{invoice.pk}/post/')
+        self.assertEqual(posted.status_code, status.HTTP_200_OK)
+
+        payment_response = self.client.post('/api/v1/billing/ledger-payments/', {
+            'tenant': self.tenant.pk,
+            'amount_cents': 10000,
+            'received_date': '2026-10-06',
+            'method': 'CASH',
+            'reference': 'RENT-ONLY-WITH-DEPOSIT',
+        }, format='json')
+        self.assertEqual(payment_response.status_code, status.HTTP_201_CREATED)
+        allocation_response = self.client.post(
+            f"/api/v1/billing/ledger-payments/{payment_response.data['id']}/allocate/",
+            {'policy_id': 'CANONICAL_PRIORITY', 'policy_version': 2},
+            format='json',
+        )
+        self.assertEqual(allocation_response.status_code, status.HTTP_200_OK)
+
+        deposit.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(deposit.balance_cents, 50000)
+        self.assertEqual(invoice.balance_cents, 50000)
+        self.assertEqual(
+            list(PaymentAllocation.objects.filter(payment_id=payment_response.data['id']).values_list(
+                'charge__charge_type', flat=True,
+            )),
+            ['RENT'],
+        )
+        self.assertFalse(LedgerPosting.objects.filter(
+            payment_id=payment_response.data['id'], account='2030',
+        ).exists())
+
     def test_unauthenticated_invoice_list_is_rejected(self):
         response = self.client.get('/api/v1/billing/invoices/')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

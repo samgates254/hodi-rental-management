@@ -2,7 +2,12 @@ from django.urls import path
 
 from .views import (
 	LoginView,
+<<<<<<< HEAD
 	GoogleLoginView,
+=======
+	EmailVerificationConfirmView,
+	EmailVerificationRequestView,
+>>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
 	LogoutView,
 	MeView,
 	OrganizationOptionsView,
@@ -16,6 +21,8 @@ app_name = 'accounts'
 
 urlpatterns = [
 	path('signup/', SignupView.as_view(), name='signup'),
+	path('email-verification/request/', EmailVerificationRequestView.as_view(), name='email-verification-request'),
+	path('verify-email/', EmailVerificationConfirmView.as_view(), name='email-verification-confirm'),
 	path('organizations/', OrganizationOptionsView.as_view(), name='organization-options'),
 	path('tenant-organization/', TenantOrganizationView.as_view(), name='tenant-organization'),
 	path('password-reset/', PasswordResetRequestView.as_view(), name='password-reset-request'),

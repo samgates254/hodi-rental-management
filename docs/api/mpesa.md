@@ -21,6 +21,10 @@ Authentication: DRF token. The payer is the active `Tenant` linked to the signed
 
 `202 Accepted` with `status: STK_SENT` means Daraja accepted the prompt. `payment_settled: false`. The tenant has not paid yet.
 
+`amount_cents` is a requested partial amount, not an authority to overcharge. Before creating an attempt, HODI calculates the tenant's outstanding posted KES charges under the existing tenant-wide `CANONICAL_PRIORITY` allocation policy, excluding deposit charge types, then subtracts the amount reserved by other open STK attempts. The request is rejected if the amount exceeds that available rent balance. A tenant row lock serializes concurrent initiations on PostgreSQL; unresolved prompts continue reserving their amount until reconciled or closed. An optional invoice ID is descriptive: it does not scope the existing tenant-wide allocation order. M-Pesa cannot collect a security deposit through this endpoint. The existing generic ledger overpayment rule still posts verified excess to tenant credit account `2020` if another payment settles the rent while an STK prompt is already in flight; it never posts rent overpayment to deposit liability account `2030`.
+
+HODI currently exposes the lease's security-deposit amount as a lease term but does not provide a separate deposit collection, liability ledger, or refund workflow. Deposit collection must not be represented as rent or initiated through this M-Pesa route until that separate accounting workflow exists.
+
 `GET /api/v1/billing/mpesa/attempts/<uuid>/` returns only an attempt linked to the authenticated tenant. Its stable public status is `PENDING`, `SUCCESSFUL`, `FAILED`, `EXPIRED`, or `UNRESOLVED`; provider references and phone numbers are not returned. An old initiated/STK-sent attempt is `UNRESOLVED`, not presumed successful or failed.
 
 ## Callback
@@ -104,6 +108,8 @@ Duplicate callbacks (same checkout or same receipt) produce no additional `Payme
 | `MPESA_CALLBACK_AUTH_TOKEN` | empty in development; required in production | Random callback bearer token, at least 32 characters in production. |
 | `MPESA_TIMEOUT_SECONDS` | `30` | HTTP timeout. |
 | `MPESA_TRANSACTION_TYPE` | `CustomerPayBillOnline` | STK `TransactionType`. |
+
+The account-verification frontend uses `ACCOUNT_FRONTEND_URL` (defaults to `http://localhost:3000` locally; production requires HTTPS) to build links for email confirmation and password reset.
 
 ## Status lifecycle
 

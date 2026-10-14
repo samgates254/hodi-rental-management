@@ -184,7 +184,11 @@ function rememberSession(
   } = {},
   memberships: OrganizationMembership[] = [],
 ) {
-  sessionStorage.setItem(AUTH_TOKEN_KEY, auth.token);
+  const token = auth.token;
+  if (!token) {
+    throw new Error("A session cannot be created before authentication is complete.");
+  }
+  sessionStorage.setItem(AUTH_TOKEN_KEY, token);
   sessionStorage.setItem("hodi_account_type", auth.account_type ?? "");
   sessionStorage.setItem("hodi_memberships", JSON.stringify(memberships));
   sessionStorage.setItem("hodi_first_name", profile.first_name ?? "");
@@ -229,8 +233,15 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   const [tenantNeedsOrganizationLink, setTenantNeedsOrganizationLink] = useState(false);
   const [requestedPlan, setRequestedPlan] = useState("");
   const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOption[]>([]);
+<<<<<<< HEAD
   const googleButtonRef = useRef<HTMLDivElement>(null);
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
+=======
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [resendBusy, setResendBusy] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+  const [resendError, setResendError] = useState("");
+>>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
 
   useEffect(() => {
     const type = new URLSearchParams(window.location.search).get("type");
@@ -393,6 +404,13 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
 
         const accountType = auth.account_type;
         const actualKind = userKindFromAccountType(accountType);
+        if (auth.email_verification_required) {
+          if (actualKind !== "agent" || userKind !== "agent") {
+            throw new Error("The account was created, but its verification response was invalid.");
+          }
+          setVerificationEmail(profile.email);
+          return;
+        }
         if (!auth.token || !actualKind || actualKind !== userKind) {
           throw new Error(
             "Your account was created, but the API returned an unsupported account type.",
@@ -419,8 +437,60 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   const isSignup = mode === "signup";
   const authInputClass = isSignup ? "h-10 w-full min-w-0" : "h-11 w-full min-w-0";
 
+  async function resendVerification() {
+    setResendBusy(true);
+    setResendError("");
+    try {
+      await clientApi.post(
+        "/api/v1/accounts/email-verification/request/",
+        { email: verificationEmail },
+        { skipAuth: true },
+      );
+      setResendSent(true);
+    } catch (cause) {
+      setResendError(cause instanceof Error ? cause.message : "The request could not be sent. Try again.");
+    } finally {
+      setResendBusy(false);
+    }
+  }
+
   if (needsOrganizationLink) {
     return <TenantLinkGate onLinked={() => window.location.assign("/clients")} />;
+  }
+
+  if (verificationEmail) {
+    return (
+      <main className="min-h-screen bg-bg px-5 py-12 text-text sm:px-8">
+        <div className="mx-auto w-full max-w-xl">
+          <div className="mb-8 flex items-center justify-between gap-3">
+            <Logo size={40} className="w-fit" />
+            <ThemeToggle />
+          </div>
+          <section className="rounded-2xl border border-border bg-surface p-6 shadow-soft sm:p-9">
+            <p className="text-[10px] font-bold tracking-[0.16em] text-text-secondary">PROPERTY AGENT</p>
+            <h1 className="mt-3 font-[family-name:var(--hodi-editorial)] text-3xl font-normal tracking-tight">Check your email</h1>
+            <p className="mt-3 text-sm leading-6 text-text-secondary">
+              We sent a verification link to <strong className="break-all text-text">{verificationEmail}</strong>. Confirm your email before signing in and continuing your agent profile.
+            </p>
+            {resendSent ? (
+              <p className="mt-5 rounded-lg border border-border bg-bg p-4 text-sm leading-6" role="status">
+                If an eligible account uses that email, new verification instructions will be sent.
+              </p>
+            ) : (
+              <div className="mt-5 grid gap-3">
+                {resendError && <p className="text-sm text-error" role="alert">{resendError}</p>}
+                <button type="button" onClick={() => void resendVerification()} disabled={resendBusy} className="inline-flex min-h-11 items-center justify-center rounded-md border border-border px-5 text-sm font-semibold hover:border-brand disabled:cursor-wait disabled:opacity-60">
+                  {resendBusy ? "Sending…" : "Resend verification email"}
+                </button>
+              </div>
+            )}
+            <p className="mt-6 text-center text-sm text-text-secondary">
+              <Link href="/signin" className="font-semibold text-brand hover:underline">Return to sign in</Link>
+            </p>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   if (workspaceOptions.length > 1) {
@@ -581,7 +651,12 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                 </div>
               )}
               {!isSignup && (
-                <SecretField label="Password" name="password" autoComplete="current-password" className={authInputClass} />
+                <>
+                  <SecretField label="Password" name="password" autoComplete="current-password" className={authInputClass} />
+                  <Link href="/password-reset" className="justify-self-end text-sm font-semibold text-brand hover:underline">
+                    Forgot password?
+                  </Link>
+                </>
               )}
               {error && <p className="m-0 text-sm text-error" role="alert">{error}</p>}
               <button

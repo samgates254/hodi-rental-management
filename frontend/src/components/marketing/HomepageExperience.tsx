@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 
@@ -102,6 +103,12 @@ export function HomepageExperience() {
             <Button href="/signup?type=landlord" size="lg">Get Started</Button>
             <Button href="#features" variant="outline-light" size="lg">Explore Features</Button>
           </div>
+          <Link
+            href="/marketplace"
+            className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-white underline decoration-white/50 underline-offset-4 hover:decoration-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+          >
+            Looking for a home? Browse published listings <span aria-hidden="true">→</span>
+          </Link>
           <div className="hodi-hero-signature"><span>For the places you care for.</span><i aria-hidden="true" /></div>
         </div>
         <figure className="hodi-home-hero-visual">

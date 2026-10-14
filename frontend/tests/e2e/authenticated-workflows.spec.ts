@@ -73,6 +73,28 @@ async function api(page: Page, path: string, method = "GET", body?: unknown) {
   }, { path, method, body });
 }
 
+function observeBrowserDiagnostics(page: Page, flow: string) {
+  const safeText = (value: string) => value
+    .replace(/(authorization\s*[:=]\s*(?:bearer|token)\s+)\S+/gi, "$1[redacted]")
+    .replace(/(secret|passkey|consumer[_ -]?key|token)(\s*[:=]\s*)\S+/gi, "$1$2[redacted]")
+    .replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]");
+  const safePath = (url: string) => new URL(url).pathname
+    .replace(/(mpesa\/callback\/)[^/]+/i, "$1[redacted]");
+
+  page.on("console", message => {
+    if (message.type() === "error") console.error(`[browser:${flow}] ${safeText(message.text())}`);
+  });
+  page.on("pageerror", error => console.error(`[page:${flow}] ${safeText(error.message)}`));
+  page.on("requestfailed", request => console.error(
+    `[request:${flow}] ${request.method()} ${safePath(request.url())} ${safeText(request.failure()?.errorText ?? "failed")}`,
+  ));
+  page.on("response", response => {
+    if (new URL(response.url()).pathname.startsWith("/api/v1/") && response.status() >= 400) {
+      console.error(`[api:${flow}] ${response.request().method()} ${safePath(response.url())} ${response.status()}`);
+    }
+  });
+}
+
 test("role navigation and public listing photos work at desktop and mobile sizes", async ({ browser, baseURL }) => {
   const tenant = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await signIn(tenant, "tenant", "tenant");
@@ -155,6 +177,7 @@ test("role navigation and public listing photos work at desktop and mobile sizes
 
 test("tenant requests persist, utilities are scoped, and seller status changes persist", async ({ browser, baseURL }) => {
   const tenant = await browser.newPage();
+  observeBrowserDiagnostics(tenant, "tenant-utilities");
   await signIn(tenant, "tenant", "tenant");
   await tenant.goto(`${baseURL}/living`);
   await expect(tenant.getByRole("heading", { name: "Services and household goods" })).toBeVisible();
@@ -172,8 +195,8 @@ test("tenant requests persist, utilities are scoped, and seller status changes p
   const orderId = (ownOrders.payload as Array<{ id: number }>)[0].id;
 
   await tenant.goto(`${baseURL}/utilities`);
-  await expect(tenant.getByRole("heading", { name: "Utilities for your tenancy" })).toBeVisible();
-  await expect(tenant.getByText("WATER")).toBeVisible();
+  await expect(tenant.getByRole("heading", { name: "Utility records" })).toBeVisible();
+  await expect(tenant.getByRole("region", { name: "Utility bills" }).getByText(/Water/i)).toBeVisible();
   await expect(tenant.getByText("PRIVATE-LANDLORD-REF")).toHaveCount(0);
   await expect(tenant.getByText("LANDLORD-SECRET")).toHaveCount(0);
   await expect(tenant.getByText("E2E Water Utility")).toHaveCount(0);
@@ -191,8 +214,8 @@ test("tenant requests persist, utilities are scoped, and seller status changes p
   await otherTenant.goto(`${baseURL}/living`);
   await expect(otherTenant.getByText("E2E browser request")).toHaveCount(0);
   await otherTenant.goto(`${baseURL}/utilities`);
-  await expect(otherTenant.getByText("KES 2,750")).toBeVisible();
-  await expect(otherTenant.getByText("KES 1,845")).toHaveCount(0);
+  await expect(otherTenant.getByText(/Ksh\s*2,750/)).toBeVisible();
+  await expect(otherTenant.getByText(/Ksh\s*1,845/)).toHaveCount(0);
   const otherUtilities = await api(otherTenant, "/api/v1/utilities/me/");
   expect(otherUtilities.status).toBe(200);
   expect(otherUtilities.payload).toHaveLength(1);
@@ -282,14 +305,20 @@ test("accountant invitation acceptance is identity-bound, reports real client da
   await impostor.close();
 
   const accountant = await browser.newPage();
+  observeBrowserDiagnostics(accountant, "accountant-workspace");
   await signIn(accountant, "accountant");
   await accountant.goto(`${baseURL}/accountants`);
   await expect(accountant.getByRole("heading", { name: "Accountant workspace" })).toBeVisible();
   await expect(accountant.getByText("Invitation to HODI E2E Demo Organisation")).toBeVisible();
   await accountant.getByRole("button", { name: "Accept" }).click();
   await expect(accountant.getByLabel("Client organisation")).toContainText("HODI E2E Demo Organisation");
-  await expect(accountant.getByText("Invoices", { exact: true })).toBeVisible();
-  await expect(accountant.getByRole("heading", { name: "KES 25,000" })).toBeVisible();
+  const accountantNav = accountant.getByRole("navigation", { name: "Accountant workspace sections" });
+  await expect(accountantNav.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "#overview");
+  await expect(accountantNav.getByRole("link", { name: "Invoices" })).toHaveAttribute("href", "#invoices");
+  await expect(accountantNav.getByRole("link", { name: "Payments" })).toHaveAttribute("href", "#payments");
+  const invoiceTotals = accountant.getByRole("region", { name: "Invoice totals" });
+  await expect(invoiceTotals.getByText("KES 25,000.00", { exact: true })).toBeVisible();
+  await expect(invoiceTotals.locator("article").filter({ hasText: "Outstanding" })).toContainText("KES 25,000.00");
   const invoices = await api(accountant, `/api/v1/billing/invoices/?organization=${fixture.organization_id}`);
   expect(invoices.status).toBe(200);
   expect(invoices.payload).toHaveLength(1);
@@ -340,6 +369,7 @@ test("workspace access lookup failure does not block a known workspace", async (
 
 test("workspace access lookup failure preserves sign-in when no workspace is known", async ({ browser }) => {
   const page = await browser.newPage();
+  observeBrowserDiagnostics(page, "sign-in-workspace-lookup");
   await page.route("**/api/v1/accounts/login/", route => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -355,7 +385,7 @@ test("workspace access lookup failure preserves sign-in when no workspace is kno
   await page.locator('input[name="username"]').fill("mock-owner");
   await page.locator('input[name="password"]').fill("mock-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("could not load your workspace options");
+  await expect(page.getByText("Your sign-in succeeded, but Hodi could not load your workspace options. Please try again.", { exact: true })).toBeVisible();
   await expect(page.evaluate(() => sessionStorage.getItem("hodi_api_token"))).resolves.toBe("mock-token");
   await expect(page).toHaveURL(/\/signin/);
   await page.close();

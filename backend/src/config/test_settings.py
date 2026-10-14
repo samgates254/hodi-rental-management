@@ -13,7 +13,7 @@ SETTINGS_CHECK = "from django.conf import settings; print(settings.DATABASES['de
 class DatabaseConfigurationTests(SimpleTestCase):
     def settings_environment(self, *, production):
         environment = os.environ.copy()
-        prefixes = ('DJANGO_', 'DB_', 'MPESA_', 'EMAIL_', 'CORS_', 'CSRF_')
+        prefixes = ('DJANGO_', 'DB_', 'MPESA_', 'EMAIL_', 'CORS_', 'CSRF_', 'ACCOUNT_')
         for name in tuple(environment):
             if name.startswith(prefixes) or name == 'DATABASE_URL':
                 environment.pop(name, None)
@@ -34,6 +34,7 @@ class DatabaseConfigurationTests(SimpleTestCase):
                 'DJANGO_ALLOWED_HOSTS': 'api.example.invalid',
                 'DJANGO_EMAIL_HOST': 'smtp.example.invalid',
                 'DJANGO_DEFAULT_FROM_EMAIL': 'hodi@example.invalid',
+                'ACCOUNT_FRONTEND_URL': 'https://app.example.invalid',
                 'DJANGO_CACHE_BACKEND': 'django.core.cache.backends.db.DatabaseCache',
                 'DJANGO_CACHE_LOCATION': 'hodi_cache',
                 'CORS_ALLOWED_ORIGINS': 'https://app.example.invalid',
@@ -101,6 +102,20 @@ class DatabaseConfigurationTests(SimpleTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), 'django.db.backends.sqlite3')
+
+    def test_missing_environment_fails_closed_when_production_values_are_present(self):
+        environment = self.settings_environment(production=False)
+        environment.pop('DJANGO_ENV', None)
+        environment['DJANGO_DEBUG'] = 'False'
+        environment['DJANGO_ALLOWED_HOSTS'] = 'api.example.invalid'
+
+        result = self.run_settings(environment)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            'DJANGO_ENV must be explicitly set when production settings are detected.',
+            result.stderr,
+        )
 
     def test_existing_production_debug_validation_remains_intact(self):
         environment = self.settings_environment(production=True)

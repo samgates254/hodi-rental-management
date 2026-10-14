@@ -1,12 +1,18 @@
 import re
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth import get_user_model
 from django.apps import apps as model_apps
 from django.core import mail
 from django.core.cache import cache
+<<<<<<< HEAD
 from django.db import IntegrityError, connection, transaction
+=======
+from django.core import signing
+from django.db import connection
+>>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -18,6 +24,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from apps.accounts.models import AccountProfile
 from apps.accounts.serializers import SignupSerializer
 from apps.tenants.models import Tenant
+from apps.marketplace.models import AgentProfile
+from apps.accounts.services import make_email_verification_token
 
 from apps.organizations.models import Organization, OrganizationMembership
 
@@ -599,6 +607,7 @@ class AuthenticationApiTests(TestCase):
         self.assertEqual(responses[0].status_code, status.HTTP_201_CREATED)
         self.assertEqual(responses[1].status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
+
     def test_login_is_rate_limited(self):
         self.user.is_active = True
         self.user.save(update_fields=('is_active',))
@@ -633,6 +642,8 @@ class AuthenticationApiTests(TestCase):
         )
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn('password-reset/confirm', mail.outbox[0].body)
+        self.assertIn('#uid=', mail.outbox[0].body)
+        self.assertIn('&token=', mail.outbox[0].body)
         existing_payload = mail.outbox[0].body
 
         missing_response = self.client.post(
@@ -662,8 +673,14 @@ class AuthenticationApiTests(TestCase):
             format='json',
         )
         reset_email = mail.outbox[-1].body
-        uid = reset_email.split('uid=', 1)[1].split()[0]
-        token = reset_email.split('token=', 1)[1].split()[0]
+        reset_link = next(
+            line.strip()
+            for line in reset_email.splitlines()
+            if '/password-reset/confirm#' in line
+        )
+        reset_values = parse_qs(urlsplit(reset_link).fragment)
+        uid = reset_values['uid'][0]
+        token = reset_values['token'][0]
 
         response = self.client.post(
             reverse('accounts:password-reset-confirm'),
@@ -790,3 +807,131 @@ class AuthenticationApiTests(TestCase):
 
         self.assertEqual(responses[0].status_code, status.HTTP_202_ACCEPTED)
         self.assertEqual(responses[1].status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+@override_settings(
+    EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+    DEFAULT_FROM_EMAIL='accounts@example.com',
+)
+class AgentEmailVerificationTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+
+    def signup_agent(self, *, username='verify-agent', email='verify-agent@example.com'):
+        return self.client.post(
+            reverse('accounts:signup'),
+            {
+                'username': username,
+                'account_type': 'PROPERTY_AGENT',
+                'email': email,
+                'first_name': 'Nia',
+                'last_name': 'Agent',
+                'password': 'A-strong-password-123!',
+                'password_confirm': 'A-strong-password-123!',
+            },
+            format='json',
+        )
+
+    def token_from_latest_email(self):
+        message = mail.outbox[-1].body
+        match = re.search(r'#token=([^\s]+)', message)
+        self.assertIsNotNone(match)
+        from urllib.parse import unquote
+
+        return unquote(match.group(1))
+
+    def test_agent_signup_requires_email_confirmation_before_login(self):
+        response = self.signup_agent()
+        user = get_user_model().objects.get(username='verify-agent')
+        login = self.client.post(
+            reverse('accounts:login'),
+            {'username': 'verify-agent', 'password': 'A-strong-password-123!'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['email_verification_required'])
+        self.assertIsNone(response.data['token'])
+        self.assertFalse(Token.objects.filter(user=user).exists())
+        self.assertEqual(login.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(Token.objects.filter(user=user).exists())
+
+    def test_valid_token_is_single_use_and_enables_agent_login(self):
+        self.signup_agent()
+        user = get_user_model().objects.get(username='verify-agent')
+        token = self.token_from_latest_email()
+
+        verified = self.client.post(
+            reverse('accounts:email-verification-confirm'),
+            {'token': token},
+            format='json',
+        )
+        reused = self.client.post(
+            reverse('accounts:email-verification-confirm'),
+            {'token': token},
+            format='json',
+        )
+        login = self.client.post(
+            reverse('accounts:login'),
+            {'username': 'verify-agent', 'password': 'A-strong-password-123!'},
+            format='json',
+        )
+
+        self.assertEqual(verified.status_code, status.HTTP_200_OK)
+        self.assertTrue(verified.data['token'])
+        self.assertEqual(user.account_profile.email_verified_at is not None, True)
+        self.assertEqual(user.agent_profile.verification_status, AgentProfile.VerificationStatus.UNVERIFIED)
+        self.assertEqual(reused.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+
+    def test_invalid_expired_and_email_changed_tokens_are_rejected(self):
+        self.signup_agent()
+        user = get_user_model().objects.get(username='verify-agent')
+        invalid = self.client.post(
+            reverse('accounts:email-verification-confirm'), {'token': 'not-a-token'}, format='json',
+        )
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
+
+        with patch('django.core.signing.time.time', return_value=1_000):
+            expired_token = make_email_verification_token(user)
+        with override_settings(EMAIL_VERIFICATION_TOKEN_MAX_AGE=1):
+            with patch('django.core.signing.time.time', return_value=1_002):
+                expired = self.client.post(
+                    reverse('accounts:email-verification-confirm'),
+                    {'token': expired_token},
+                    format='json',
+                )
+        self.assertEqual(expired.status_code, status.HTTP_400_BAD_REQUEST)
+
+        changed_email_token = make_email_verification_token(user)
+        user.email = 'changed@example.com'
+        user.save(update_fields=('email',))
+        changed_email = self.client.post(
+            reverse('accounts:email-verification-confirm'),
+            {'token': changed_email_token},
+            format='json',
+        )
+        self.assertEqual(changed_email.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIsNone(user.account_profile.email_verified_at)
+
+    def test_resend_has_generic_response_and_per_email_rate_limit(self):
+        self.signup_agent()
+        mail.outbox.clear()
+        endpoint = reverse('accounts:email-verification-request')
+        eligible = self.client.post(endpoint, {'email': 'verify-agent@example.com'}, format='json')
+        unknown = self.client.post(endpoint, {'email': 'unknown@example.com'}, format='json')
+
+        self.assertEqual(eligible.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(unknown.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(eligible.data, unknown.data)
+        self.assertEqual(len(mail.outbox), 1)
+
+        cache.clear()
+        mail.outbox.clear()
+        responses = [
+            self.client.post(endpoint, {'email': 'verify-agent@example.com'}, format='json')
+            for _ in range(4)
+        ]
+        self.assertTrue(all(response.status_code == status.HTTP_202_ACCEPTED for response in responses))
+        self.assertEqual(len(mail.outbox), 3)

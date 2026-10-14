@@ -1,8 +1,12 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core import mail
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework.authtoken.models import Token
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -17,8 +21,17 @@ from apps.marketplace.models import (
 from apps.notifications.models import Notification
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
+from apps.marketplace.services import publish_listing as publish_listing_service
 
 
+def public_results(response):
+	return response.data.get('results', []) if isinstance(response.data, dict) else response.data
+
+
+@override_settings(
+	EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+	DEFAULT_FROM_EMAIL='accounts@example.com',
+)
 class AgentMarketplaceWorkflowTests(APITestCase):
 	def setUp(self):
 		User = get_user_model()
@@ -49,6 +62,7 @@ class AgentMarketplaceWorkflowTests(APITestCase):
 			AccountProfile.objects.create(
 				user=user,
 				account_type=AccountProfile.AccountType.PROPERTY_AGENT,
+				email_verified_at=timezone.now(),
 			)
 		self.agent = AgentProfile.objects.create(
 			user=self.agent_user,
@@ -116,6 +130,24 @@ class AgentMarketplaceWorkflowTests(APITestCase):
 		self.assertFalse(user.organization_memberships.exists())
 		self.assertFalse(hasattr(user, 'tenant_record'))
 		self.assertEqual(response.data['agent_verification_status'], AgentProfile.VerificationStatus.UNVERIFIED)
+		self.assertTrue(response.data['email_verification_required'])
+		self.assertIsNone(response.data['token'])
+		self.assertEqual(len(mail.outbox), 1)
+		self.assertIn('/verify-email#token=', mail.outbox[0].body)
+		self.assertFalse(Token.objects.filter(user=user).exists())
+
+	def test_unverified_agent_cannot_be_authorized_or_access_workspace(self):
+		account = self.agent_user.account_profile
+		account.email_verified_at = None
+		account.save(update_fields=('email_verified_at', 'updated_at'))
+
+		grant = self._grant()
+		self.assertEqual(grant.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertFalse(AgentUnitAuthorization.objects.filter(agent=self.agent).exists())
+
+		self.client.force_authenticate(self.agent_user)
+		workspace = self.client.get(reverse('marketplace:agent-profile'))
+		self.assertEqual(workspace.status_code, status.HTTP_403_FORBIDDEN)
 
 	def test_owner_authorization_is_required_and_manager_cannot_grant_it(self):
 		unauthorized = self._create_agent_draft()
@@ -162,7 +194,7 @@ class AgentMarketplaceWorkflowTests(APITestCase):
 		self.assertEqual(published.status_code, status.HTTP_200_OK, published.data)
 		self.assertEqual(published.data['status'], Listing.Status.PUBLISHED)
 		public_rows = self.client.get(reverse('marketplace:public-listing-list'))
-		self.assertEqual(len(public_rows.data), 1)
+		self.assertEqual(len(public_results(public_rows)), 1)
 
 	def test_agent_and_listing_data_are_isolated_and_revocation_unpublishes(self):
 		self._grant()
@@ -189,12 +221,42 @@ class AgentMarketplaceWorkflowTests(APITestCase):
 		listing.refresh_from_db()
 		self.assertEqual(listing.status, Listing.Status.PAUSED)
 		self.assertIsNone(listing.agent_profile_id)
-		self.assertEqual(self.client.get(reverse('marketplace:public-listing-list')).data, [])
+		self.assertEqual(public_results(self.client.get(reverse('marketplace:public-listing-list'))), [])
 
 		self.client.force_authenticate(self.agent_user)
 		denied = self.client.post(reverse('marketplace:agent-listing-publish', kwargs={'pk': listing.pk}))
 		self.assertEqual(denied.status_code, status.HTTP_404_NOT_FOUND)
 		self.assertEqual(self.client.get(reverse('marketplace:agent-inquiry-list')).data, [])
+
+	def test_revocation_between_agent_check_and_publish_cannot_republish_unassigned_listing(self):
+		self._grant()
+		created = self._create_agent_draft()
+		listing = Listing.objects.get(pk=created.data['id'])
+		self.agent.verification_status = AgentProfile.VerificationStatus.VERIFIED
+		self.agent.save(update_fields=('verification_status',))
+		self.client.force_authenticate(self.agent_user)
+		published = self.client.post(reverse('marketplace:agent-listing-publish', kwargs={'pk': listing.pk}))
+		self.assertEqual(published.status_code, status.HTTP_200_OK)
+		authorization = AgentUnitAuthorization.objects.get(unit=self.unit, status=AgentUnitAuthorization.Status.ACTIVE)
+		owner_client = self.client.__class__()
+		owner_client.force_authenticate(self.owner)
+
+		def revoke_then_publish(stale_listing, **kwargs):
+			revoked = owner_client.delete(reverse(
+				'marketplace:agent-authorization-detail', kwargs={'authorization_id': authorization.pk},
+			))
+			self.assertEqual(revoked.status_code, status.HTTP_200_OK)
+			return publish_listing_service(stale_listing, **kwargs)
+
+		self.client.force_authenticate(self.agent_user)
+		with patch('apps.marketplace.views.publish_listing', side_effect=revoke_then_publish):
+			response = self.client.post(reverse('marketplace:agent-listing-publish', kwargs={'pk': listing.pk}))
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		listing.refresh_from_db()
+		self.assertEqual(listing.status, Listing.Status.PAUSED)
+		self.assertIsNone(listing.agent_profile_id)
+		self.assertEqual(public_results(self.client.get(reverse('marketplace:public-listing-list'))), [])
 
 	def test_reassigned_listing_and_enquiries_are_private_from_previous_agent(self):
 		self._grant()

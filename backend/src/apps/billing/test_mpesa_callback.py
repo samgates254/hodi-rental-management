@@ -433,6 +433,35 @@ class MpesaCallbackTests(APITestCase):
         self.assertEqual(other_attempt.status, MpesaAttempt.Status.FAILED)
         self.assertEqual(Payment.objects.count(), 1)
 
+    def test_existing_payment_with_same_receipt_and_different_terms_stays_unresolved(self):
+        today = timezone.localdate()
+        existing = Payment.objects.create(
+            organization=self.organization,
+            tenant=self.tenant,
+            amount_cents=100000,
+            received_date=today,
+            execution_timestamp=timezone.now(),
+            method=Payment.Method.CASH,
+            status=Payment.Status.PENDING,
+            currency='KES',
+            reference='NLJ7RT61SV',
+            external_id='NLJ7RT61SV',
+            recorded_by=self.tenant_user,
+        )
+
+        response = self.post_callback(stk_payload())
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['settled'])
+        self.assertEqual(response.data['status'], 'UNRESOLVED')
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(PaymentAllocation.objects.count(), 0)
+        existing.refresh_from_db()
+        self.assertEqual(existing.status, Payment.Status.PENDING)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(self.attempt.reconciliation_state, MpesaAttempt.ReconciliationState.UNRESOLVED)
+
     def test_callback_cannot_override_tenant_or_organization(self):
         payload = stk_payload()
         payload['tenant'] = self.other_tenant.pk
@@ -623,3 +652,102 @@ class MpesaCallbackConcurrencyTests(TransactionTestCase):
 
     def test_three_identical_callbacks_simultaneously(self):
         self._hammer(3)
+
+    def test_same_receipt_across_organizations_rolls_back_losing_settlement(self):
+        other_user = get_user_model().objects.create_user(username='cb-conc-other', password='secret')
+        other_org = Organization.objects.create(name='Other Concurrent Homes')
+        other_tenant = Tenant.objects.create(
+            organization=other_org,
+            user=other_user,
+            first_name='Other',
+            last_name='Tenant',
+            phone_number='+254700000099',
+        )
+        today = timezone.localdate()
+        invoice = Invoice.objects.create(
+            organization=other_org,
+            tenant=other_tenant,
+            period_start=today.replace(day=1),
+            period_end=today,
+            due_date=today,
+            status=DocumentStatus.POSTED,
+            total_cents=150000,
+            balance_cents=150000,
+        )
+        other_charge = Charge.objects.create(
+            invoice=invoice,
+            organization=other_org,
+            tenant=other_tenant,
+            charge_type='RENT',
+            amount_cents=150000,
+            balance_cents=150000,
+            due_date=today,
+            lifecycle=DocumentStatus.POSTED,
+        )
+        other_attempt = MpesaAttempt.objects.create(
+            organization=other_org,
+            tenant=other_tenant,
+            invoice=invoice,
+            initiated_by=other_user,
+            amount_cents=150000,
+            phone_number='254700000099',
+            status=MpesaAttempt.Status.STK_SENT,
+            merchant_request_id='m-conc-other',
+            checkout_request_id='ws_CO_CONC_OTHER',
+        )
+        shared_receipt = 'SHAREDRECEIPT1'
+        barrier = threading.Barrier(2, timeout=10)
+        responses = []
+        errors = []
+
+        def deliver(checkout, merchant):
+            client = APIClient()
+            client.raise_request_exception = False
+            phone = '254700000099' if checkout == other_attempt.checkout_request_id else '254700000010'
+            try:
+                barrier.wait(timeout=10)
+                for _ in range(12):
+                    try:
+                        response = client.post(
+                            CALLBACK_URL,
+                            stk_payload(
+                                checkout=checkout,
+                                merchant=merchant,
+                                receipt=shared_receipt,
+                                phone=phone,
+                            ),
+                            format='json',
+                        )
+                        if response.status_code == status.HTTP_200_OK:
+                            responses.append(response)
+                            return
+                        last_response = f'{response.status_code}:{getattr(response, "data", {})}'
+                    except OperationalError:
+                        last_response = 'OperationalError'
+                    time.sleep(0.05)
+                errors.append(f'{checkout} ({last_response})')
+            finally:
+                connection.close()
+
+        threads = [
+            threading.Thread(target=deliver, args=('ws_CO_CONC', 'm-conc')),
+            threading.Thread(target=deliver, args=(other_attempt.checkout_request_id, other_attempt.merchant_request_id)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(responses), 2)
+        self.assertEqual(Payment.objects.filter(external_id=shared_receipt).count(), 1)
+        self.assertEqual(MpesaAttempt.objects.filter(mpesa_receipt_number=shared_receipt).count(), 1)
+        self.assertEqual(MpesaAttempt.objects.filter(status=MpesaAttempt.Status.SUCCESS).count(), 1)
+        winner = MpesaAttempt.objects.get(mpesa_receipt_number=shared_receipt)
+        payment = Payment.objects.get(external_id=shared_receipt)
+        self.assertEqual(payment.organization_id, winner.organization_id)
+        self.assertEqual(payment.tenant_id, winner.tenant_id)
+        allocation = PaymentAllocation.objects.get(payment=payment)
+        self.assertEqual(allocation.charge.organization_id, winner.organization_id)
+        other_charge.refresh_from_db()
+        self.assertEqual(other_charge.balance_cents, 0 if winner == other_attempt else 150000)

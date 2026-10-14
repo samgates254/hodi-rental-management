@@ -8,6 +8,7 @@ from rest_framework.exceptions import ValidationError
 from apps.billing.models import (
     CHARGE_TYPES,
     Charge,
+    DEPOSIT_CHARGE_TYPES,
     DocumentStatus,
     Invoice,
     LedgerPosting,
@@ -129,6 +130,10 @@ def add_charge(*, invoice, charge_type, amount_cents, due_date, actor, period_st
     normalized = (charge_type or '').strip().upper()
     if normalized not in CHARGE_TYPES:
         raise ValidationError({'charge_type': 'Unknown charge type.'})
+    if normalized in DEPOSIT_CHARGE_TYPES:
+        raise ValidationError({
+            'charge_type': 'Security deposits must use the separate deposit workflow, not a rent invoice.',
+        })
     if isinstance(amount_cents, bool) or not isinstance(amount_cents, int) or amount_cents <= 0:
         raise ValidationError({'amount_cents': 'Amount must be a positive integer number of cents.'})
     charge = Charge.objects.create(
@@ -304,6 +309,7 @@ def allocate_payment(payment, *, policy_id, policy_version, actor, request=None)
             balance_cents__gt=0,
             currency='KES',
         )
+        .exclude(charge_type__in=DEPOSIT_CHARGE_TYPES)
         .select_related('invoice')
     )
     items = [

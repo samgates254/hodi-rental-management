@@ -10,24 +10,30 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework.authtoken.models import Token
+from urllib.parse import quote
 
 from .models import AccountProfile
 
 VERIFICATION_SALT = 'accounts.email-verification'
 
 
-def send_verification_email(user):
-	token = signing.dumps(
+def make_email_verification_token(user):
+	return signing.dumps(
 		{'user_id': user.pk, 'email': user.email.casefold()},
 		salt=VERIFICATION_SALT,
 	)
+
+
+def send_verification_email(user):
+	token = make_email_verification_token(user)
+	verification_url = f'{settings.ACCOUNT_FRONTEND_URL}/verify-email#token={quote(token, safe="")}'
 	send_mail(
 		'Verify your email address',
 		(
-			'Use this verification token to activate your account:\n\n'
-			f'{token}\n\n'
-			f'Submit it to {settings.ACCOUNT_EMAIL_VERIFICATION_PATH} '
-			'as the token field in a JSON POST request.'
+			'Confirm that you own the email address for your Hodi property-agent account.\n\n'
+			f'Open this link to verify your email (valid for '
+			f'{settings.EMAIL_VERIFICATION_TOKEN_MAX_AGE // 3600} hours):\n{verification_url}\n\n'
+			'If you did not create this account, you can ignore this message.'
 		),
 		settings.DEFAULT_FROM_EMAIL,
 		[user.email],
@@ -48,21 +54,36 @@ def verify_email_token(token):
 	except (signing.BadSignature, KeyError, TypeError, ValueError, get_user_model().DoesNotExist, AccountProfile.DoesNotExist) as error:
 		return None
 
-	if profile.email_verified_at is not None or user.email.casefold() != payload.get('email'):
+	if (
+		not user.is_active
+		or profile.account_type != AccountProfile.AccountType.PROPERTY_AGENT
+		or user.email.casefold() != payload.get('email')
+	):
 		return None
 
-	profile.email_verified_at = timezone.now()
-	profile.save(update_fields=('email_verified_at', 'updated_at'))
+	verified_at = timezone.now()
+	updated = AccountProfile.objects.filter(
+		pk=profile.pk,
+		account_type=AccountProfile.AccountType.PROPERTY_AGENT,
+		email_verified_at__isnull=True,
+	).update(email_verified_at=verified_at, updated_at=verified_at)
+	if updated != 1:
+		return None
 	return user
 
 
 def send_password_reset_email(user):
 	uid = urlsafe_base64_encode(force_bytes(user.pk))
 	token = default_token_generator.make_token(user)
+	reset_url = (
+		f'{settings.ACCOUNT_FRONTEND_URL}/password-reset/confirm'
+		f'#uid={quote(uid, safe="")}&token={quote(token, safe="")}'
+	)
 	send_mail(
 		'Reset your password',
 		(
 			'We received a request to reset the password for your account.\n\n'
+			f'Open this link to choose a new password:\n{reset_url}\n\n'
 			f'Submit these values to {settings.ACCOUNT_PASSWORD_RESET_CONFIRM_PATH}:\n'
 			f'uid={uid}\n'
 			f'token={token}\n\n'

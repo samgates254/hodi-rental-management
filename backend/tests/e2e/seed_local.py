@@ -24,7 +24,7 @@ if not password or not manifest:
 
 User = get_user_model()
 from apps.accounts.models import AccountProfile
-from apps.billing.models import Invoice
+from apps.billing.models import Charge, Invoice
 from apps.leases.models import Lease
 from apps.marketplace.models import CommerceListing, Listing as PropertyListing, ListingPhoto, SupplierProfile
 from apps.maintenance.models import MaintenanceRequest, RepairQuotation, RepairQuotationLine, WorkOrder
@@ -139,8 +139,21 @@ for position, (filename, caption, relative_source) in enumerate(photo_sources):
 today = timezone.localdate()
 invoice, _ = Invoice.objects.get_or_create(organization=organization, tenant=tenant, period_start=today.replace(day=1), defaults={
     "lease": tenant.leases.first(), "period_end": today, "due_date": today + timedelta(days=5), "status": "POSTED",
-    "currency": "KES", "total_cents": 2500000,
+    "currency": "KES", "total_cents": 2500000, "balance_cents": 2500000,
 })
+Charge.objects.get_or_create(
+    invoice=invoice,
+    charge_type="RENT",
+    description="E2E monthly rent",
+    defaults={
+        "organization": organization,
+        "tenant": tenant,
+        "amount_cents": 2500000,
+        "balance_cents": 2500000,
+        "due_date": invoice.due_date,
+        "lifecycle": "POSTED",
+    },
+)
 Invoice.objects.get_or_create(organization=other_organization, tenant=other_tenant, period_start=today.replace(day=1), defaults={
     "lease": other_tenant.leases.first(), "period_end": today, "due_date": today + timedelta(days=5), "status": "POSTED",
     "currency": "KES", "total_cents": 500000,

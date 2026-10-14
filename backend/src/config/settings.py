@@ -9,7 +9,29 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / '.env')
 
-DJANGO_ENV = os.environ.get('DJANGO_ENV', 'development').strip().lower()
+django_env_value = os.environ.get('DJANGO_ENV', '').strip().lower()
+if not django_env_value:
+    allowed_hosts_candidate = [
+        host.strip().lower()
+        for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',')
+        if host.strip()
+    ]
+    local_hosts = {'localhost', '127.0.0.1', '::1', 'testserver'}
+    production_markers = (
+        os.environ.get('DJANGO_DEBUG', '').strip().lower() in {'0', 'false', 'no'},
+        any(host not in local_hosts for host in allowed_hosts_candidate),
+        bool(os.environ.get('DATABASE_URL', '').strip()),
+        os.environ.get('DB_ENGINE', '').strip().endswith('postgresql'),
+        bool(os.environ.get('DJANGO_EMAIL_HOST', '').strip()),
+        os.environ.get('MPESA_ENVIRONMENT', '').strip().lower() == 'production',
+    )
+    if any(production_markers):
+        raise ImproperlyConfigured(
+            'DJANGO_ENV must be explicitly set when production settings are detected.',
+        )
+    DJANGO_ENV = 'development'
+else:
+	DJANGO_ENV = django_env_value
 if DJANGO_ENV not in {'development', 'production'}:
     raise ImproperlyConfigured('DJANGO_ENV must be development or production.')
 
@@ -111,6 +133,22 @@ if PASSWORD_RESET_TIMEOUT <= 0:
     raise ImproperlyConfigured('PASSWORD_RESET_TIMEOUT must be positive.')
 ACCOUNT_EMAIL_VERIFICATION_PATH = '/api/v1/accounts/verify-email/'
 ACCOUNT_PASSWORD_RESET_CONFIRM_PATH = '/api/v1/accounts/password-reset/confirm/'
+ACCOUNT_FRONTEND_URL = os.environ.get(
+    'ACCOUNT_FRONTEND_URL',
+    'http://localhost:3000',
+).strip().rstrip('/')
+_account_frontend_parts = urlsplit(ACCOUNT_FRONTEND_URL)
+if (
+    _account_frontend_parts.scheme not in {'http', 'https'}
+    or not _account_frontend_parts.netloc
+    or _account_frontend_parts.username
+    or _account_frontend_parts.password
+    or _account_frontend_parts.query
+    or _account_frontend_parts.fragment
+):
+    raise ImproperlyConfigured('ACCOUNT_FRONTEND_URL must be an HTTP(S) origin or base path.')
+if DJANGO_ENV == 'production' and _account_frontend_parts.scheme != 'https':
+    raise ImproperlyConfigured('ACCOUNT_FRONTEND_URL must use HTTPS in production.')
 
 if DJANGO_ENV == 'production':
     email_host = os.environ.get('DJANGO_EMAIL_HOST')
@@ -224,6 +262,8 @@ REST_FRAMEWORK = {
         'auth_login': '10/minute',
         'auth_password_reset_request': '3/hour',
         'auth_password_reset_confirm': '5/hour',
+        'auth_email_verification_request': '5/hour',
+        'auth_email_verification_confirm': '10/hour',
         'auth_organization_options': '60/minute',
         'marketplace_inquiry': '10/hour',
     },
@@ -235,6 +275,8 @@ if DEBUG:
         'auth_login': '1000/minute',
         'auth_password_reset_request': '1000/hour',
         'auth_password_reset_confirm': '1000/hour',
+        'auth_email_verification_request': '1000/hour',
+        'auth_email_verification_confirm': '1000/hour',
         'auth_organization_options': '1000/minute',
         'marketplace_inquiry': '1000/hour',
     }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { clientApi, ClientApiError, fetchMe, type MeResponse } from "@/lib/clientApi";
+import { clientApi, ClientApiError, fetchMe, logout, type MeResponse } from "@/lib/clientApi";
 import { formatMinor } from "@/lib/money";
+import { Logo } from "@/components/layout/Logo";
 
 type Invite = {
   id: number;
@@ -52,6 +53,8 @@ export default function AccountantWorkspace() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
       const [profile, invitationResponse] = await Promise.all([
         fetchMe(),
@@ -99,6 +102,15 @@ export default function AccountantWorkspace() {
     }
   }
 
+  async function signOut() {
+    try {
+      await logout();
+    } catch {
+      // The shared logout helper clears the local session even if the API is unavailable.
+    }
+    window.location.assign("/signin");
+  }
+
   const clients = me?.memberships.filter((membership) => membership.role === "ACCOUNTANT" && membership.is_active) || [];
   const pending = invites.filter((invite) => invite.status === "PENDING" && invite.can_accept);
   const currency = invoices[0]?.currency || "KES";
@@ -106,13 +118,29 @@ export default function AccountantWorkspace() {
   return (
     <main className="hodi-record">
       <div className="hodi-record-wrap">
+        <header className="hodi-record-topbar">
+          <Logo size={34} />
+          {clients.length > 0 && (
+            <nav className="hodi-record-nav" aria-label="Accountant workspace sections">
+              <a href="#overview">Overview</a>
+              <a href="#invoices">Invoices</a>
+              <a href="#payments">Payments</a>
+            </nav>
+          )}
+          <div className="hodi-record-header-actions">
+            <button type="button" className="secondary" onClick={() => void refresh()} disabled={loading}>
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+            <button type="button" className="secondary" onClick={() => void signOut()}>Sign out</button>
+          </div>
+        </header>
         <p className="hodi-record-kicker">Hodi finance</p>
         <h1>Accountant workspace</h1>
         <p className="hodi-record-lead">
           Client access is granted by an organisation owner and can be revoked at any time. Figures below are recorded invoices and payments only.
         </p>
         {error && <p className="hodi-record-alert" role="alert">{error}</p>}
-        {loading && <p className="hodi-record-note">Loading client access…</p>}
+        {loading && <p className="hodi-record-note" role="status">Loading client access…</p>}
 
         {pending.map((invite) => (
           <article className="hodi-record-invite" key={invite.id}>
@@ -135,14 +163,14 @@ export default function AccountantWorkspace() {
                 ))}
               </select>
             </label>
-            <section className="hodi-record-stats" aria-label="Invoice totals">
+            <section id="overview" className="hodi-record-stats" aria-label="Invoice totals" aria-busy={loading}>
               <article className="hodi-record-stat"><span>Invoices</span><strong>{invoices.length}</strong></article>
               <article className="hodi-record-stat"><span>Invoiced</span><strong>{formatMinor(sum(invoices, "total_cents"), currency)}</strong></article>
               <article className="hodi-record-stat"><span>Paid</span><strong>{formatMinor(sum(invoices, "paid_cents"), currency)}</strong></article>
               <article className="hodi-record-stat"><span>Outstanding</span><strong>{formatMinor(sum(invoices, "balance_cents"), currency)}</strong></article>
             </section>
 
-            <h2>Invoice report</h2>
+            <h2 id="invoices">Invoice report</h2>
             <div className="hodi-record-table-wrap">
               <table>
                 <thead>
@@ -171,7 +199,7 @@ export default function AccountantWorkspace() {
             </div>
             {!invoices.length && <p className="hodi-record-note">No invoices are recorded for this client.</p>}
 
-            <h2>Recorded rent transactions</h2>
+            <h2 id="payments">Recorded rent transactions</h2>
             <div className="hodi-record-table-wrap">
               <table>
                 <thead>

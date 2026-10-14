@@ -35,7 +35,9 @@ export type AccountType =
  * { token, account_type, organization_id, professional_trade }
  */
 export type AuthResponse = {
-  token: string;
+	token?: string | null;
+	email_verification_required?: boolean;
+	email_verified?: boolean;
   is_staff?: boolean;
   first_name?: string;
   last_name?: string;
@@ -340,13 +342,13 @@ export async function register(payload: SignupPayload): Promise<AuthResponse> {
     payload,
     { skipAuth: true },
   );
-  if (!data?.token) {
+	if (!data || (!data.token && !data.email_verification_required)) {
     throw new ClientApiError(500, "Invalid response", {
       detail: "Signup succeeded but no token was returned.",
     });
   }
-  setStoredAuthToken(data.token);
-  if (typeof window !== "undefined" && data.account_type) {
+	if (data.token) setStoredAuthToken(data.token);
+	if (data.token && typeof window !== "undefined" && data.account_type) {
     window.sessionStorage.setItem("hodi_account_type", data.account_type);
   }
   return data;

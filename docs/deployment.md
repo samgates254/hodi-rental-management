@@ -24,6 +24,8 @@ Create a Render PostgreSQL database in the API service's region. Link its **inte
 
 Production settings explicitly reject any configured database backend other than Django's PostgreSQL backend. This also rejects production startup when `DATABASE_URL` is absent and the fallback would select SQLite. The `DB_ENGINE`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT` fallback remains available; it can be used with a PostgreSQL `DB_ENGINE` where an operator-managed connection is appropriate. SQLite remains the default for local development and tests only. For Render, configure the linked PostgreSQL `DATABASE_URL`.
 
+Set `DJANGO_ENV=production` explicitly. If that variable is omitted, settings reject common deployment markers such as a non-local host, PostgreSQL connection, `DEBUG=False`, production SMTP, or live Daraja mode instead of silently using development protections. Local settings remain convenient when those markers are absent.
+
 Before switching production traffic to a release, provision the PostgreSQL database, configure a reachable PostgreSQL connection and credentials, and run the reviewed migrations against that database from the pre-deploy step. Confirm the API health check returns HTTP 200 before routing customer traffic. Do not use SQLite as a production fallback.
 
 The compatible `/api/v1/health/` endpoint checks database connectivity with Django's connection API. HTTP 200 with `{"status":"ok"}` means the application can connect to its database. HTTP 503 with a generic database-unavailable response means the application answered the health request but its database connection check failed; inspect application startup and database-provider availability through secured operator tooling. A timeout, connection refusal, or proxy error means the application did not return a health response and should be investigated as an application startup, process, or routing failure. The response intentionally contains no exception, SQL, URL, or credential details.
@@ -44,6 +46,7 @@ Set these in the Render service's Environment page. Values shown in angle bracke
 | `DJANGO_TRUSTED_PROXY_SSL_HEADER` | `HTTP_X_FORWARDED_PROTO,https`. Render terminates TLS and forwards the original scheme; trust this header only while the app is behind Render's proxy. |
 | `DJANGO_EMAIL_HOST` | SMTP hostname from the chosen email provider. Required by production settings. |
 | `DJANGO_DEFAULT_FROM_EMAIL` | A sender address authorized by the email provider. Required by production settings. |
+| `ACCOUNT_FRONTEND_URL` | HTTPS public frontend origin used in agent email-verification and password-reset links. |
 | `DJANGO_CACHE_BACKEND` | `django.core.cache.backends.db.DatabaseCache` for the shared database-backed cache. |
 | `DJANGO_CACHE_LOCATION` | `hodi_cache` (must match the `createcachetable` pre-deploy command). |
 | `MPESA_ENVIRONMENT` | Explicitly set to `sandbox` for initial deployment. Do not switch to `production` until live credentials and callback verification have been reviewed. |
@@ -101,6 +104,8 @@ Create a separate Render **Web Service**, runtime **Node**, with:
 | Start Command | `npm start` |
 
 Set `API_PROXY_TARGET` as a **build-time** environment variable to the deployed Django HTTPS origin, for example `https://<api-service>.onrender.com`. The Next.js rewrite manifest is produced during `next build`, and the Next.js server must be able to reach the API origin. The public plans request is `GET /api/v1/subscriptions/plans/`. Do not set a production localhost target or add credentials to frontend build variables. If hosting ingress routes `/api/v1/*` directly to Django instead, configure that route explicitly and verify it before launch.
+
+The `/admin` frontend route redirects to Django admin. Set `DJANGO_ADMIN_URL` to the deployed Django `/admin/` URL when the backend origin is not available through `API_PROXY_TARGET`; in local development it defaults to `http://127.0.0.1:8000/admin/`. `/hodi-admin/revenue` is the separate HODI subscription operations workspace.
 
 ## First-deploy checks
 

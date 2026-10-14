@@ -1,10 +1,13 @@
 from datetime import date
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+from unittest import skipUnless
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError, transaction
-from django.test import TestCase, override_settings
+from django.db import IntegrityError, connection, transaction
+from django.test import TestCase, TransactionTestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -424,6 +427,30 @@ class MpesaInitiateApiTests(TestCase):
         self.assertEqual(MpesaAttempt.objects.count(), 0)
         self.assertEqual(fake.stk_calls, [])
 
+    def test_amount_cannot_exceed_server_calculated_outstanding_balance(self):
+        self.client.force_authenticate(self.tenant_user)
+        fake = FakeMpesaClient()
+        with self._patch_client(fake):
+            response = self.client.post(self.url, {'amount_cents': 150100}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(MpesaAttempt.objects.count(), 0)
+        self.assertEqual(fake.stk_calls, [])
+
+    def test_partial_stk_payment_is_allowed_and_pending_attempt_reserves_balance(self):
+        self.client.force_authenticate(self.tenant_user)
+        fake = FakeMpesaClient()
+        with self._patch_client(fake):
+            first = self.client.post(self.url, {'amount_cents': 100000}, format='json')
+            fake.result = _accepted_result(merchant_request_id='m-2', checkout_request_id='c-2')
+            exceeds_unreserved = self.client.post(self.url, {'amount_cents': 60000}, format='json')
+            remaining = self.client.post(self.url, {'amount_cents': 50000}, format='json')
+        self.assertEqual(first.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(first.data['amount_cents'], 100000)
+        self.assertEqual(exceeds_unreserved.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(remaining.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(MpesaAttempt.objects.count(), 2)
+        self.assertEqual(len(fake.stk_calls), 2)
+
     def test_invalid_phone_rejected(self):
         self.client.force_authenticate(self.tenant_user)
         fake = FakeMpesaClient()
@@ -433,6 +460,15 @@ class MpesaInitiateApiTests(TestCase):
                 'phone_number': '12345',
             }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(MpesaAttempt.objects.count(), 0)
+
+    @override_settings(MPESA_CONSUMER_KEY='')
+    def test_missing_provider_configuration_fails_closed_without_creating_attempt(self):
+        self.client.force_authenticate(self.tenant_user)
+        response = self.client.post(self.url, {'amount_cents': 10000}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['detail'], 'M-Pesa is not configured.')
         self.assertEqual(MpesaAttempt.objects.count(), 0)
 
     def test_tenant_cannot_pay_another_organizations_invoice(self):
@@ -509,3 +545,76 @@ class MpesaInitiateApiTests(TestCase):
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.balance_cents, 150000)
         self.assertEqual(self.invoice.status, DocumentStatus.POSTED)
+
+
+@skipUnless(connection.vendor == 'postgresql', 'Requires PostgreSQL row-level locking semantics.')
+@override_settings(**MPESA_SETTINGS)
+class MpesaInitiationConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.tenant_user = user_model.objects.create_user(username='concurrent-stk-tenant', password='secret')
+        self.organization = Organization.objects.create(name='Concurrent STK Homes')
+        self.tenant = Tenant.objects.create(
+            organization=self.organization,
+            user=self.tenant_user,
+            first_name='Amina',
+            last_name='Otieno',
+            phone_number='+254700000010',
+        )
+        today = date.today()
+        invoice = Invoice.objects.create(
+            organization=self.organization,
+            tenant=self.tenant,
+            period_start=today.replace(day=1),
+            period_end=today,
+            due_date=today,
+            status=DocumentStatus.POSTED,
+            total_cents=150000,
+            balance_cents=150000,
+        )
+        Charge.objects.create(
+            invoice=invoice,
+            organization=self.organization,
+            tenant=self.tenant,
+            charge_type='RENT',
+            amount_cents=150000,
+            balance_cents=150000,
+            due_date=today,
+            lifecycle=DocumentStatus.POSTED,
+        )
+
+    def test_concurrent_prompts_cannot_reserve_more_than_open_rent_balance(self):
+        fake = FakeMpesaClient()
+        barrier = threading.Barrier(2)
+
+        def initiate(amount, key):
+            from django.db import close_old_connections
+
+            close_old_connections()
+            client = IdempotentTestAPIClient()
+            client.force_authenticate(self.tenant_user)
+            barrier.wait(timeout=10)
+            try:
+                response = client.post('/api/v1/billing/mpesa/initiate/', {
+                    'amount_cents': amount,
+                    'idempotency_key': key,
+                }, format='json')
+                return response.status_code
+            finally:
+                connection.close()
+
+        with patch('application.services.mpesa.MpesaClient.from_settings', return_value=fake):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                statuses = list(executor.map(
+                    lambda args: initiate(*args),
+                    (
+                        (100000, '4a9f3700-87eb-4e5a-81d8-dfc1fe39a001'),
+                        (60000, '4a9f3700-87eb-4e5a-81d8-dfc1fe39a002'),
+                    ),
+                ))
+
+        self.assertEqual(sorted(statuses), [status.HTTP_202_ACCEPTED, status.HTTP_400_BAD_REQUEST])
+        self.assertEqual(MpesaAttempt.objects.count(), 1)
+        self.assertEqual(len(fake.stk_calls), 1)

@@ -3,13 +3,14 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
+from apps.accounts.models import AccountProfile
 from apps.leases.models import Lease
 from apps.properties.models import Unit
 from application.services.audit import record_audit
 from application.services.notifications import notify_user
 from common.permissions import user_can_access_organization_resource
 
-from .models import AgentProfile, Listing, ListingInquiry, ListingPhoto, ViewingRequest
+from .models import AgentProfile, AgentUnitAuthorization, Listing, ListingInquiry, ListingPhoto, ViewingRequest
 
 MAX_PHOTOS = 12
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
@@ -30,6 +31,8 @@ def publicly_available_queryset():
 		Listing.objects.filter(
 			status=Listing.Status.PUBLISHED,
 			unit__status=Unit.Status.AVAILABLE,
+			unit__building__property__is_active=True,
+			unit__building__property__organization__is_active=True,
 		)
 		.filter(
 			Q(agent_profile__isnull=True)
@@ -37,6 +40,7 @@ def publicly_available_queryset():
 				agent_profile__verification_status=AgentProfile.VerificationStatus.VERIFIED,
 				agent_profile__account_status=AgentProfile.AccountStatus.ACTIVE,
 				agent_profile__user__is_active=True,
+				agent_profile__user__account_profile__email_verified_at__isnull=False,
 			)
 		)
 		.annotate(has_active_lease=Exists(active_lease))
@@ -47,10 +51,18 @@ def publicly_available_queryset():
 def is_publicly_available(listing):
 	if listing.status != Listing.Status.PUBLISHED:
 		return False
+	property_record = listing.unit.building.property
+	if not property_record.is_active or not property_record.organization.is_active:
+		return False
 	if listing.agent_profile_id and (
 		listing.agent_profile.verification_status != AgentProfile.VerificationStatus.VERIFIED
 		or listing.agent_profile.account_status != AgentProfile.AccountStatus.ACTIVE
 		or not listing.agent_profile.user.is_active
+		or not AccountProfile.objects.filter(
+			user_id=listing.agent_profile.user_id,
+			account_type=AccountProfile.AccountType.PROPERTY_AGENT,
+			email_verified_at__isnull=False,
+		).exists()
 	):
 		return False
 	if listing.unit.status != Unit.Status.AVAILABLE:
@@ -170,8 +182,11 @@ def create_listing(*, unit, actor, data, request=None, agent_profile=None):
 
 
 @transaction.atomic
-def update_listing(listing, *, actor, data, request=None):
-	listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
+def update_listing(listing, *, actor, data, request=None, agent_profile=None):
+	if agent_profile is not None:
+		listing = _lock_agent_listing(listing, agent_profile=agent_profile, actor=actor)
+	else:
+		listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
 	if 'unit' in data and data['unit'] is not None and data['unit'].pk != listing.unit_id:
 		raise ValidationError({'unit': 'A listing cannot be moved to another unit.'})
 	_apply_fields(listing, data, listing.unit)
@@ -196,9 +211,52 @@ def _availability_error(listing):
 	return ''
 
 
+def _lock_agent_listing(listing, *, agent_profile, actor, require_verified=False):
+	try:
+		profile = AgentProfile.objects.select_for_update(of=('self',)).select_related('user').get(pk=agent_profile.pk)
+	except AgentProfile.DoesNotExist as error:
+		raise ValidationError({'status': 'An active agent profile is required to manage this listing.'}) from error
+	if (
+		profile.user_id != actor.pk
+		or not profile.user.is_active
+		or not AccountProfile.objects.filter(
+			user_id=actor.pk,
+			account_type=AccountProfile.AccountType.PROPERTY_AGENT,
+			email_verified_at__isnull=False,
+		).exists()
+		or profile.account_status != AgentProfile.AccountStatus.ACTIVE
+	):
+		raise ValidationError({'status': 'An active property-agent profile is required to manage this listing.'})
+	if require_verified and profile.verification_status != AgentProfile.VerificationStatus.VERIFIED:
+		raise ValidationError({'status': 'A verified agent profile is required to publish this listing.'})
+	authorization = AgentUnitAuthorization.objects.select_for_update(of=('self',)).filter(
+		unit_id=listing.unit_id,
+		agent=profile,
+		status=AgentUnitAuthorization.Status.ACTIVE,
+		unit__status__in=(Unit.Status.AVAILABLE, Unit.Status.OCCUPIED, Unit.Status.MAINTENANCE),
+		unit__building__property__organization__is_active=True,
+	).first()
+	if authorization is None:
+		raise ValidationError({'status': 'An active owner authorization is required to manage this listing.'})
+	locked = Listing.objects.select_for_update(of=('self',)).select_related(
+		'unit__building__property',
+	).get(pk=listing.pk)
+	if locked.agent_profile_id != profile.pk:
+		raise ValidationError({'status': 'This agent is no longer assigned to the listing.'})
+	return locked
+
+
 @transaction.atomic
-def publish_listing(listing, *, actor, request=None):
-	listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
+def publish_listing(listing, *, actor, request=None, agent_profile=None):
+	if agent_profile is not None:
+		listing = _lock_agent_listing(
+			listing,
+			agent_profile=agent_profile,
+			actor=actor,
+			require_verified=True,
+		)
+	else:
+		listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
 	reason = _availability_error(listing)
 	if reason:
 		raise ValidationError({'status': reason})
@@ -235,8 +293,11 @@ def unpublish_listing(listing, *, actor, request=None):
 
 
 @transaction.atomic
-def pause_listing(listing, *, actor, request=None):
-	listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
+def pause_listing(listing, *, actor, request=None, agent_profile=None):
+	if agent_profile is not None:
+		listing = _lock_agent_listing(listing, agent_profile=agent_profile, actor=actor)
+	else:
+		listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
 	listing.status = Listing.Status.PAUSED
 	listing.save(update_fields=('status', 'updated_at'))
 	record_audit(
@@ -252,8 +313,11 @@ def pause_listing(listing, *, actor, request=None):
 
 
 @transaction.atomic
-def archive_listing(listing, *, actor, request=None):
-	listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
+def archive_listing(listing, *, actor, request=None, agent_profile=None):
+	if agent_profile is not None:
+		listing = _lock_agent_listing(listing, agent_profile=agent_profile, actor=actor)
+	else:
+		listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
 	listing.status = Listing.Status.ARCHIVED
 	listing.save(update_fields=('status', 'updated_at'))
 	record_audit(
@@ -301,12 +365,28 @@ def validate_photo(uploaded):
 		raise ValidationError({'image': 'The file extension does not match the image type.'})
 	if uploaded.size > MAX_PHOTO_BYTES:
 		raise ValidationError({'image': 'Each photo must be 8 MB or smaller.'})
+	header = uploaded.read(12)
+	try:
+		uploaded.seek(0)
+	except (AttributeError, OSError, ValueError) as error:
+		raise ValidationError({'image': 'The uploaded image could not be read safely.'}) from error
+	valid_signature = (
+		(content_type == 'image/jpeg' and header.startswith(b'\xff\xd8\xff'))
+		or (content_type == 'image/png' and header.startswith(b'\x89PNG\r\n\x1a\n'))
+		or (content_type == 'image/gif' and header[:6] in {b'GIF87a', b'GIF89a'})
+		or (content_type == 'image/webp' and header[:4] == b'RIFF' and header[8:12] == b'WEBP')
+	)
+	if not valid_signature:
+		raise ValidationError({'image': 'The file contents do not match the selected image type.'})
 	return content_type
 
 
 @transaction.atomic
-def add_photo(listing, *, uploaded, caption='', make_primary=False, actor, request=None):
-	listing = Listing.objects.select_for_update(of=('self',)).get(pk=listing.pk)
+def add_photo(listing, *, uploaded, caption='', make_primary=False, actor, request=None, agent_profile=None):
+	if agent_profile is not None:
+		listing = _lock_agent_listing(listing, agent_profile=agent_profile, actor=actor)
+	else:
+		listing = Listing.objects.select_for_update(of=('self',)).get(pk=listing.pk)
 	if listing.photos.count() >= MAX_PHOTOS:
 		raise ValidationError({'image': f'A listing can have at most {MAX_PHOTOS} photos.'})
 	content_type = validate_photo(uploaded)

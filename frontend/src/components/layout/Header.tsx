@@ -10,6 +10,7 @@ import ThemeToggle from "@/components/theme/ThemeToggle";
 
 const NAV = primaryNav;
 const HOME_NAV = [
+  { label: "Find a home", href: "/marketplace" },
   { label: "Platform", href: "/platform" },
   { label: "Features", href: "#features" },
   { label: "For landlords", href: "/solutions#owners-solution" },

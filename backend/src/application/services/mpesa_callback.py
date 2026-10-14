@@ -40,6 +40,10 @@ class CallbackValidationError(Exception):
     """Success-callback metadata failed HODI checks. Do not create a Payment."""
 
 
+class DuplicateReceiptConflict(Exception):
+    """A globally unique Safaricom receipt was concurrently assigned elsewhere."""
+
+
 def classify_stk_query(attempt, query, *, conservative=False) -> tuple[str, str, str]:
     """Return transaction outcome only when the query response is tied to this attempt.
 
@@ -189,6 +193,33 @@ def _existing_payment(*, organization, receipt: str) -> Payment | None:
     return Payment.objects.filter(organization=organization, external_id=receipt).first()
 
 
+def _payment_matches_attempt(payment, *, attempt, receipt, received_date) -> bool:
+    return (
+        payment.organization_id == attempt.organization_id
+        and payment.tenant_id == attempt.tenant_id
+        and payment.method == Payment.Method.MPESA
+        and payment.currency == attempt.currency
+        and payment.amount_cents == int(attempt.amount_cents)
+        and payment.external_id == receipt
+        and payment.received_date == received_date
+        and payment.status in {Payment.Status.PENDING, Payment.Status.ALLOCATED}
+    )
+
+
+def _mark_attempt_unresolved(attempt, *, reason, request):
+    attempt.reconciliation_state = MpesaAttempt.ReconciliationState.UNRESOLVED
+    attempt.save(update_fields=('reconciliation_state', 'updated_at'))
+    record_audit(
+        action='mpesa.stk.callback_discrepancy',
+        object_type='MpesaAttempt',
+        object_id=attempt.pk,
+        actor=attempt.initiated_by,
+        organization=attempt.organization,
+        metadata={'reason': reason},
+        request=request,
+    )
+
+
 def _mark_attempt(attempt, *, status, result_code, result_description, receipt=None):
     attempt.status = status
     attempt.result_code = result_code
@@ -315,6 +346,58 @@ def settle_verified_stk_failure(*, checkout_request_id, merchant_request_id, res
 
 
 def settle_stk_callback(*, payload, provider_query=None, request=None) -> CallbackResult:
+    """Settle a verified callback, rolling back all writes on receipt races."""
+    stk = parse_stk_callback(payload)
+    checkout = str(stk.get('CheckoutRequestID')).strip()
+    try:
+        return _settle_stk_callback_transaction(
+            payload=payload,
+            provider_query=provider_query,
+            request=request,
+        )
+    except DuplicateReceiptConflict:
+        # The transaction which created/allocated a losing payment must be
+        # rolled back before we record the unresolved reconciliation outcome.
+        with transaction.atomic():
+            attempt = _lock_attempt(checkout)
+            if attempt is None:
+                return _ack(
+                    matched=False,
+                    settled=False,
+                    duplicate=True,
+                    status='UNRESOLVED',
+                    detail='Receipt conflict requires reconciliation.',
+                )
+            if attempt.status == MpesaAttempt.Status.SUCCESS:
+                payment = _existing_payment(
+                    organization=attempt.organization,
+                    receipt=attempt.mpesa_receipt_number or '',
+                )
+                return _ack(
+                    matched=True,
+                    settled=True,
+                    duplicate=True,
+                    status=attempt.status,
+                    detail='Payment already settled.',
+                    attempt=attempt,
+                    payment=payment,
+                )
+            _mark_attempt_unresolved(
+                attempt,
+                reason='duplicate_receipt_race',
+                request=request,
+            )
+            return _ack(
+                matched=True,
+                settled=False,
+                duplicate=True,
+                status='UNRESOLVED',
+                detail='Receipt was assigned to another attempt. No payment was recorded for this attempt.',
+                attempt=attempt,
+            )
+
+
+def _settle_stk_callback_transaction(*, payload, provider_query=None, request=None) -> CallbackResult:
     stk = parse_stk_callback(payload)
     checkout = str(stk.get('CheckoutRequestID')).strip()
     result_code = _result_code(stk)
@@ -443,25 +526,54 @@ def settle_stk_callback(*, payload, provider_query=None, request=None) -> Callba
                 attempt=attempt,
             )
 
+        receipt_payments = list(Payment.objects.filter(external_id=receipt).order_by('created_at', 'pk')[:2])
+        if receipt_payments:
+            if (
+                len(receipt_payments) != 1
+                or not _payment_matches_attempt(
+                    receipt_payments[0],
+                    attempt=attempt,
+                    receipt=receipt,
+                    received_date=received_date,
+                )
+            ):
+                _mark_attempt_unresolved(
+                    attempt,
+                    reason='existing_payment_receipt_conflict',
+                    request=request,
+                )
+                return _ack(
+                    matched=True,
+                    settled=False,
+                    duplicate=True,
+                    status='UNRESOLVED',
+                    detail='Receipt is already attached to a different payment. No payment state changed.',
+                    attempt=attempt,
+                )
+
         payment, _created = _create_or_load_payment(
             attempt=attempt,
             receipt=receipt,
             received_date=received_date,
             request=request,
         )
-        if payment.tenant_id != attempt.tenant_id or payment.organization_id != attempt.organization_id:
-            _mark_attempt(
+        if not _payment_matches_attempt(
+            payment,
+            attempt=attempt,
+            receipt=receipt,
+            received_date=received_date,
+        ):
+            _mark_attempt_unresolved(
                 attempt,
-                status=MpesaAttempt.Status.FAILED,
-                result_code=result_code,
-                result_description='Receipt is already tied to another tenant or organization.',
+                reason='existing_payment_receipt_conflict',
+                request=request,
             )
             return _ack(
                 matched=True,
                 settled=False,
                 duplicate=True,
-                status=attempt.status,
-                detail='Receipt belongs to another payment. No additional payment was recorded.',
+                status='UNRESOLVED',
+                detail='Receipt is already attached to a different payment. No payment state changed.',
                 attempt=attempt,
             )
         payment = _allocate_if_pending(
@@ -470,25 +582,17 @@ def settle_stk_callback(*, payload, provider_query=None, request=None) -> Callba
             request=request,
         )
         try:
-            with transaction.atomic():
-                _mark_attempt(
-                    attempt,
-                    status=MpesaAttempt.Status.SUCCESS,
-                    result_code=result_code,
-                    result_description=result_desc or 'The service request is processed successfully.',
-                    receipt=receipt,
-                )
-        except IntegrityError:
-            attempt.refresh_from_db()
-            return _ack(
-                matched=True,
-                settled=attempt.status == MpesaAttempt.Status.SUCCESS,
-                duplicate=True,
-                status=attempt.status,
-                detail='Duplicate M-Pesa receipt. No additional payment was recorded.',
-                attempt=attempt,
-                payment=payment,
+            _mark_attempt(
+                attempt,
+                status=MpesaAttempt.Status.SUCCESS,
+                result_code=result_code,
+                result_description=result_desc or 'The service request is processed successfully.',
+                receipt=receipt,
             )
+        except IntegrityError as error:
+            # Let the exception escape the outer transaction so the payment,
+            # allocations, invoice balances, and ledger postings all roll back.
+            raise DuplicateReceiptConflict from error
         record_audit(
             action='mpesa.stk.settle',
             object_type='MpesaAttempt',

@@ -1,8 +1,11 @@
+import hashlib
+import hmac
 import logging
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.cache import cache
 from django.db import transaction
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request as GoogleRequest
@@ -20,13 +23,20 @@ from apps.tenants.models import Tenant
 
 from .models import AccountProfile
 from .serializers import (
+	EmailVerificationConfirmSerializer,
+	EmailVerificationRequestSerializer,
 	LoginSerializer,
 	PasswordResetConfirmSerializer,
 	PasswordResetRequestSerializer,
 	SignupSerializer,
 	TenantOrganizationSerializer,
 )
-from .services import reset_user_password, send_password_reset_email
+from .services import (
+	reset_user_password,
+	send_password_reset_email,
+	send_verification_email,
+	verify_email_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +89,24 @@ class SignupView(APIView):
 		serializer.is_valid(raise_exception=True)
 		user = serializer.save()
 		profile = user.account_profile
-		token, _created = Token.objects.get_or_create(user=user)
+		verification_required = profile.account_type == AccountProfile.AccountType.PROPERTY_AGENT
+		token = None
+		if verification_required:
+			try:
+				send_verification_email(user)
+			except Exception:
+				# Keep the response generic and never log token or email content.
+				logger.error('Unable to send agent email-verification message user_id=%s', user.pk)
+		else:
+			token, _created = Token.objects.get_or_create(user=user)
 		return Response(
 			{
-				'detail': 'Account created successfully.',
-				'token': token.key,
+				'detail': (
+					'Account created. Check your email for a verification link.'
+					if verification_required else 'Account created successfully.'
+				),
+				'token': token.key if token else None,
+				'email_verification_required': verification_required,
 				'account_type': profile.account_type,
 				'organization_id': profile.organization_id,
 				'professional_trade': profile.professional_trade,
@@ -94,6 +117,91 @@ class SignupView(APIView):
 				),
 			},
 			status=status.HTTP_201_CREATED,
+		)
+
+
+def _email_verification_resend_allowed(email):
+	key_digest = hmac.new(
+		settings.SECRET_KEY.encode('utf-8'),
+		email.casefold().encode('utf-8'),
+		hashlib.sha256,
+	).hexdigest()
+	key = f'account-email-verification:{key_digest}'
+	try:
+		if cache.add(key, 1, timeout=3600):
+			return True
+		return cache.incr(key) <= 3
+	except Exception:
+		# Email delivery is disabled if its abuse-control store is unavailable.
+		logger.error('Email-verification rate limiter is unavailable.')
+		return False
+
+
+class EmailVerificationRequestView(APIView):
+	permission_classes = (permissions.AllowAny,)
+	authentication_classes = ()
+	throttle_classes = (ScopedRateThrottle,)
+	throttle_scope = 'auth_email_verification_request'
+
+	def post(self, request):
+		serializer = EmailVerificationRequestSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		email = serializer.validated_data['email']
+		response = {
+			'detail': 'If an eligible account uses that email, verification instructions will be sent.',
+		}
+		if not _email_verification_resend_allowed(email):
+			return Response(response, status=status.HTTP_202_ACCEPTED)
+
+		user = get_user_model().objects.filter(email__iexact=email, is_active=True).first()
+		profile = getattr(user, 'account_profile', None) if user is not None else None
+		if (
+			profile is not None
+			and profile.account_type == AccountProfile.AccountType.PROPERTY_AGENT
+			and profile.email_verified_at is None
+		):
+			try:
+				send_verification_email(user)
+			except Exception:
+				logger.error('Unable to send agent email-verification message user_id=%s', user.pk)
+		return Response(response, status=status.HTTP_202_ACCEPTED)
+
+
+class EmailVerificationConfirmView(APIView):
+	permission_classes = (permissions.AllowAny,)
+	authentication_classes = ()
+	throttle_classes = (ScopedRateThrottle,)
+	throttle_scope = 'auth_email_verification_confirm'
+
+	def post(self, request):
+		serializer = EmailVerificationConfirmSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		user = verify_email_token(serializer.validated_data['token'])
+		if user is None:
+			return Response(
+				{'detail': 'This verification link is invalid, expired, or already used.'},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+		token, _created = Token.objects.get_or_create(user=user)
+		profile = user.account_profile
+		agent_profile = getattr(user, 'agent_profile', None)
+		return Response(
+			{
+				'detail': 'Email verified successfully.',
+				'token': token.key,
+				'account_type': profile.account_type,
+				'first_name': user.first_name,
+				'last_name': user.last_name,
+				'email': user.email,
+				'phone_number': profile.phone_number,
+				'agent_verification_status': (
+					agent_profile.verification_status if agent_profile is not None else None
+				),
+				'agent_account_status': (
+					agent_profile.account_status if agent_profile is not None else None
+				),
+			},
+			status=status.HTTP_200_OK,
 		)
 
 
@@ -161,7 +269,7 @@ class PasswordResetRequestView(APIView):
 			try:
 				send_password_reset_email(user)
 			except Exception:
-				logger.exception('Unable to send password reset email.')
+				logger.error('Unable to send password reset email user_id=%s', user.pk)
 		return Response(
 			{'detail': 'If an active account uses that email, reset instructions will be sent.'},
 			status=status.HTTP_202_ACCEPTED,
@@ -206,6 +314,7 @@ class LoginView(APIView):
 		serializer = LoginSerializer(data=request.data, context={'request': request})
 		serializer.is_valid(raise_exception=True)
 		user = serializer.validated_data['user']
+<<<<<<< HEAD
 		return Response(_auth_response_data(user), status=status.HTTP_200_OK)
 
 
@@ -251,6 +360,40 @@ class GoogleLoginView(APIView):
 
 		user = get_user_model().objects.filter(
 			email__iexact=email.strip(),
+=======
+		profile = getattr(user, 'account_profile', None)
+		if (
+			profile is not None
+			and profile.account_type == AccountProfile.AccountType.PROPERTY_AGENT
+			and profile.email_verified_at is None
+		):
+			return Response(
+				{'detail': 'Verify your email address before signing in.'},
+				status=status.HTTP_403_FORBIDDEN,
+			)
+		token, _created = Token.objects.get_or_create(user=user)
+		response_data = {
+			'token': token.key,
+			'is_staff': user.is_staff,
+			'first_name': user.first_name,
+			'last_name': user.last_name,
+			'email': user.email,
+		}
+		if profile is not None:
+			response_data.update({
+				'account_type': profile.account_type,
+				'organization_id': profile.organization_id,
+				'professional_trade': profile.professional_trade,
+				'phone_number': profile.phone_number,
+				'email_verified': profile.email_verified_at is not None,
+			})
+		agent_profile = getattr(user, 'agent_profile', None)
+		if agent_profile is not None:
+			response_data['agent_verification_status'] = agent_profile.verification_status
+			response_data['agent_account_status'] = agent_profile.account_status
+		memberships = OrganizationMembership.objects.filter(
+			user=user,
+>>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
 			is_active=True,
 		).first()
 		if user is None:
@@ -282,6 +425,7 @@ class MeView(APIView):
 				'organization_id': profile.organization_id if profile is not None else None,
 				'professional_trade': profile.professional_trade if profile is not None else '',
 				'phone_number': profile.phone_number if profile is not None else '',
+				'email_verified': profile.email_verified_at is not None if profile is not None else False,
 				'agent_verification_status': getattr(
 					getattr(user, 'agent_profile', None), 'verification_status', None,
 				),
