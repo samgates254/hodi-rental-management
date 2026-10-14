@@ -38,6 +38,34 @@ Owner / property manager only:
 
 Public payloads include title, rent, rooms, amenities, area, city, property name, unit label, and photos. They do not include organization id, unit id, tenant, lease, landlord private contact, national ID, or internal financial rows.
 
+An inquiry may include `viewing_requested_for` as an ISO 8601 future date/time. Hodi records it as a requested viewing; the listing agent must confirm or decline it.
+
+## Independent property agents
+
+Register through the existing account API with `account_type: "PROPERTY_AGENT"`. This creates an independent profile and does not create an organization membership or landlord privileges.
+
+Agent routes require the authenticated agent account:
+
+- `GET/PATCH /marketplace/agents/me/` — read or update contact details, agency name, service area, and description. Verification and account status are read-only.
+- `POST /marketplace/agents/me/request-verification/` — request staff review.
+- `GET /marketplace/agents/me/authorized-units/` — list active unit authorizations.
+- `GET/POST /marketplace/agents/listings/` and `GET/PATCH /marketplace/agents/listings/{id}/` — manage listings for authorized units. Drafts are allowed before verification.
+- `POST /marketplace/agents/listings/{id}/publish/` — publish only with a verified, active agent profile and current owner authorization.
+- `POST /marketplace/agents/listings/{id}/pause/` and `.../archive/` — stop exposure or archive the listing.
+- `GET /marketplace/agents/inquiries/` and `PATCH /marketplace/agents/inquiries/{id}/status/` — read enquiries on currently managed listings and move them from new to contacted to closed.
+- `GET /marketplace/agents/viewings/` and `PATCH /marketplace/agents/viewings/{id}/status/` — review and update viewing requests.
+
+Only an active organization owner may grant or revoke advertising authority:
+
+- `GET /marketplace/agent-authorizations/?organization={id}` — view the organization’s authorization history.
+- `POST /marketplace/agent-authorizations/` with `organization`, `unit`, registered `agent_email`, `attest_authority: true`, and optional `authority_reference` — create an auditable unit authorization.
+- `DELETE /marketplace/agent-authorizations/{id}/` — revoke authorization. A published listing assigned to that agent is paused, and the agent can no longer see its enquiries or viewings.
+- `POST /marketplace/agents/profiles/{id}/moderate/` — staff-only verification/account-status update. Verification states are `UNVERIFIED`, `PENDING`, `VERIFIED`, and `REJECTED`; account states are `ACTIVE` and `SUSPENDED`.
+
+Hodi records the owner attestation, granting user, unit, agent, and timestamps. One active agent authorization is allowed per unit. Agent access does not grant organization membership; existing owners keep their organization-scoped listing access.
+
+Agent commission tracking is not part of this workflow yet. Add it later as a separately authorized financial record with explicit agreement and payment evidence; enquiries and viewings must not create or settle commissions, and commissions must remain separate from rent and deposits.
+
 ## Caretaker dashboard
 
 - `GET /maintenance/issues/` — list issues in active organizations where the user has an `OWNER`, `PROPERTY_MANAGER`, `CARETAKER`, or `TECHNICIAN` membership; a linked tenant may also read only their own issues. Staff with multiple memberships may select one using `?organization={id}`.

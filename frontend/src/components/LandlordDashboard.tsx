@@ -13,6 +13,7 @@ import AuditLogPanel from "@/components/ops/AuditLogPanel";
 import BillingWorkspace from "@/components/ops/BillingWorkspace";
 import MaintenanceRequestsPanel from "@/components/ops/MaintenanceRequestsPanel";
 import MarketplaceManager from "@/components/marketplace/MarketplaceManager";
+import AgentAuthorizationWorkspace from "@/components/marketplace/AgentAuthorizationWorkspace";
 import CommerceWorkspace from "@/components/marketplace/CommerceWorkspace";
 import NotificationBell from "@/components/ops/NotificationBell";
 import SubscriptionPanel from "@/components/SubscriptionPanel";
@@ -811,6 +812,7 @@ export default function LandlordDashboard() {
           {showPortfolio && <a className={sectionClass("tenants")} href="#tenants"><Icon name="people" />Tenants</a>}
           {showPortfolio && <a className={sectionClass("leases")} href="#leases"><Icon name="lease" />Leases</a>}
           {canWritePortfolio && <a className={sectionClass("marketplace")} href="#marketplace"><Icon name="building" />Listings</a>}
+          {canManageTeam && !previewMode && selectedOrganizationId && <a className={sectionClass("agent-authorizations")} href="#agent-authorizations"><Icon name="people" />Agents</a>}
           <Link href="/marketplace">Marketplace</Link>
           {canManageTeam && <Link href="/accountants">Accountants</Link>}
           {canReadBilling && <a className={sectionClass("billing")} href="#billing"><Icon name="lease" />Billing</a>}
@@ -1396,6 +1398,15 @@ export default function LandlordDashboard() {
 
             {canWritePortfolio && !previewMode && (
               <MarketplaceManager
+                units={organizationData.units}
+                buildings={organizationData.buildings}
+                properties={organizationData.properties}
+              />
+            )}
+            {canManageTeam && !previewMode && selectedOrganizationId && (
+              <AgentAuthorizationWorkspace
+                key={`agent-authorizations-${selectedOrganizationId}`}
+                organizationId={selectedOrganizationId}
                 units={organizationData.units}
                 buildings={organizationData.buildings}
                 properties={organizationData.properties}

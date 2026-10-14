@@ -10,6 +10,7 @@ class AccountProfile(models.Model):
 		TENANT = 'TENANT', 'Tenant'
 		OWNER = 'OWNER', 'Organization owner'
 		SERVICE_PROFESSIONAL = 'SERVICE_PROFESSIONAL', 'Service professional'
+		PROPERTY_AGENT = 'PROPERTY_AGENT', 'Property agent'
 
 	class ProfessionalTrade(models.TextChoices):
 		ELECTRICIAN = 'ELECTRICIAN', 'Electrician'

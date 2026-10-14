@@ -48,6 +48,11 @@ class SignupView(APIView):
 				'account_type': profile.account_type,
 				'organization_id': profile.organization_id,
 				'professional_trade': profile.professional_trade,
+				'agent_verification_status': (
+					user.agent_profile.verification_status
+					if profile.account_type == AccountProfile.AccountType.PROPERTY_AGENT
+					else None
+				),
 			},
 			status=status.HTTP_201_CREATED,
 		)
@@ -178,6 +183,10 @@ class LoginView(APIView):
 				'professional_trade': profile.professional_trade,
 				'phone_number': profile.phone_number,
 			})
+		agent_profile = getattr(user, 'agent_profile', None)
+		if agent_profile is not None:
+			response_data['agent_verification_status'] = agent_profile.verification_status
+			response_data['agent_account_status'] = agent_profile.account_status
 		memberships = OrganizationMembership.objects.filter(
 			user=user,
 			is_active=True,
@@ -214,6 +223,12 @@ class MeView(APIView):
 				'organization_id': profile.organization_id if profile is not None else None,
 				'professional_trade': profile.professional_trade if profile is not None else '',
 				'phone_number': profile.phone_number if profile is not None else '',
+				'agent_verification_status': getattr(
+					getattr(user, 'agent_profile', None), 'verification_status', None,
+				),
+				'agent_account_status': getattr(
+					getattr(user, 'agent_profile', None), 'account_status', None,
+				),
 				'memberships': [
 					{
 						'organization': membership.organization_id,

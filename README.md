@@ -19,9 +19,22 @@ Django modular monolith for a secure, multi-tenant rental-management backend.
 
 ```bash
 cd backend
-cp .env.example .env
-env/bin/python manage.py migrate
-env/bin/python manage.py runserver
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+if [ ! -f .env ]; then cp .env.example .env; fi
+python manage.py migrate
+python manage.py runserver
+```
+
+In another terminal:
+
+```bash
+cd frontend
+npm ci
+npm run dev
 ```
 
 Health check: `http://127.0.0.1:8000/api/v1/health/`
+
+Daraja sandbox configuration and callback testing are covered in [the sandbox setup guide](docs/payments/daraja-sandbox-setup.md). Do not use production credentials for local testing.

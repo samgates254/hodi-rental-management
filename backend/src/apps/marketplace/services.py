@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
@@ -9,7 +9,7 @@ from application.services.audit import record_audit
 from application.services.notifications import notify_user
 from common.permissions import user_can_access_organization_resource
 
-from .models import Listing, ListingInquiry, ListingPhoto
+from .models import AgentProfile, Listing, ListingInquiry, ListingPhoto, ViewingRequest
 
 MAX_PHOTOS = 12
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
@@ -31,6 +31,14 @@ def publicly_available_queryset():
 			status=Listing.Status.PUBLISHED,
 			unit__status=Unit.Status.AVAILABLE,
 		)
+		.filter(
+			Q(agent_profile__isnull=True)
+			| Q(
+				agent_profile__verification_status=AgentProfile.VerificationStatus.VERIFIED,
+				agent_profile__account_status=AgentProfile.AccountStatus.ACTIVE,
+				agent_profile__user__is_active=True,
+			)
+		)
 		.annotate(has_active_lease=Exists(active_lease))
 		.filter(has_active_lease=False)
 	)
@@ -38,6 +46,12 @@ def publicly_available_queryset():
 
 def is_publicly_available(listing):
 	if listing.status != Listing.Status.PUBLISHED:
+		return False
+	if listing.agent_profile_id and (
+		listing.agent_profile.verification_status != AgentProfile.VerificationStatus.VERIFIED
+		or listing.agent_profile.account_status != AgentProfile.AccountStatus.ACTIVE
+		or not listing.agent_profile.user.is_active
+	):
 		return False
 	if listing.unit.status != Unit.Status.AVAILABLE:
 		return False
@@ -116,12 +130,13 @@ def _apply_fields(listing, data, unit):
 
 
 @transaction.atomic
-def create_listing(*, unit, actor, data, request=None):
+def create_listing(*, unit, actor, data, request=None, agent_profile=None):
 	if Listing.objects.filter(unit=unit).exists():
 		raise ValidationError({'unit': 'This unit already has a marketplace listing.'})
 	listing = Listing(
 		unit=unit,
 		created_by=actor,
+		agent_profile=agent_profile,
 		title=data.get('title', ''),
 		description=data.get('description', ''),
 		monthly_rent_minor=_clean_rent(data.get('monthly_rent_minor')),
@@ -209,6 +224,40 @@ def unpublish_listing(listing, *, actor, request=None):
 	listing.save(update_fields=('status', 'updated_at'))
 	record_audit(
 		action='marketplace.listing.unpublish',
+		object_type='Listing',
+		object_id=listing.pk,
+		actor=actor,
+		organization=_organization(listing.unit),
+		metadata={'unit_id': listing.unit_id},
+		request=request,
+	)
+	return listing
+
+
+@transaction.atomic
+def pause_listing(listing, *, actor, request=None):
+	listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
+	listing.status = Listing.Status.PAUSED
+	listing.save(update_fields=('status', 'updated_at'))
+	record_audit(
+		action='marketplace.listing.pause',
+		object_type='Listing',
+		object_id=listing.pk,
+		actor=actor,
+		organization=_organization(listing.unit),
+		metadata={'unit_id': listing.unit_id},
+		request=request,
+	)
+	return listing
+
+
+@transaction.atomic
+def archive_listing(listing, *, actor, request=None):
+	listing = Listing.objects.select_for_update(of=('self',)).select_related('unit__building__property').get(pk=listing.pk)
+	listing.status = Listing.Status.ARCHIVED
+	listing.save(update_fields=('status', 'updated_at'))
+	record_audit(
+		action='marketplace.listing.archive',
 		object_type='Listing',
 		object_id=listing.pk,
 		actor=actor,
@@ -310,7 +359,7 @@ def delete_photo(photo, *, actor, request=None):
 
 
 @transaction.atomic
-def create_inquiry(*, listing, name, email, phone, message, request=None):
+def create_inquiry(*, listing, name, email, phone, message, viewing_requested_for=None, request=None):
 	if not is_publicly_available(listing):
 		raise NotFound('Listing not found.')
 	inquiry = ListingInquiry.objects.create(
@@ -320,6 +369,20 @@ def create_inquiry(*, listing, name, email, phone, message, request=None):
 		phone=(phone or '').strip(),
 		message=message.strip(),
 	)
+	if viewing_requested_for is not None:
+		viewing = ViewingRequest.objects.create(
+			inquiry=inquiry,
+			requested_for=viewing_requested_for,
+		)
+		record_audit(
+			action='marketplace.viewing.create',
+			object_type='ViewingRequest',
+			object_id=viewing.pk,
+			actor=None,
+			organization=_organization(listing.unit),
+			metadata={'listing_id': str(listing.pk)},
+			request=request,
+		)
 	record_audit(
 		action='marketplace.inquiry.create',
 		object_type='ListingInquiry',
@@ -330,7 +393,7 @@ def create_inquiry(*, listing, name, email, phone, message, request=None):
 		request=request,
 	)
 	notify_user(
-		user=listing.created_by,
+		user=listing.agent_profile.user if listing.agent_profile_id else listing.created_by,
 		type='MARKETPLACE_INQUIRY',
 		title='New listing inquiry',
 		body=f'{inquiry.name} asked about {listing.title}.',

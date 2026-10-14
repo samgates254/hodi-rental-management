@@ -16,7 +16,7 @@ import {
 import TenantLinkGate from "@/components/ops/TenantLinkGate";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 
-type UserKind = "tenant" | "landlord";
+type UserKind = "tenant" | "landlord" | "agent";
 type AuthMode = "signin" | "signup";
 type OrganizationMembership = {
   organization_id: number | string;
@@ -29,15 +29,17 @@ type WorkspaceOption = {
   description: string;
 };
 
-const ACCOUNT_TYPE: Record<UserKind, "TENANT" | "OWNER"> = {
+const ACCOUNT_TYPE: Record<UserKind, "TENANT" | "OWNER" | "PROPERTY_AGENT"> = {
   tenant: "TENANT",
   landlord: "OWNER",
+  agent: "PROPERTY_AGENT",
 };
 
 function userKindFromAccountType(accountType?: string): UserKind | null {
   const type = (accountType || "").toUpperCase();
   if (type === "TENANT") return "tenant";
   if (type === "OWNER") return "landlord";
+  if (type === "PROPERTY_AGENT") return "agent";
   return null;
 }
 
@@ -53,6 +55,9 @@ function workspacesForAuth(
   const accountKind = userKindFromAccountType(auth.account_type);
   if (accountKind === "tenant") {
     addWorkspace("/clients", "Tenant workspace", "View your tenancy, rent, and maintenance.");
+  }
+  if (accountKind === "agent") {
+    addWorkspace("/agents", "Agent workspace", "Manage your profile, listings, enquiries, and viewings.");
   }
 
   for (const membership of memberships) {
@@ -77,7 +82,9 @@ function workspacesForAuth(
 }
 
 function dashboardFor(kind: UserKind) {
-  return kind === "tenant" ? "/clients" : "/landlords";
+  if (kind === "tenant") return "/clients";
+  if (kind === "agent") return "/agents";
+  return "/landlords";
 }
 
 function dashboardWithPlan(kind: UserKind) {
@@ -201,6 +208,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
     if (mode === "signup") {
       if (type === "tenant" || type === "client") setUserKind("tenant");
       if (type === "landlord" || type === "owner") setUserKind("landlord");
+      if (type === "agent" || type === "property-agent") setUserKind("agent");
     }
   }, [mode]);
 
@@ -408,14 +416,18 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
               ? "One sign-in for every workspace you can use."
               : userKind === "landlord"
                 ? "A calmer place to run the portfolio."
-                : "Your home, rent, and requests in one place."}
+                : userKind === "agent"
+                  ? "Build a trusted property business with Hodi."
+                  : "Your home, rent, and requests in one place."}
           </h1>
           <p>
             {!isSignup
               ? "Hodi opens the workspaces your organization has already granted. Nothing else is created from this screen."
               : userKind === "landlord"
                 ? "Create an owner account and an organization. Managers, accountants, caretakers, and technicians join by invitation."
-                : "Create a tenant account. You will link it to the organization that holds your tenancy."}
+                : userKind === "agent"
+                  ? "Create an independent agent profile. Property owners authorize the homes you may advertise."
+                  : "Create a tenant account. You will link it to the organization that holds your tenancy."}
           </p>
           <small>Illustrative photograph. Not a Hodi listing.</small>
         </div>
@@ -428,7 +440,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
         </div>
         <div className="hodi-auth-card">
             <p key={userKind} className="text-[10px] font-bold tracking-[0.16em] text-text-secondary auth-role-enter">
-              {!isSignup ? "HODI ACCOUNT" : userKind === "landlord" ? "LANDLORD PORTAL" : "CLIENT PORTAL"}
+              {!isSignup ? "HODI ACCOUNT" : userKind === "landlord" ? "LANDLORD PORTAL" : userKind === "agent" ? "PROPERTY AGENT" : "CLIENT PORTAL"}
             </p>
             <h2 className={`${isSignup ? "mt-2 text-2xl" : "mt-3 text-3xl"} font-[family-name:var(--hodi-editorial)] font-normal tracking-tight text-charcoal`}>
               {isSignup ? "Create your account" : "Welcome back"}
@@ -440,8 +452,8 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             </p>
 
             {isSignup && <>
-              <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-surface-raised p-1">
-              {(["landlord", "tenant"] as const).map(kind => (
+              <div className="mt-4 grid grid-cols-1 gap-2 rounded-lg bg-surface-raised p-1 sm:grid-cols-3">
+              {(["landlord", "tenant", "agent"] as const).map(kind => (
                 <button
                   key={kind}
                   type="button"
@@ -456,7 +468,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                       : "text-text-secondary hover:text-text"
                   }`}
                 >
-                  {kind === "landlord" ? "Property owner" : "Tenant"}
+                  {kind === "landlord" ? "Property owner" : kind === "agent" ? "Property agent" : "Tenant"}
                 </button>
               ))}
               </div>

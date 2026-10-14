@@ -42,6 +42,13 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
+    const viewingInput = String(form.get("viewing_requested_for") ?? "");
+    const viewingDate = viewingInput ? new Date(viewingInput) : null;
+    if (viewingDate && Number.isNaN(viewingDate.getTime())) {
+      setInquiryError("Choose a valid viewing date and time.");
+      return;
+    }
+    const viewingRequestedFor = viewingDate?.toISOString();
     setSending(true);
     setInquiryError("");
     setInquiryNotice("");
@@ -54,11 +61,12 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
           email: String(form.get("email") ?? ""),
           phone: String(form.get("phone") ?? ""),
           message: String(form.get("message") ?? ""),
+          ...(viewingRequestedFor ? { viewing_requested_for: viewingRequestedFor } : {}),
         },
         { skipAuth: true },
       );
       formElement.reset();
-      setInquiryNotice("Inquiry sent to the listing owner. This does not reserve the home or create a lease.");
+      setInquiryNotice("Inquiry sent to the listing contact. This does not reserve the home or create a lease.");
     } catch (reason) {
       setInquiryError(apiErrorMessage(reason, "The inquiry could not be sent."));
     } finally {
@@ -113,11 +121,12 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
               </div>
               <aside className="h-fit rounded-2xl border border-border bg-surface p-5 shadow-soft">
                 <h2 className="text-xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>Ask about this home</h2>
-                <p className="mt-2 text-sm leading-relaxed text-text-secondary">Your name, email, and message go to the organization that published the listing. Hodi does not book the unit from this form.</p>
+                <p className="mt-2 text-sm leading-relaxed text-text-secondary">Your contact details go to the agent or property organization managing the listing. A viewing request is not a booking.</p>
                 <form className="mt-4 space-y-3" onSubmit={event => void sendInquiry(event)}>
                   <label className="block text-sm text-text-secondary">Name<input className="auth-input mt-1" name="name" required maxLength={120} /></label>
                   <label className="block text-sm text-text-secondary">Email<input className="auth-input mt-1" name="email" type="email" required /></label>
                   <label className="block text-sm text-text-secondary">Phone<input className="auth-input mt-1" name="phone" maxLength={30} /></label>
+                  <label className="block text-sm text-text-secondary">Request a viewing (optional)<input className="auth-input mt-1" name="viewing_requested_for" type="datetime-local" /><span className="text-xs text-text-secondary">Choose a future date and time.</span></label>
                   <label className="block text-sm text-text-secondary">Message<textarea className="auth-input mt-1 min-h-28" name="message" required maxLength={2000} /></label>
                   {inquiryError && <p className="text-sm text-red-700" role="alert">{inquiryError}</p>}
                   {inquiryNotice && <p className="text-sm text-charcoal" role="status">{inquiryNotice}</p>}

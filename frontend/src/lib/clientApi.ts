@@ -26,6 +26,7 @@ export type AccountType =
   | "TENANT"
   | "OWNER"
   | "SERVICE_PROFESSIONAL"
+  | "PROPERTY_AGENT"
   | string;
 
 /**
@@ -42,6 +43,8 @@ export type AuthResponse = {
   account_type?: AccountType;
   organization_id?: number | null;
   professional_trade?: string;
+  agent_verification_status?: string | null;
+  agent_account_status?: string | null;
   memberships?: Array<{
     organization_id: number | string;
     organization_name: string;
@@ -62,7 +65,7 @@ export type SignupPayload = {
   username: string;
   password: string;
   password_confirm: string;
-  account_type: "OWNER" | "TENANT" | "SERVICE_PROFESSIONAL" | "UNSPECIFIED";
+  account_type: "OWNER" | "TENANT" | "PROPERTY_AGENT" | "SERVICE_PROFESSIONAL" | "UNSPECIFIED";
   organization_id?: number | null;
   organization_name?: string;
   phone_number?: string;
@@ -406,6 +409,7 @@ export async function linkTenantOrganization(organizationId: number): Promise<{
 export function dashboardPathForAccountType(accountType: string | null | undefined): string {
   const type = (accountType || "").toUpperCase();
   if (type === "TENANT") return "/clients";
+  if (type === "PROPERTY_AGENT") return "/agents";
   // OWNER and SERVICE_PROFESSIONAL use the landlord/ops area today.
   return "/landlords";
 }

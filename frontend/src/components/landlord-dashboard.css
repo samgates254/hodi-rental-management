@@ -1155,3 +1155,37 @@
     transition: none;
   }
 }
+
+.agent-authority-attestation {
+  display: flex !important;
+  grid-column: 1 / -1;
+  align-items: flex-start;
+  gap: 9px !important;
+  line-height: 1.5;
+}
+
+.agent-authority-attestation input {
+  flex: 0 0 auto;
+  min-height: auto !important;
+  margin-top: 2px;
+}
+
+.agent-auth-message {
+  margin: 0 0 12px;
+  border: 1px solid var(--hodi-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.agent-auth-message--error {
+  border-color: color-mix(in srgb, var(--hodi-error) 30%, var(--hodi-border));
+  background: var(--hodi-error-soft);
+  color: var(--hodi-error);
+}
+
+.agent-auth-message--success {
+  border-color: color-mix(in srgb, var(--hodi-success) 30%, var(--hodi-border));
+  background: var(--hodi-success-soft);
+  color: var(--hodi-success);
+}

@@ -2,8 +2,8 @@ from rest_framework import serializers
 
 from apps.properties.models import Unit
 
-from .models import (CommerceListing, CommerceOrder, CommercePhoto, SupplierProfile,
-	Listing, ListingInquiry, ListingPhoto)
+from .models import (AgentProfile, AgentUnitAuthorization, CommerceListing, CommerceOrder,
+	CommercePhoto, SupplierProfile, Listing, ListingInquiry, ListingPhoto, ViewingRequest)
 from .services import is_publicly_available
 
 
@@ -115,6 +115,7 @@ class ManagedListingSerializer(serializers.ModelSerializer):
 	unit_label = serializers.CharField(source='unit.name', read_only=True)
 	unit_status = serializers.CharField(source='unit.status', read_only=True)
 	organization = serializers.IntegerField(source='organization_id', read_only=True)
+	responsible_agent = serializers.IntegerField(source='agent_profile_id', read_only=True)
 	is_publicly_available = serializers.SerializerMethodField()
 
 	class Meta:
@@ -123,11 +124,11 @@ class ManagedListingSerializer(serializers.ModelSerializer):
 			'id', 'unit', 'organization', 'title', 'description', 'monthly_rent_minor', 'currency',
 			'bedrooms', 'bathrooms', 'floor', 'size_sqm', 'furnished', 'amenities',
 			'area', 'city', 'country', 'property_name', 'unit_label', 'unit_status',
-			'status', 'is_publicly_available', 'published_at', 'created_at', 'updated_at', 'photos',
+			'status', 'responsible_agent', 'is_publicly_available', 'published_at', 'created_at', 'updated_at', 'photos',
 		)
 		read_only_fields = (
 			'id', 'organization', 'property_name', 'unit_label', 'unit_status',
-			'status', 'is_publicly_available', 'published_at', 'created_at', 'updated_at', 'photos',
+			'status', 'responsible_agent', 'is_publicly_available', 'published_at', 'created_at', 'updated_at', 'photos',
 		)
 
 	def get_is_publicly_available(self, listing):
@@ -140,7 +141,7 @@ class ManagedListingSerializer(serializers.ModelSerializer):
 class ListingWriteSerializer(serializers.Serializer):
 	unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all())
 	title = serializers.CharField(max_length=200)
-	description = serializers.CharField(required=False, allow_blank=True)
+	description = serializers.CharField(required=False, allow_blank=True, max_length=10000)
 	monthly_rent_minor = serializers.IntegerField(min_value=1)
 	currency = serializers.CharField(required=False, default='KES', max_length=3)
 	bedrooms = serializers.IntegerField(required=False, min_value=0, max_value=30)
@@ -166,9 +167,84 @@ class InquiryWriteSerializer(serializers.Serializer):
 	email = serializers.EmailField()
 	phone = serializers.CharField(required=False, allow_blank=True, max_length=30)
 	message = serializers.CharField(max_length=2000)
+	viewing_requested_for = serializers.DateTimeField(required=False)
+
+	def validate_viewing_requested_for(self, value):
+		from django.utils import timezone
+
+		if value <= timezone.now():
+			raise serializers.ValidationError('Choose a future date and time for the viewing.')
+		return value
 
 
 class InquiryReadSerializer(serializers.ModelSerializer):
+	viewing_request = serializers.SerializerMethodField()
+
 	class Meta:
 		model = ListingInquiry
-		fields = ('id', 'name', 'email', 'phone', 'message', 'created_at')
+		fields = ('id', 'name', 'email', 'phone', 'message', 'status', 'viewing_request', 'created_at')
+
+	def get_viewing_request(self, inquiry):
+		try:
+			viewing = inquiry.viewing_request
+		except ViewingRequest.DoesNotExist:
+			return None
+		return ViewingRequestReadSerializer(viewing).data
+
+
+class ViewingRequestReadSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = ViewingRequest
+		fields = ('id', 'requested_for', 'status', 'created_at', 'updated_at')
+
+
+class AgentProfileSerializer(serializers.ModelSerializer):
+	description = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+	class Meta:
+		model = AgentProfile
+		fields = (
+			'id', 'display_name', 'public_email', 'public_phone', 'business_name',
+			'description', 'service_area', 'verification_status', 'account_status',
+			'created_at', 'updated_at',
+		)
+		read_only_fields = ('id', 'verification_status', 'account_status', 'created_at', 'updated_at')
+
+
+class AgentUnitAuthorizationCreateSerializer(serializers.Serializer):
+	organization = serializers.IntegerField(min_value=1)
+	unit = serializers.IntegerField(min_value=1)
+	agent_email = serializers.EmailField()
+	attest_authority = serializers.BooleanField()
+	authority_reference = serializers.CharField(required=False, allow_blank=True, max_length=120)
+
+	def validate_attest_authority(self, value):
+		if not value:
+			raise serializers.ValidationError('Confirm that you are authorized to grant advertising rights for this unit.')
+		return value
+
+
+class AgentUnitAuthorizationReadSerializer(serializers.ModelSerializer):
+	agent_name = serializers.CharField(source='agent.display_name', read_only=True)
+	agent_email = serializers.EmailField(source='agent.public_email', read_only=True)
+	unit_name = serializers.CharField(source='unit.name', read_only=True)
+	property_name = serializers.CharField(source='unit.building.property.name', read_only=True)
+	building_name = serializers.CharField(source='unit.building.name', read_only=True)
+	organization = serializers.IntegerField(source='unit.building.property.organization_id', read_only=True)
+
+	class Meta:
+		model = AgentUnitAuthorization
+		fields = (
+			'id', 'agent', 'agent_name', 'agent_email', 'unit', 'unit_name', 'building_name',
+			'property_name', 'organization', 'status', 'authority_reference', 'granted_at',
+			'revoked_at',
+		)
+		read_only_fields = fields
+
+
+class AgentInquiryStatusSerializer(serializers.Serializer):
+	status = serializers.ChoiceField(choices=ListingInquiry.Status.choices)
+
+
+class AgentViewingStatusSerializer(serializers.Serializer):
+	status = serializers.ChoiceField(choices=ViewingRequest.Status.choices)

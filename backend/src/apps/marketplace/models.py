@@ -9,10 +9,54 @@ from apps.properties.models import Unit
 from apps.tenants.models import Tenant
 
 
+class AgentProfile(models.Model):
+	class VerificationStatus(models.TextChoices):
+		UNVERIFIED = 'UNVERIFIED', 'Unverified'
+		PENDING = 'PENDING', 'Pending verification'
+		VERIFIED = 'VERIFIED', 'Verified'
+		REJECTED = 'REJECTED', 'Rejected'
+
+	class AccountStatus(models.TextChoices):
+		ACTIVE = 'ACTIVE', 'Active'
+		SUSPENDED = 'SUSPENDED', 'Suspended'
+
+	user = models.OneToOneField(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.CASCADE,
+		related_name='agent_profile',
+	)
+	display_name = models.CharField(max_length=160)
+	public_email = models.EmailField(blank=True)
+	public_phone = models.CharField(max_length=30, blank=True)
+	business_name = models.CharField(max_length=200, blank=True)
+	description = models.TextField(blank=True)
+	service_area = models.CharField(max_length=160, blank=True)
+	verification_status = models.CharField(
+		max_length=16,
+		choices=VerificationStatus.choices,
+		default=VerificationStatus.UNVERIFIED,
+	)
+	account_status = models.CharField(
+		max_length=16,
+		choices=AccountStatus.choices,
+		default=AccountStatus.ACTIVE,
+	)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ('display_name', 'pk')
+
+	def __str__(self):
+		return self.display_name
+
+
 class Listing(models.Model):
 	class Status(models.TextChoices):
 		DRAFT = 'DRAFT', 'Draft'
 		PUBLISHED = 'PUBLISHED', 'Published'
+		PAUSED = 'PAUSED', 'Paused'
+		ARCHIVED = 'ARCHIVED', 'Archived'
 
 	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 	unit = models.OneToOneField(
@@ -43,6 +87,13 @@ class Listing(models.Model):
 		settings.AUTH_USER_MODEL,
 		on_delete=models.PROTECT,
 		related_name='marketplace_listings',
+	)
+	agent_profile = models.ForeignKey(
+		AgentProfile,
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name='managed_listings',
 	)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
@@ -99,6 +150,11 @@ class ListingPhoto(models.Model):
 
 
 class ListingInquiry(models.Model):
+	class Status(models.TextChoices):
+		NEW = 'NEW', 'New'
+		CONTACTED = 'CONTACTED', 'Contacted'
+		CLOSED = 'CLOSED', 'Closed'
+
 	listing = models.ForeignKey(
 		Listing,
 		on_delete=models.CASCADE,
@@ -108,6 +164,7 @@ class ListingInquiry(models.Model):
 	email = models.EmailField()
 	phone = models.CharField(max_length=30, blank=True)
 	message = models.TextField()
+	status = models.CharField(max_length=16, choices=Status.choices, default=Status.NEW)
 	created_at = models.DateTimeField(auto_now_add=True)
 
 	class Meta:
@@ -118,6 +175,75 @@ class ListingInquiry(models.Model):
 
 	def __str__(self):
 		return f'{self.name} → {self.listing_id}'
+
+
+class ViewingRequest(models.Model):
+	class Status(models.TextChoices):
+		REQUESTED = 'REQUESTED', 'Requested'
+		CONFIRMED = 'CONFIRMED', 'Confirmed'
+		DECLINED = 'DECLINED', 'Declined'
+		CANCELLED = 'CANCELLED', 'Cancelled'
+		COMPLETED = 'COMPLETED', 'Completed'
+
+	inquiry = models.OneToOneField(
+		ListingInquiry,
+		on_delete=models.CASCADE,
+		related_name='viewing_request',
+	)
+	requested_for = models.DateTimeField()
+	status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ('requested_for', 'pk')
+
+	def __str__(self):
+		return f'Viewing for inquiry {self.inquiry_id} ({self.status})'
+
+
+class AgentUnitAuthorization(models.Model):
+	class Status(models.TextChoices):
+		ACTIVE = 'ACTIVE', 'Active'
+		REVOKED = 'REVOKED', 'Revoked'
+
+	agent = models.ForeignKey(
+		AgentProfile,
+		on_delete=models.PROTECT,
+		related_name='unit_authorizations',
+	)
+	unit = models.ForeignKey(
+		Unit,
+		on_delete=models.PROTECT,
+		related_name='agent_authorizations',
+	)
+	granted_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.PROTECT,
+		related_name='granted_agent_authorizations',
+	)
+	status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+	authority_attestation = models.TextField()
+	authority_reference = models.CharField(max_length=120, blank=True)
+	granted_at = models.DateTimeField(auto_now_add=True)
+	revoked_at = models.DateTimeField(null=True, blank=True)
+	revoked_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name='revoked_agent_authorizations',
+	)
+
+	class Meta:
+		ordering = ('-granted_at', 'pk')
+		constraints = [
+			models.UniqueConstraint(
+				fields=('unit',),
+				condition=Q(status='ACTIVE'),
+				name='one_active_agent_per_unit',
+			),
+		]
 
 
 class SupplierProfile(models.Model):

@@ -97,6 +97,11 @@ class SignupSerializer(serializers.Serializer):
 				raise serializers.ValidationError(
 					'Service professionals do not select an organization during signup.',
 				)
+		elif account_type == AccountProfile.AccountType.PROPERTY_AGENT:
+			if organization is not None or organization_name or professional_trade:
+				raise serializers.ValidationError(
+					'Property agents do not join an owner organization or select a repair trade during signup.',
+				)
 
 		if attrs['password'] != attrs['password_confirm']:
 			raise serializers.ValidationError({
@@ -140,6 +145,16 @@ class SignupSerializer(serializers.Serializer):
 			professional_trade=professional_trade,
 			phone_number=phone_number,
 		)
+		if account_type == AccountProfile.AccountType.PROPERTY_AGENT:
+			from apps.marketplace.models import AgentProfile
+
+			display_name = ' '.join(part for part in (user.first_name, user.last_name) if part).strip()
+			AgentProfile.objects.create(
+				user=user,
+				display_name=display_name or user.get_username(),
+				public_email=user.email,
+				public_phone=phone_number,
+			)
 		if account_type == AccountProfile.AccountType.OWNER:
 			organization = Organization.objects.create(name=organization_name)
 			OrganizationMembership.objects.create(

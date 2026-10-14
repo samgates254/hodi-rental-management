@@ -223,6 +223,7 @@ REST_FRAMEWORK = {
         'auth_password_reset_request': '3/hour',
         'auth_password_reset_confirm': '5/hour',
         'auth_organization_options': '60/minute',
+        'marketplace_inquiry': '10/hour',
     },
 }
 if DEBUG:
@@ -233,6 +234,7 @@ if DEBUG:
         'auth_password_reset_request': '1000/hour',
         'auth_password_reset_confirm': '1000/hour',
         'auth_organization_options': '1000/minute',
+        'marketplace_inquiry': '1000/hour',
     }
 
 CORS_ALLOWED_ORIGINS = [
