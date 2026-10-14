@@ -7,12 +7,8 @@ from django.contrib.auth import get_user_model
 from django.apps import apps as model_apps
 from django.core import mail
 from django.core.cache import cache
-<<<<<<< HEAD
-from django.db import IntegrityError, connection, transaction
-=======
 from django.core import signing
-from django.db import connection
->>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone

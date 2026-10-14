@@ -305,104 +305,82 @@ class PasswordResetConfirmView(APIView):
 
 
 class LoginView(APIView):
-	permission_classes = (permissions.AllowAny,)
-	authentication_classes = ()
-	throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
-	throttle_scope = 'auth_login'
+    permission_classes = (permissions.AllowAny,)
+    authentication_classes = ()
+    throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
+    throttle_scope = 'auth_login'
 
-	def post(self, request):
-		serializer = LoginSerializer(data=request.data, context={'request': request})
-		serializer.is_valid(raise_exception=True)
-		user = serializer.validated_data['user']
-<<<<<<< HEAD
-		return Response(_auth_response_data(user), status=status.HTTP_200_OK)
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        profile = getattr(user, 'account_profile', None)
+
+        if (
+            profile is not None
+            and profile.account_type == AccountProfile.AccountType.PROPERTY_AGENT
+            and profile.email_verified_at is None
+        ):
+            return Response(
+                {'detail': 'Verify your email address before signing in.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return Response(_auth_response_data(user), status=status.HTTP_200_OK)
 
 
 class GoogleLoginView(APIView):
-	permission_classes = (permissions.AllowAny,)
-	authentication_classes = ()
-	throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
-	throttle_scope = 'auth_login'
+    permission_classes = (permissions.AllowAny,)
+    authentication_classes = ()
+    throttle_classes = () if settings.DEBUG else (ScopedRateThrottle,)
+    throttle_scope = 'auth_login'
 
-	def post(self, request):
-		client_id = settings.GOOGLE_OAUTH_CLIENT_ID
-		if not client_id:
-			return Response(
-				{'detail': 'Google sign-in is not configured.'},
-				status=status.HTTP_503_SERVICE_UNAVAILABLE,
-			)
+    def post(self, request):
+        client_id = settings.GOOGLE_OAUTH_CLIENT_ID
+        if not client_id:
+            return Response(
+                {'detail': 'Google sign-in is not configured.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
-		credential = request.data.get('credential')
-		if not isinstance(credential, str) or not credential:
-			return Response(
-				{'credential': ['This field is required.']},
-				status=status.HTTP_400_BAD_REQUEST,
-			)
+        credential = request.data.get('credential')
+        if not isinstance(credential, str) or not credential:
+            return Response(
+                {'credential': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-		try:
-			claims = verify_oauth2_token(
-				credential,
-				GoogleRequest(),
-				audience=client_id,
-			)
-		except (GoogleAuthError, ValueError):
-			return Response(
-				{'detail': 'Unable to sign in with this Google account.'},
-				status=status.HTTP_400_BAD_REQUEST,
-			)
+        try:
+            claims = verify_oauth2_token(
+                credential,
+                GoogleRequest(),
+                audience=client_id,
+            )
+        except (GoogleAuthError, ValueError):
+            return Response(
+                {'detail': 'Unable to sign in with this Google account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-		email = claims.get('email')
-		if not claims.get('email_verified') or not isinstance(email, str) or not email.strip():
-			return Response(
-				{'detail': 'Unable to sign in with this Google account.'},
-				status=status.HTTP_400_BAD_REQUEST,
-			)
+        email = claims.get('email')
+        if not claims.get('email_verified') or not isinstance(email, str) or not email.strip():
+            return Response(
+                {'detail': 'Unable to sign in with this Google account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-		user = get_user_model().objects.filter(
-			email__iexact=email.strip(),
-=======
-		profile = getattr(user, 'account_profile', None)
-		if (
-			profile is not None
-			and profile.account_type == AccountProfile.AccountType.PROPERTY_AGENT
-			and profile.email_verified_at is None
-		):
-			return Response(
-				{'detail': 'Verify your email address before signing in.'},
-				status=status.HTTP_403_FORBIDDEN,
-			)
-		token, _created = Token.objects.get_or_create(user=user)
-		response_data = {
-			'token': token.key,
-			'is_staff': user.is_staff,
-			'first_name': user.first_name,
-			'last_name': user.last_name,
-			'email': user.email,
-		}
-		if profile is not None:
-			response_data.update({
-				'account_type': profile.account_type,
-				'organization_id': profile.organization_id,
-				'professional_trade': profile.professional_trade,
-				'phone_number': profile.phone_number,
-				'email_verified': profile.email_verified_at is not None,
-			})
-		agent_profile = getattr(user, 'agent_profile', None)
-		if agent_profile is not None:
-			response_data['agent_verification_status'] = agent_profile.verification_status
-			response_data['agent_account_status'] = agent_profile.account_status
-		memberships = OrganizationMembership.objects.filter(
-			user=user,
->>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
-			is_active=True,
-		).first()
-		if user is None:
-			return Response(
-				{'detail': 'Unable to sign in with this Google account.'},
-				status=status.HTTP_400_BAD_REQUEST,
-			)
+        user = get_user_model().objects.filter(
+            email__iexact=email.strip(),
+            is_active=True,
+        ).first()
 
-		return Response(_auth_response_data(user), status=status.HTTP_200_OK)
+        if user is None:
+            return Response(
+                {'detail': 'Unable to sign in with this Google account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(_auth_response_data(user), status=status.HTTP_200_OK)
 
 
 class MeView(APIView):

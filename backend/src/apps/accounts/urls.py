@@ -2,12 +2,9 @@ from django.urls import path
 
 from .views import (
 	LoginView,
-<<<<<<< HEAD
 	GoogleLoginView,
-=======
 	EmailVerificationConfirmView,
 	EmailVerificationRequestView,
->>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
 	LogoutView,
 	MeView,
 	OrganizationOptionsView,

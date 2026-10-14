@@ -233,15 +233,12 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
   const [tenantNeedsOrganizationLink, setTenantNeedsOrganizationLink] = useState(false);
   const [requestedPlan, setRequestedPlan] = useState("");
   const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOption[]>([]);
-<<<<<<< HEAD
   const googleButtonRef = useRef<HTMLDivElement>(null);
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
-=======
   const [verificationEmail, setVerificationEmail] = useState("");
   const [resendBusy, setResendBusy] = useState(false);
   const [resendSent, setResendSent] = useState(false);
   const [resendError, setResendError] = useState("");
->>>>>>> 9c0db3f (feat: improve HODI marketplace and release readiness)
 
   useEffect(() => {
     const type = new URLSearchParams(window.location.search).get("type");
