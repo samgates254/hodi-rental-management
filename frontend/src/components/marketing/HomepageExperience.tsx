@@ -1,12 +1,42 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { useTilt } from "@/hooks/useTilt";
-import { ArchitecturalHero3D } from "@/components/3d/ArchitecturalHero3D";
-import { ArchitecturalExplodedSequence } from "@/components/3d/ArchitecturalExplodedSequence";
+
+const ArchitecturalHero3D = dynamic(
+  () =>
+    import("@/components/3d/ArchitecturalHero3D").then(
+      (mod) => mod.ArchitecturalHero3D
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full min-h-[460px] flex flex-col items-center justify-center p-8 text-center bg-teal text-white rounded-2xl animate-pulse">
+        <span className="text-xs uppercase tracking-widest text-emerald-200/80 mb-2">
+          Initializing 3D Experience...
+        </span>
+        <p className="font-editorial text-lg text-white">
+          Connected Property Operations
+        </p>
+      </div>
+    ),
+  }
+);
+
+const ArchitecturalExplodedSequence = dynamic(
+  () =>
+    import("@/components/3d/ArchitecturalExplodedSequence").then(
+      (mod) => mod.ArchitecturalExplodedSequence
+    ),
+  {
+    ssr: false,
+    loading: () => null,
+  }
+);
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
