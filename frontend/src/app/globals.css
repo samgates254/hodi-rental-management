@@ -505,7 +505,21 @@
   .hodi-section-intro h2 { font-size: clamp(2rem, 3.35vw, 3rem); }
   .hodi-section-intro-copy p, .hodi-feature-copy > p, .hodi-properties-heading > p { margin: 0; color: #707a73; font-size: 1rem; line-height: 1.7; }
   .hodi-section-intro-copy small { display: block; margin-top: 1rem; color: #707a73; font-size: .75rem; line-height: 1.5; }
-  .hodi-dashboard-preview { overflow: hidden; border: 1px solid #e7e5de; border-radius: 1rem; background: #fff; box-shadow: 0 18px 44px rgb(32 41 35 / .09), 0 2px 6px rgb(32 41 35 / .04); }
+  .hodi-dashboard-preview {
+    overflow: hidden;
+    border: 1px solid rgba(22, 61, 50, 0.08);
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.75), 0 20px 48px -10px rgba(22, 61, 50, 0.09), 0 2px 6px rgba(22, 61, 50, 0.04);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+  }
+  :root[data-theme="dark"] .hodi-dashboard-preview {
+    background: rgba(17, 27, 46, 0.82);
+    border-color: rgba(132, 177, 159, 0.14);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 20px 48px -10px rgba(0, 0, 0, 0.35);
+  }
   .hodi-preview-bar { display: grid; grid-template-columns: 1fr auto 1fr; min-height: 2.75rem; align-items: center; gap: 1rem; padding-inline: 1.25rem; background: #eef1ec; color: #707a73; font-size: .65rem; letter-spacing: .045em; }
   .hodi-preview-bar > span:last-child { text-align: right; letter-spacing: 0; }
   .hodi-window-dots { display: inline-flex; gap: .3rem; }
@@ -545,7 +559,24 @@
   .hodi-feature-copy li::before { content: "✓"; margin-right: .65rem; color: var(--hodi-forest); }
   .hodi-text-link { display: inline-flex; align-items: center; gap: .65rem; margin-top: 1.5rem; color: var(--hodi-forest); font-size: .85rem; font-weight: 650; text-decoration: none; }
   .hodi-text-link:hover { text-decoration: underline; text-underline-offset: .25rem; }
-  .hodi-rent-preview, .hodi-utilities-preview, .hodi-tenant-preview { min-width: 0; overflow: hidden; border: 1px solid #e7e5de; border-radius: .65rem; background: #fff; box-shadow: 0 12px 32px rgb(32 41 35 / .055); }
+  .hodi-rent-preview, .hodi-utilities-preview, .hodi-tenant-preview {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid rgba(22, 61, 50, 0.08);
+    border-radius: .85rem;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.75), 0 16px 36px -8px rgba(22, 61, 50, 0.07);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+  }
+  :root[data-theme="dark"] .hodi-rent-preview,
+  :root[data-theme="dark"] .hodi-utilities-preview,
+  :root[data-theme="dark"] .hodi-tenant-preview {
+    background: rgba(17, 27, 46, 0.85);
+    border-color: rgba(132, 177, 159, 0.14);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 16px 36px -8px rgba(0, 0, 0, 0.35);
+  }
   .hodi-mini-window-head { display: flex; min-height: 3rem; align-items: center; justify-content: space-between; gap: .75rem; padding-inline: 1rem; border-bottom: 1px solid #e7e5de; color: var(--hodi-forest); font-size: .72rem; font-weight: 600; }
   .hodi-mini-window-head > span:last-child { color: #707a73; font-size: .58rem; font-weight: 500; letter-spacing: .04em; }
   .hodi-table-head, .hodi-table-empty { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: .65rem; padding: 1rem; }
@@ -1745,3 +1776,85 @@ header.hodi-site-header nav a:hover {
     padding: 1.25rem 1.15rem 2.5rem;
   }
 }
+
+/* ==========================================================================
+   Elevated Materiality: Frosted Glassmorphism & Hairline Insets
+   ========================================================================== */
+
+.hodi-glass-card {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(22, 61, 50, 0.08);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.65),
+    0 10px 30px -5px rgba(22, 61, 50, 0.04),
+    0 1px 3px rgba(22, 61, 50, 0.02);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+:root[data-theme="dark"] .hodi-glass-card {
+  background: rgba(17, 27, 46, 0.78);
+  border-color: rgba(132, 177, 159, 0.14);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.08),
+    0 10px 30px -5px rgba(0, 0, 0, 0.3);
+}
+
+.hodi-glass-card:hover {
+  border-color: rgba(22, 61, 50, 0.16);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.85),
+    0 18px 44px -6px rgba(22, 61, 50, 0.08),
+    0 2px 6px rgba(22, 61, 50, 0.03);
+}
+
+:root[data-theme="dark"] .hodi-glass-card:hover {
+  border-color: rgba(132, 177, 159, 0.25);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.12),
+    0 18px 44px -6px rgba(0, 0, 0, 0.45);
+}
+
+/* Mesh drift keyframes for ambient organic lighting */
+@keyframes ambientDrift1 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(8%, 10%, 0) scale(1.08); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes ambientDrift2 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-10%, -8%, 0) scale(1.06); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes ambientDrift3 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6%, -12%, 0) scale(1.1); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.animate-ambient-drift-1 {
+  animation: ambientDrift1 28s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-ambient-drift-2 {
+  animation: ambientDrift2 34s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-ambient-drift-3 {
+  animation: ambientDrift3 24s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ambient-drift-1,
+  .animate-ambient-drift-2,
+  .animate-ambient-drift-3 {
+    animation: none;
+  }
+}
+
