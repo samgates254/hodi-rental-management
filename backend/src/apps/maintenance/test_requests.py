@@ -65,6 +65,7 @@ class MaintenanceRequestApiTests(APITestCase):
             skills=['PLUMBER'],
             rating_milli=4000,
             acceptance_milli=800,
+            verified=True,
         )
         self.tenant = Tenant.objects.create(
             organization=self.organization,
@@ -1362,7 +1363,12 @@ class MaintenanceRequestApiTests(APITestCase):
         OrganizationMembership.objects.create(
             organization=self.organization, user=replacement, role=OrganizationMembership.Role.TECHNICIAN,
         )
-        TechnicianProfile.objects.create(user=replacement, trade='PLUMBER', skills=['PLUMBER'])
+        TechnicianProfile.objects.create(
+            user=replacement,
+            trade='PLUMBER',
+            skills=['PLUMBER'],
+            verified=True,
+        )
         request_id = self._report_and_assign()
         self.client.force_authenticate(self.technician)
         missing_reason = self.client.post(f'/api/v1/maintenance/requests/{request_id}/decline/', {}, format='json')
