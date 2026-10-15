@@ -32,6 +32,7 @@ class TenantAccess(BasePermission):
 class TenantViewSet(viewsets.ModelViewSet):
     serializer_class = TenantSerializer
     permission_classes = (IsAuthenticated, TenantAccess)
+    http_method_names = ('get', 'post', 'put', 'patch', 'head', 'options')
 
     def get_queryset(self):
         user = self.request.user

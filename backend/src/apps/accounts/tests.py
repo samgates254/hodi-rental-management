@@ -13,7 +13,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 from rest_framework.test import APIClient
 from rest_framework.throttling import ScopedRateThrottle
 
@@ -232,13 +232,13 @@ class AuthenticationApiTests(TestCase):
         )
 
     def test_logout_revokes_current_token(self):
-        token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+        _instance, token = AuthToken.objects.create(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
 
         response = self.client.post('/api/v1/accounts/logout/')
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        self.assertFalse(AuthToken.objects.filter(user=self.user).exists())
 
     @override_settings(
         EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
@@ -272,7 +272,8 @@ class AuthenticationApiTests(TestCase):
             user.organization_memberships.get().role,
             'OWNER',
         )
-        self.assertEqual(response.data['token'], Token.objects.get(user=user).key)
+        self.assertTrue(bool(response.data['token']))
+        self.assertTrue(AuthToken.objects.filter(user=user).exists())
         self.assertEqual(response.data['account_type'], 'OWNER')
         self.assertEqual(response.data['organization_id'], user.account_profile.organization_id)
         self.assertEqual(mail.outbox, [])
@@ -662,7 +663,7 @@ class AuthenticationApiTests(TestCase):
         self.user.email = 'manager@example.com'
         self.user.is_active = True
         self.user.save(update_fields=('email', 'is_active'))
-        old_token = Token.objects.create(user=self.user)
+        old_instance, old_token = AuthToken.objects.create(user=self.user)
         self.client.post(
             reverse('accounts:password-reset-request'),
             {'email': self.user.email},
@@ -692,8 +693,8 @@ class AuthenticationApiTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(self.user.check_password('A-new-strong-password-456!'))
-        self.assertFalse(Token.objects.filter(pk=old_token.pk).exists())
-        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        self.assertFalse(AuthToken.objects.filter(pk=old_instance.pk).exists())
+        self.assertFalse(AuthToken.objects.filter(user=self.user).exists())
         self.assertEqual(
             self.client.post(
                 reverse('accounts:login'),
@@ -849,9 +850,9 @@ class AgentEmailVerificationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data['email_verification_required'])
         self.assertIsNone(response.data['token'])
-        self.assertFalse(Token.objects.filter(user=user).exists())
+        self.assertFalse(AuthToken.objects.filter(user=user).exists())
         self.assertEqual(login.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertFalse(Token.objects.filter(user=user).exists())
+        self.assertFalse(AuthToken.objects.filter(user=user).exists())
 
     def test_valid_token_is_single_use_and_enables_agent_login(self):
         self.signup_agent()

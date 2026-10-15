@@ -15,6 +15,7 @@ from apps.subscriptions.services import ensure_unit_capacity
 
 
 class OrganizationScopedViewSet(viewsets.ModelViewSet):
+	http_method_names = ('get', 'post', 'put', 'patch', 'head', 'options')
 	permission_classes = (OrganizationRolePermission,)
 	organization_resource = 'properties'
 

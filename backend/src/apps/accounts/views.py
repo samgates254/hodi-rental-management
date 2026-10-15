@@ -11,11 +11,11 @@ from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.id_token import verify_oauth2_token
 from rest_framework import permissions, status
-from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from knox.models import AuthToken
 
 from apps.organizations.models import Organization
 from apps.organizations.models import OrganizationMembership
@@ -43,8 +43,9 @@ logger = logging.getLogger(__name__)
 
 def _auth_response_data(user):
 	profile = getattr(user, 'account_profile', None)
+	_instance, token = AuthToken.objects.create(user=user)
 	response_data = {
-		'token': Token.objects.get_or_create(user=user)[0].key,
+		'token': token,
 		'is_staff': user.is_staff,
 		'first_name': user.first_name,
 		'last_name': user.last_name,
@@ -98,14 +99,14 @@ class SignupView(APIView):
 				# Keep the response generic and never log token or email content.
 				logger.error('Unable to send agent email-verification message user_id=%s', user.pk)
 		else:
-			token, _created = Token.objects.get_or_create(user=user)
+			_instance, token = AuthToken.objects.create(user=user)
 		return Response(
 			{
 				'detail': (
 					'Account created. Check your email for a verification link.'
 					if verification_required else 'Account created successfully.'
 				),
-				'token': token.key if token else None,
+				'token': token if token else None,
 				'email_verification_required': verification_required,
 				'account_type': profile.account_type,
 				'organization_id': profile.organization_id,
@@ -182,13 +183,13 @@ class EmailVerificationConfirmView(APIView):
 				{'detail': 'This verification link is invalid, expired, or already used.'},
 				status=status.HTTP_400_BAD_REQUEST,
 			)
-		token, _created = Token.objects.get_or_create(user=user)
+		_instance, token = AuthToken.objects.create(user=user)
 		profile = user.account_profile
 		agent_profile = getattr(user, 'agent_profile', None)
 		return Response(
 			{
 				'detail': 'Email verified successfully.',
-				'token': token.key,
+				'token': token,
 				'account_type': profile.account_type,
 				'first_name': user.first_name,
 				'last_name': user.last_name,
@@ -428,5 +429,8 @@ class LogoutView(APIView):
 	permission_classes = (permissions.IsAuthenticated,)
 
 	def post(self, request):
-		Token.objects.filter(user=request.user).delete()
+		if hasattr(request, '_auth') and request._auth is not None:
+			# With Knox, request._auth is the AuthToken instance
+			if hasattr(request._auth, 'delete'):
+				request._auth.delete()
 		return Response(status=status.HTTP_204_NO_CONTENT)

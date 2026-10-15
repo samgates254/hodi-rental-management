@@ -24,11 +24,13 @@ from apps.leases.models import RentSchedule
 from apps.organizations.models import Organization
 from application.services.audit import record_audit
 from application.services.notifications import notify_user
-from engines.allocation.facade import AllocationCharge, allocate
-from engines.proration.facade import prorate_move_in
-from rental_os.algorithms.allocation import AllocationError
-from rental_os.algorithms.money import MoneyError
-from rental_os.algorithms.proration import ProrationError
+from engines.allocation.facade import (
+    AllocationCharge,
+    AllocationError,
+    MoneyError,
+    allocate,
+)
+from engines.proration.facade import ProrationError, prorate_move_in
 
 
 def _utc_stamp(moment):
@@ -714,8 +716,11 @@ def reverse_payment(payment, *, reason, actor, request=None):
 
 
 def assess_tenant_delinquency(*, tenant, as_of, grace_days):
-    from engines.delinquency.facade import DelinquencyObligation, assess
-    from rental_os.algorithms.delinquency import DelinquencyError
+    from engines.delinquency.facade import (
+        DelinquencyError,
+        DelinquencyObligation,
+        assess,
+    )
 
     if type(as_of) is not date:
         raise ValidationError({'as_of': 'as_of must be a civil date.'})

@@ -76,15 +76,49 @@ jobs:
             exit 1
           fi
 
-      - name: Run billing, maintenance and lease regressions
+      - name: Run backend test suite
         run: >-
           python manage.py test
-          apps.billing.test_mpesa_callback
-          apps.billing.test_mpesa_reconciliation
-          apps.billing.test_mpesa_client
-          apps.billing.test_ledger
-          apps.maintenance.test_requests
-          apps.maintenance.tests
-          apps.leases.tests
-          apps.leases.test_lifecycle
-          apps.leases.test_overlap_concurrency
+          apps.accounts
+          apps.billing
+          apps.leases
+          apps.maintenance
+          apps.marketplace
+          apps.organizations
+          apps.properties
+          apps.subscriptions
+          apps.tenants
+          apps.utilities
+          tests.security
+          tests.api
+          tests.integration
+          tests.unit
+
+  frontend-verification:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run type check
+        run: npx tsc --noEmit
+
+      - name: Build Next.js application
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+

@@ -8,7 +8,8 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files import File
-from rest_framework.authtoken.models import Token
+from django.utils import timezone
+from knox.models import AuthToken
 from common.rental_dates import rental_business_date
 
 if settings.DJANGO_ENV == "production":
@@ -175,7 +176,7 @@ Path(manifest).write_text(json.dumps({
     "users": {"owner": owner.username, "other_owner": other_owner.username, "tenant": tenant_user.username,
               "other_tenant": other_tenant_user.username, "accountant": accountant.username, "impostor": impostor.username,
               "caretaker": caretaker.username},
-    "tokens": {key: Token.objects.get_or_create(user=user)[0].key for key, user in {
+    "tokens": {key: AuthToken.objects.create(user=user)[1] for key, user in {
         "owner": owner, "other_owner": other_owner, "tenant": tenant_user,
         "other_tenant": other_tenant_user, "accountant": accountant, "impostor": impostor,
         "caretaker": caretaker,
