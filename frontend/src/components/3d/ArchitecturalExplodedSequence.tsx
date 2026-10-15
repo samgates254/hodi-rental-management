@@ -50,28 +50,25 @@ export function ArchitecturalExplodedSequence() {
     const canvas = canvasRef.current;
     if (!section || !canvas) return;
 
-    // Check WebGL
+    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+    const scene = new THREE.Scene();
+    let renderer: THREE.WebGLRenderer;
+
     try {
-      const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-      if (!gl) return;
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: true,
+        powerPreference: "high-performance",
+      });
     } catch {
       return;
     }
 
-    const isMobile = window.innerWidth < 768;
-    const scene = new THREE.Scene();
-
-    const renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      alpha: true,
-      powerPreference: "high-performance",
-    });
-
     const maxPr = isMobile ? 1.5 : Math.min(window.devicePixelRatio || 1, 2);
     renderer.setPixelRatio(maxPr);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
 

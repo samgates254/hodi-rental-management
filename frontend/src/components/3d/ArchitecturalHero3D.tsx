@@ -75,35 +75,32 @@ export function ArchitecturalHero3D() {
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
 
-    // Check WebGL availability
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+    // Scene & Renderer
+    const scene = new THREE.Scene();
+    let renderer: THREE.WebGLRenderer;
+
     try {
-      const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-      if (!gl) {
-        setIsWebGLSupported(false);
-        return;
-      }
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: true,
+        powerPreference: "high-performance",
+      });
     } catch {
       setIsWebGLSupported(false);
       return;
     }
 
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const isMobile = window.innerWidth < 768;
-
-    // Scene & Renderer
-    const scene = new THREE.Scene();
-
-    const renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      alpha: true,
-      powerPreference: "high-performance",
-    });
-
     const maxPr = isMobile ? 1.5 : Math.min(window.devicePixelRatio || 1, 2);
     renderer.setPixelRatio(maxPr);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
 
@@ -488,13 +485,13 @@ export function ArchitecturalHero3D() {
 
     // --- ANIMATION RAF LOOP ---
     let animationId: number;
-    const clock = new THREE.Clock();
+    const startTime = performance.now();
 
     const render = () => {
       animationId = requestAnimationFrame(render);
       if (!isVisible) return;
 
-      const elapsed = clock.getElapsedTime();
+      const elapsed = (performance.now() - startTime) * 0.001;
 
       // Gentle ambient idle sway if not dragging and motion is permitted
       if (!isDragging && !prefersReducedMotion) {
