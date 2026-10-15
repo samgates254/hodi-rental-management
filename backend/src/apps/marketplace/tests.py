@@ -446,6 +446,66 @@ class MarketplaceApiTests(APITestCase):
 		self.assertEqual(CommerceOrder.objects.get(pk=order.pk).status, 'ACCEPTED')
 		self.assertEqual(AuditLog.objects.filter(object_type='CommerceOrder', object_id=str(order.pk)).count(), 2)
 
+	def test_deactivated_listing_organization_blocks_new_orders_and_hides_old_orders(self):
+		supplier = SupplierProfile.objects.create(
+			organization=self.other_organization,
+			created_by=self.other,
+			business_name='Closed Laundry',
+			categories=['laundry'],
+		)
+		listing = CommerceListing.objects.create(
+			organization=self.other_organization,
+			supplier=supplier,
+			created_by=self.other,
+			kind='SERVICE',
+			category='laundry',
+			title='Closed laundry service',
+			description='No longer accepting requests',
+			is_published=True,
+			availability='AVAILABLE',
+			price_minor=50000,
+		)
+		tenant = Tenant.objects.get(user=self.tenant_user)
+		Lease.objects.create(
+			tenant=tenant,
+			unit=self.unit,
+			reference='L-COMMERCE-DEACTIVATED',
+			start_date=date(2026, 1, 1),
+			monthly_rent_minor=4500000,
+			status=Lease.Status.ACTIVE,
+		)
+		self.client.force_authenticate(self.tenant_user)
+		created = self.client.post(
+			reverse('marketplace:commerce-order-list'),
+			{'listing': listing.pk, 'quantity': '1'},
+			format='json',
+		)
+		self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+
+		self.other_organization.is_active = False
+		self.other_organization.save(update_fields=('is_active', 'updated_at'))
+		old_orders = self.client.get(reverse('marketplace:commerce-order-list'))
+		new_order = self.client.post(
+			reverse('marketplace:commerce-order-list'),
+			{'listing': listing.pk, 'quantity': '1'},
+			format='json',
+		)
+
+		self.assertEqual(old_orders.status_code, status.HTTP_200_OK)
+		self.assertEqual(old_orders.data, [])
+		self.assertEqual(new_order.status_code, status.HTTP_400_BAD_REQUEST)
+
+		self.other_organization.is_active = True
+		self.other_organization.save(update_fields=('is_active', 'updated_at'))
+		self.organization.is_active = False
+		self.organization.save(update_fields=('is_active', 'updated_at'))
+		inactive_tenant_org_order = self.client.post(
+			reverse('marketplace:commerce-order-list'),
+			{'listing': listing.pk, 'quantity': '1'},
+			format='json',
+		)
+		self.assertEqual(inactive_tenant_org_order.status_code, status.HTTP_403_FORBIDDEN)
+
 	def test_lease_start_today_in_nairobi_authorizes_marketplace_request_before_utc_midnight(self):
 		supplier = SupplierProfile.objects.create(
 			organization=self.other_organization,

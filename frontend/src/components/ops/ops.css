@@ -107,8 +107,8 @@
 
 .ops-table th,
 .ops-table td {
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--hodi-border);
+  padding: var(--hodi-table-cell-y) var(--hodi-table-cell-x);
+  border-bottom: var(--hodi-border-width) solid var(--hodi-border);
   text-align: left;
   vertical-align: top;
 }
@@ -121,7 +121,7 @@
 }
 
 .ops-table tbody tr {
-  transition: background-color 140ms ease;
+  transition: background-color var(--hodi-transition-fast) ease;
 }
 
 .ops-table tbody tr:hover {

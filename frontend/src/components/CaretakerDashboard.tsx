@@ -91,6 +91,17 @@ function humanize(value: string | null | undefined) {
   return value.toLowerCase().replace(/[_-]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
 }
 
+function issueStatus(issue: MaintenanceIssue) {
+  return issue.operational_status ?? issue.status;
+}
+
+function issueFilterStatus(issue: MaintenanceIssue) {
+  const status = issueStatus(issue);
+  if (["CLOSED", "CANCELLED"].includes(status)) return "RESOLVED";
+  if (status === "COMPLETED") return "IN_PROGRESS";
+  return status;
+}
+
 function requestError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
@@ -268,7 +279,7 @@ export default function CaretakerDashboard() {
   }
 
   const activeIssues = useMemo(
-    () => issues.filter(issue => issue.status !== "RESOLVED"),
+    () => issues.filter(issue => !["RESOLVED", "CLOSED", "CANCELLED"].includes(issueStatus(issue))),
     [issues],
   );
   const overduePayments = payments.filter(payment => payment.status === "OVERDUE");
@@ -277,7 +288,7 @@ export default function CaretakerDashboard() {
   const pendingTotal = pendingPayments.reduce((total, payment) => total + payment.amount_minor, 0);
   const issueQuery = issueSearch.trim().toLocaleLowerCase();
   const visibleIssues = issues.filter(issue => {
-    const matchesStatus = issueFilter === "ALL" || issue.status === issueFilter;
+    const matchesStatus = issueFilter === "ALL" || issueFilterStatus(issue) === issueFilter;
     const searchableText = [
       issue.title,
       issue.tenant_name,
@@ -366,7 +377,7 @@ export default function CaretakerDashboard() {
 
         <section className="caretaker-summary" aria-label="Workspace summary">
           <article><span>Open issues</span><strong>{activeIssues.length}</strong><small>Need follow-up</small></article>
-          <article><span>In progress</span><strong>{issues.filter(issue => issue.status === "IN_PROGRESS").length}</strong><small>Being handled</small></article>
+          <article><span>In progress</span><strong>{issues.filter(issue => issueStatus(issue) === "IN_PROGRESS").length}</strong><small>Being handled</small></article>
           <article className="is-warning"><span>Rent overdue</span><strong>{overduePayments.length}</strong><small>{formatMoney(overdueTotal)} outstanding</small></article>
           <article><span>Awaiting payment</span><strong>{pendingPayments.length}</strong><small>{formatMoney(pendingTotal)} pending</small></article>
         </section>
@@ -411,9 +422,11 @@ export default function CaretakerDashboard() {
                       <h3>{issue.title}</h3>
                       <p>{issue.tenant_name ?? "Resident"} · {[issue.property_name, issue.unit_name].filter(Boolean).join(" · ") || "Property not listed"}</p>
                     </div>
-                    <span className={`caretaker-status status-${(issue.operational_status ?? issue.status).toLowerCase()}`}>
-                      {humanize(issue.operational_status ?? issue.status)}
-                    </span>
+                    {!issue.operational_request_id && (
+                      <span className={`caretaker-status status-${issueStatus(issue).toLowerCase()}`}>
+                        {humanize(issueStatus(issue))}
+                      </span>
+                    )}
                   </div>
                   <div className="caretaker-issue-meta">
                     <span>{humanize(issue.category ?? "General")}</span>
@@ -427,7 +440,7 @@ export default function CaretakerDashboard() {
                       {issue.updates.map(update => (
                         <li key={update.id}>
                           <span><strong>{update.author_name ?? "Team update"}</strong> · {formatDate(update.created_at)}</span>
-                          {update.status && <b>{humanize(update.status)}</b>}
+                          {update.status && !issue.operational_request_id && <b>{humanize(update.status)}</b>}
                           {update.note && <p>{update.note}</p>}
                         </li>
                       ))}

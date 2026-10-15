@@ -9,7 +9,7 @@ from django.core import mail
 from django.core.cache import cache
 from django.core import signing
 from django.db import IntegrityError, connection, transaction
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -103,6 +103,33 @@ class AuthenticationApiTests(TestCase):
         verify_token.assert_called_once()
         self.assertEqual(verify_token.call_args.args[0], 'verified-google-token')
         self.assertEqual(verify_token.call_args.kwargs['audience'], 'google-client-id')
+
+    @override_settings(GOOGLE_OAUTH_CLIENT_ID='google-client-id')
+    @patch('apps.accounts.views.verify_oauth2_token')
+    def test_google_login_does_not_bypass_unverified_agent_email(self, verify_token):
+        agent = get_user_model().objects.create_user(
+            username='google-agent',
+            email='google-agent@example.com',
+            password='password',
+        )
+        AccountProfile.objects.create(
+            user=agent,
+            account_type=AccountProfile.AccountType.PROPERTY_AGENT,
+        )
+        verify_token.return_value = {
+            'email': 'google-agent@example.com',
+            'email_verified': True,
+        }
+
+        response = self.client.post(
+            reverse('accounts:google-login'),
+            {'credential': 'verified-google-token'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data, {'detail': 'Verify your email address before signing in.'})
+        self.assertFalse(AuthToken.objects.filter(user=agent).exists())
 
     @override_settings(GOOGLE_OAUTH_CLIENT_ID='google-client-id')
     @patch('apps.accounts.views.verify_oauth2_token')
@@ -500,44 +527,6 @@ class AuthenticationApiTests(TestCase):
         self.assertFalse(get_user_model().objects.filter(username='race-loser').exists())
         self.assertFalse(Organization.objects.filter(name='Racing Estate').exists())
 
-    def test_email_uniqueness_migration_detects_conflicts_without_exposing_addresses(self):
-        from importlib import import_module
-
-        migration = import_module(
-            'apps.accounts.migrations.0003_user_email_ci_nonempty_unique',
-        )
-        user_model = get_user_model()
-        index_name = connection.ops.quote_name(migration.INDEX_NAME)
-        with connection.cursor() as cursor:
-            cursor.execute(f'DROP INDEX {index_name}')
-        try:
-            user_model.objects.create_user(
-                username='email-conflict-one',
-                email='Conflict@Example.com',
-                password='password-one',
-            )
-            user_model.objects.create_user(
-                username='email-conflict-two',
-                email='conflict@example.COM',
-                password='password-two',
-            )
-            with self.assertRaises(RuntimeError) as raised:
-                migration.check_existing_emails(model_apps, schema_editor=None)
-        finally:
-            user_model.objects.filter(
-                username__in=('email-conflict-one', 'email-conflict-two'),
-            ).delete()
-            table = connection.ops.quote_name(user_model._meta.db_table)
-            email_column = connection.ops.quote_name(user_model._meta.get_field('email').column)
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    f'CREATE UNIQUE INDEX {index_name} ON {table} (LOWER({email_column})) '
-                    f"WHERE {email_column} <> ''"
-                )
-
-        self.assertIn('1 groups', str(raised.exception))
-        self.assertNotIn('@', str(raised.exception))
-
     def test_signup_rejects_password_mismatch(self):
         response = self.client.post(
             reverse('accounts:signup'),
@@ -804,6 +793,48 @@ class AuthenticationApiTests(TestCase):
 
         self.assertEqual(responses[0].status_code, status.HTTP_202_ACCEPTED)
         self.assertEqual(responses[1].status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+class EmailUniquenessMigrationTests(TransactionTestCase):
+    """Exercise schema DDL outside TestCase's wrapping transaction."""
+
+    def test_email_uniqueness_migration_detects_conflicts_without_exposing_addresses(self):
+        from importlib import import_module
+
+        migration = import_module(
+            'apps.accounts.migrations.0003_user_email_ci_nonempty_unique',
+        )
+        user_model = get_user_model()
+        index_name = connection.ops.quote_name(migration.INDEX_NAME)
+        with connection.cursor() as cursor:
+            cursor.execute(f'DROP INDEX {index_name}')
+        try:
+            user_model.objects.create_user(
+                username='email-conflict-one',
+                email='Conflict@Example.com',
+                password='password-one',
+            )
+            user_model.objects.create_user(
+                username='email-conflict-two',
+                email='conflict@example.COM',
+                password='password-two',
+            )
+            with self.assertRaises(RuntimeError) as raised:
+                migration.check_existing_emails(model_apps, schema_editor=None)
+        finally:
+            user_model.objects.filter(
+                username__in=('email-conflict-one', 'email-conflict-two'),
+            ).delete()
+            table = connection.ops.quote_name(user_model._meta.db_table)
+            email_column = connection.ops.quote_name(user_model._meta.get_field('email').column)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f'CREATE UNIQUE INDEX {index_name} ON {table} (LOWER({email_column})) '
+                    f"WHERE {email_column} <> ''"
+                )
+
+        self.assertIn('1 groups', str(raised.exception))
+        self.assertNotIn('@', str(raised.exception))
 
 
 @override_settings(

@@ -9,6 +9,7 @@ from rest_framework.exceptions import APIException, ValidationError
 from apps.billing.models import (
     CHARGE_TYPES,
     Charge,
+    ChargeJournalEntry,
     DEPOSIT_CHARGE_TYPES,
     DocumentStatus,
     Invoice,
@@ -39,6 +40,63 @@ def _utc_stamp(moment):
     moment = moment.astimezone(datetime_timezone.utc)
     return moment.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
+
+
+def _charge_journal_accounts(charge_type):
+    """Return receivable and income/liability accounts for a supported charge."""
+    normalized = (charge_type or '').strip().upper()
+
+    if normalized in DEPOSIT_CHARGE_TYPES:
+        return ('1100', '2100')
+    if normalized in ('RENT', 'BASE_RENT'):
+        return ('1100', '4010')
+    if normalized in CHARGE_TYPES:
+        return ('1100', '4020')
+
+    raise ValidationError({
+        'charge_type': f'Unsupported charge type for accounting: {normalized or "(blank)"}.',
+    })
+
+
+def _create_charge_journal(charge):
+    """Create the original balanced journal for one posted charge."""
+    debit_account, credit_account = _charge_journal_accounts(charge.charge_type)
+
+    existing = ChargeJournalEntry.objects.filter(
+        charge=charge,
+        reverses__isnull=True,
+    )
+    if existing.exists():
+        # Idempotency is safe only if the complete original journal is correct.
+        lines = list(existing.order_by('account', 'direction'))
+        expected = {
+            (debit_account, 'DEBIT', charge.amount_cents),
+            (credit_account, 'CREDIT', charge.amount_cents),
+        }
+        actual = {
+            (line.account, line.direction, line.amount_cents)
+            for line in lines
+        }
+        if len(lines) != 2 or actual != expected:
+            raise ValidationError({
+                'journal': f'Existing journal for charge {charge.pk} is inconsistent.',
+            })
+        return lines
+
+    return [
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=debit_account,
+            direction=ChargeJournalEntry.Direction.DEBIT,
+            amount_cents=charge.amount_cents,
+        ),
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=credit_account,
+            direction=ChargeJournalEntry.Direction.CREDIT,
+            amount_cents=charge.amount_cents,
+        ),
+    ]
 
 def recompute_invoice_totals(invoice):
     charges = list(invoice.charges.all())
@@ -200,12 +258,17 @@ def post_invoice(invoice, *, actor, request=None):
     charges = list(invoice.charges.select_for_update().all())
     if not charges:
         raise ValidationError({'charges': 'Add at least one charge before posting.'})
+    # Validate every charge before changing invoice or charge state.
     for charge in charges:
         if charge.lifecycle != DocumentStatus.DRAFT:
             raise ValidationError({'charges': 'Every charge must still be a draft.'})
+        _charge_journal_accounts(charge.charge_type)
+
+    for charge in charges:
         charge.lifecycle = DocumentStatus.POSTED
         charge.balance_cents = charge.amount_cents
         charge.save(update_fields=('lifecycle', 'balance_cents', 'updated_at'))
+        _create_charge_journal(charge)
     invoice.status = DocumentStatus.POSTED
     invoice.save(update_fields=('status', 'updated_at'))
     recompute_invoice_totals(invoice)
@@ -231,19 +294,116 @@ def post_invoice(invoice, *, actor, request=None):
 
 @transaction.atomic
 def void_invoice(invoice, *, actor, request=None):
-    invoice = Invoice.objects.select_for_update().select_related('organization').get(pk=invoice.pk)
+    invoice = (
+        Invoice.objects.select_for_update()
+        .select_related('organization')
+        .get(pk=invoice.pk)
+    )
     if invoice.status != DocumentStatus.POSTED:
         raise ValidationError({'status': 'Only a posted invoice can be voided.'})
     if PaymentAllocation.objects.filter(charge__invoice=invoice).exists():
-        raise ValidationError({'status': 'Invoices with payment allocations cannot be voided.'})
-    invoice.charges.select_for_update().update(
-        lifecycle=DocumentStatus.VOIDED,
-        balance_cents=0,
-        updated_at=timezone.now(),
-    )
+        raise ValidationError({
+            'status': 'Invoices with payment allocations cannot be voided.',
+        })
+
+    charges = list(invoice.charges.select_for_update().order_by('pk'))
+    reversal_plan = []
+
+    # Validate every original journal and every existing reversal before
+    # creating reversal entries or changing invoice/charge state.
+    for charge in charges:
+        debit_account, credit_account = _charge_journal_accounts(
+            charge.charge_type
+        )
+
+        originals = list(
+            ChargeJournalEntry.objects.select_for_update()
+            .filter(charge=charge, reverses__isnull=True)
+            .order_by('pk')
+        )
+
+        expected_originals = {
+            (
+                debit_account,
+                ChargeJournalEntry.Direction.DEBIT,
+                charge.amount_cents,
+            ),
+            (
+                credit_account,
+                ChargeJournalEntry.Direction.CREDIT,
+                charge.amount_cents,
+            ),
+        }
+        actual_originals = {
+            (entry.account, entry.direction, entry.amount_cents)
+            for entry in originals
+        }
+
+        if len(originals) != 2 or actual_originals != expected_originals:
+            raise ValidationError({
+                'journal': (
+                    f'Original journal for charge {charge.pk} is missing '
+                    'entries or is inconsistent. Invoice was not voided.'
+                ),
+            })
+
+        for original in originals:
+            reversals = list(
+                original.reversal_entries.select_for_update().order_by('pk')
+            )
+
+            opposite_direction = (
+                ChargeJournalEntry.Direction.CREDIT
+                if original.direction == ChargeJournalEntry.Direction.DEBIT
+                else ChargeJournalEntry.Direction.DEBIT
+            )
+
+            if len(reversals) > 1:
+                raise ValidationError({
+                    'journal': (
+                        f'Multiple reversals exist for journal entry '
+                        f'{original.pk}. Invoice was not voided.'
+                    ),
+                })
+
+            if reversals:
+                reversal = reversals[0]
+                if (
+                    reversal.charge_id != charge.pk
+                    or reversal.account != original.account
+                    or reversal.direction != opposite_direction
+                    or reversal.amount_cents != original.amount_cents
+                    or reversal.reverses_id != original.pk
+                ):
+                    raise ValidationError({
+                        'journal': (
+                            f'Reversal for journal entry {original.pk} is '
+                            'inconsistent. Invoice was not voided.'
+                        ),
+                    })
+            else:
+                reversal_plan.append((charge, original, opposite_direction))
+
+    # The complete set of existing journals is valid. Create only missing
+    # reversals; the database uniqueness constraint protects against duplicates.
+    for charge, original, opposite_direction in reversal_plan:
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=original.account,
+            direction=opposite_direction,
+            amount_cents=original.amount_cents,
+            reverses=original,
+        )
+
+    for charge in charges:
+        charge.lifecycle = DocumentStatus.VOIDED
+        charge.balance_cents = 0
+        charge.save(update_fields=('lifecycle', 'balance_cents', 'updated_at'))
+
     invoice.status = DocumentStatus.VOIDED
     invoice.balance_cents = 0
     invoice.save(update_fields=('status', 'balance_cents', 'updated_at'))
+
     record_audit(
         action='invoice.void',
         object_type='Invoice',
@@ -583,7 +743,7 @@ def reverse_payment(payment, *, reason, actor, request=None):
     if not reason:
         raise ValidationError({'reason': 'A non-empty reversal reason is required.'})
 
-    payment = Payment.objects.select_for_update().select_related(
+    payment = Payment.objects.select_for_update(of=('self',)).select_related(
         'organization', 'tenant', 'tenant__user',
     ).get(pk=payment.pk)
     existing = PaymentReversal.objects.filter(payment=payment).first()

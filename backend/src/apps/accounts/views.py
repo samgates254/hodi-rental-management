@@ -381,6 +381,17 @@ class GoogleLoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        profile = getattr(user, 'account_profile', None)
+        if (
+            profile is not None
+            and profile.account_type == AccountProfile.AccountType.PROPERTY_AGENT
+            and profile.email_verified_at is None
+        ):
+            return Response(
+                {'detail': 'Verify your email address before signing in.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         return Response(_auth_response_data(user), status=status.HTTP_200_OK)
 
 

@@ -70,21 +70,33 @@ def _ensure_billing_write(user, organization_id):
 def _invoice_queryset(user):
     return Invoice.objects.filter(
         Q(organization_id__in=_readable_billing_orgs(user))
-        | Q(tenant__user=user, tenant__is_active=True)
+        | Q(
+            tenant__user=user,
+            tenant__is_active=True,
+            tenant__organization__is_active=True,
+        )
     ).distinct().prefetch_related('charges')
 
 
 def _charge_queryset(user):
     return Charge.objects.filter(
         Q(organization_id__in=_readable_billing_orgs(user))
-        | Q(tenant__user=user, tenant__is_active=True)
+        | Q(
+            tenant__user=user,
+            tenant__is_active=True,
+            tenant__organization__is_active=True,
+        )
     ).distinct()
 
 
 def _payment_queryset(user):
     return Payment.objects.filter(
         Q(organization_id__in=_readable_billing_orgs(user))
-        | Q(tenant__user=user, tenant__is_active=True)
+        | Q(
+            tenant__user=user,
+            tenant__is_active=True,
+            tenant__organization__is_active=True,
+        )
     ).distinct().prefetch_related('allocations', 'postings')
 
 
@@ -299,7 +311,11 @@ class DelinquencyView(APIView):
             tenant.organization_id,
             'billing',
             'read',
-        ) or tenant.user_id == request.user.id
+        ) or (
+            tenant.user_id == request.user.id
+            and tenant.is_active
+            and tenant.organization.is_active
+        )
         if not can_read:
             raise NotFound('Tenant not found.')
         try:

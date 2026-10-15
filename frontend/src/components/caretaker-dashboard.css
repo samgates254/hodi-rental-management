@@ -14,7 +14,7 @@
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 5;
-  width: 248px;
+  width: var(--hodi-sidebar-width);
   display: flex;
   flex-direction: column;
   padding: 28px 18px 20px;
@@ -104,13 +104,13 @@
 }
 
 .caretaker-main {
-  margin-left: 248px;
-  padding: 0 42px 30px;
+  margin-left: var(--hodi-sidebar-width);
+  padding: 0 var(--hodi-workspace-gutter) 30px;
 }
 
 .caretaker-header {
   display: flex;
-  min-height: 92px;
+  min-height: var(--hodi-workspace-header-height);
   align-items: center;
   justify-content: space-between;
   gap: 18px;
@@ -120,13 +120,13 @@
 
 .caretaker-header h1 {
   margin: 4px 0 0;
-  font-size: 28px;
+  font-size: var(--hodi-type-page-title);
   letter-spacing: -.8px;
 }
 
 .caretaker-header select {
   min-width: 220px;
-  min-height: 44px;
+  min-height: var(--hodi-control-height);
   border: 1px solid var(--caretaker-line);
   border-radius: 12px;
   background: var(--caretaker-paper);
@@ -171,7 +171,7 @@
   border-radius: 10px;
   background: var(--caretaker-paper);
   box-shadow: 0 1px 2px rgb(23 32 51 / .025);
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition: border-color var(--hodi-transition-fast) ease, box-shadow var(--hodi-transition-fast) ease, transform var(--hodi-transition-fast) ease;
 }
 
 .caretaker-summary article:hover {
@@ -271,9 +271,9 @@
 .caretaker-issue form select,
 .caretaker-issue form input,
 .caretaker-issue form textarea {
-  min-height: 44px;
+  min-height: var(--hodi-control-height);
   border: 1px solid var(--caretaker-line);
-  border-radius: 8px;
+  border-radius: var(--hodi-radius-control);
   background: var(--hodi-surface);
   color: var(--caretaker-ink);
   padding: 0 12px;
@@ -312,7 +312,7 @@
   border: 1px solid var(--caretaker-line);
   border-radius: 10px;
   background: var(--hodi-surface-raised);
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  transition: border-color var(--hodi-transition-fast) ease, box-shadow var(--hodi-transition-fast) ease;
 }
 
 .caretaker-issue:hover {
@@ -346,8 +346,8 @@
   min-height: 28px;
   padding: 0 10px;
   border-radius: 6px;
-  background: var(--caretaker-soft);
-  color: var(--hodi-brand);
+  background: var(--hodi-neutral-soft);
+  color: var(--hodi-neutral);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -468,8 +468,8 @@
 
 .caretaker-table-wrap th,
 .caretaker-table-wrap td {
-  padding: 12px 10px;
-  border-bottom: 1px solid var(--caretaker-line);
+  padding: var(--hodi-table-cell-y) var(--hodi-table-cell-x);
+  border-bottom: var(--hodi-border-width) solid var(--caretaker-line);
   text-align: left;
   white-space: nowrap;
 }
@@ -505,7 +505,7 @@
   width: 34px;
   height: 34px;
   margin: 0 auto;
-  border: 3px solid #d9e0e5;
+  border: 3px solid var(--hodi-border);
   border-top-color: var(--caretaker-teal, #0bacaa);
   border-radius: 50%;
   animation: caretaker-spin .8s linear infinite;
@@ -539,15 +539,15 @@
 }
 
 .caretaker-sidebar nav a:focus-visible {
-  outline: 2px solid #c6a66b;
-  outline-offset: 2px;
+  outline: var(--hodi-focus-width) solid var(--hodi-gold);
+  outline-offset: var(--hodi-focus-offset);
 }
 
 .ops-mast {
   margin: 8px 0 18px;
   padding: 22px 24px 20px;
   border: 1px solid var(--hodi-border);
-  border-left: 3px solid #c6a66b;
+  border-left: 3px solid var(--hodi-gold);
   border-radius: 12px;
   background: var(--hodi-surface);
 }
@@ -567,13 +567,13 @@
 .ops-mast-kicker span {
   width: 22px;
   height: 1px;
-  background: #c6a66b;
+  background: var(--hodi-gold);
 }
 
 .ops-mast h2 {
   margin: 8px 0 6px;
   font-family: Fraunces, "Iowan Old Style", Georgia, serif;
-  font-size: clamp(1.55rem, 2.4vw, 2.15rem);
+  font-size: var(--hodi-type-workspace-summary);
   font-weight: 460;
   letter-spacing: -0.03em;
   line-height: 1.15;
@@ -601,7 +601,7 @@
 
   .caretaker-main {
     margin-left: 0;
-    padding: 0 18px 24px;
+    padding: 0 var(--hodi-space-4) 24px;
   }
 
   .caretaker-header,
@@ -613,13 +613,23 @@
   }
 
   .caretaker-sidebar nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    gap: var(--hodi-space-2);
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: var(--hodi-space-1);
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
   }
 
   .caretaker-sidebar nav a {
     justify-content: center;
-    min-height: auto;
-    padding: 14px 18px;
+    min-height: var(--hodi-nav-item-height);
+    flex: 0 0 auto;
+    padding: 0 12px;
+    white-space: nowrap;
   }
 
   .caretaker-sidebar-bottom {
@@ -649,7 +659,7 @@
     position: sticky;
     z-index: 5;
     bottom: 0;
-    box-shadow: 0 -8px 18px rgb(255 255 255 / .85);
+    box-shadow: var(--hodi-shadow-raised);
   }
 }
 
@@ -661,7 +671,7 @@
 
 .caretaker-issue,
 .caretaker-summary article {
-  border-top: 2px solid #c6a66b;
+  border-top: 2px solid var(--hodi-gold);
 }
 
 .caretaker-issue h3,
@@ -680,7 +690,7 @@
 .caretaker-panel table th {
   position: sticky;
   top: 0;
-  background: #f7f5f0;
+  background: var(--hodi-surface-raised);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -695,7 +705,7 @@
 }
 
 .caretaker-empty {
-  border: 1px solid var(--hodi-border);
-  background: #f7f5f0;
+  border: var(--hodi-border-width) solid var(--hodi-border);
+  background: var(--hodi-surface);
   padding: 28px 20px;
 }

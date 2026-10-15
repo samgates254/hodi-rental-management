@@ -109,7 +109,11 @@ def _request_queryset(user):
                 unit__building__property__organization__memberships__is_active=True,
                 unit__building__property__organization__memberships__role=OrganizationMembership.Role.TECHNICIAN,
             )
-            | Q(tenant__user=user, tenant__is_active=True)
+            | Q(
+                tenant__user=user,
+                tenant__is_active=True,
+                tenant__organization__is_active=True,
+            )
         )
         .select_related('unit', 'tenant', 'created_by', 'work_order', 'unit__building__property')
         .prefetch_related('comments')

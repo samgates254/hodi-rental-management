@@ -32,6 +32,7 @@ class MaintenanceRequestApiTests(APITestCase):
         self.accountant = user_model.objects.create_user(username='accountant', password='password')
         self.technician = user_model.objects.create_user(username='tech', password='password')
         self.other_tech = user_model.objects.create_user(username='other-tech', password='password')
+        self.same_org_other_tech = user_model.objects.create_user(username='same-org-other-tech', password='password')
         self.tenant_user = user_model.objects.create_user(username='tenant', password='password')
         self.organization = Organization.objects.create(name='Rongai Homes')
         self.other = Organization.objects.create(name='Other Homes')
@@ -46,6 +47,9 @@ class MaintenanceRequestApiTests(APITestCase):
         )
         OrganizationMembership.objects.create(
             organization=self.organization, user=self.technician, role=OrganizationMembership.Role.TECHNICIAN,
+        )
+        OrganizationMembership.objects.create(
+            organization=self.organization, user=self.same_org_other_tech, role=OrganizationMembership.Role.TECHNICIAN,
         )
         OrganizationMembership.objects.create(
             organization=self.other, user=self.other_tech, role=OrganizationMembership.Role.TECHNICIAN,
@@ -97,6 +101,25 @@ class MaintenanceRequestApiTests(APITestCase):
             created_at=created_at,
         )
 
+    def _create_direct_request(self, unit, title, assignee=None):
+        request = MaintenanceRequest.objects.create(
+            unit=unit,
+            created_by=self.owner,
+            title=title,
+            description=f'{title} details',
+            hazard=2,
+            vulnerability=1,
+            priority_class=2,
+            score_millis=1000,
+        )
+        WorkOrder.objects.create(request=request, assignee=assignee)
+        return request.pk
+
+    def _create_other_organization_unit(self):
+        property_record = Property.objects.create(organization=self.other, name='Other property')
+        building = Building.objects.create(property=property_record, name='Other building')
+        return Unit.objects.create(building=building, name='Other unit')
+
     def test_staff_queue_orders_by_priority_oldest_first_and_primary_key(self):
         first_tied = self._create_request_for_ordering('First tied request')
         class_one = self._create_request_for_ordering('Class one request')
@@ -138,6 +161,42 @@ class MaintenanceRequestApiTests(APITestCase):
             [newer_same_priority, older_same_priority, older_lower_priority],
         )
 
+    def test_tenant_history_excludes_another_tenants_requests(self):
+        own_request = self._create_request_for_ordering('Own tenant request')
+        other_user = get_user_model().objects.create_user(username='other-tenant-user', password='password')
+        other_tenant = Tenant.objects.create(
+            organization=self.other,
+            user=other_user,
+            first_name='Other',
+            last_name='Tenant',
+            phone_number='+254700000011',
+        )
+        other_unit = self._create_other_organization_unit()
+        other_request = self._create_direct_request(other_unit, 'Another tenant request')
+        MaintenanceRequest.objects.filter(pk=other_request).update(tenant=other_tenant)
+
+        self.client.force_authenticate(self.tenant_user)
+        response = self.client.get('/api/v1/maintenance/requests/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['id'] for row in response.data], [own_request])
+
+    def test_tenant_history_excludes_records_after_its_organization_is_deactivated(self):
+        request_id = self._create_request_for_ordering('Deactivated organization request')
+        OrganizationMembership.objects.create(
+            organization=self.other,
+            user=self.tenant_user,
+            role=OrganizationMembership.Role.CARETAKER,
+        )
+        self.organization.is_active = False
+        self.organization.save(update_fields=('is_active', 'updated_at'))
+
+        self.client.force_authenticate(self.tenant_user)
+        response = self.client.get('/api/v1/maintenance/requests/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn(request_id, [row['id'] for row in response.data])
+
     def test_tenant_cannot_access_staff_queue_but_can_access_tenant_history(self):
         request_id = self._create_request_for_ordering('Tenant request')
 
@@ -149,9 +208,31 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(history_response.status_code, status.HTTP_200_OK)
         self.assertEqual([row['id'] for row in history_response.data], [request_id])
 
+    def test_caretaker_can_access_only_their_organization_queue(self):
+        own_request = self._create_request_for_ordering('Caretaker organization request')
+        other_request = self._create_direct_request(
+            self._create_other_organization_unit(),
+            'Other organization request',
+        )
+
+        self.client.force_authenticate(self.caretaker)
+        response = self.client.get('/api/v1/maintenance/requests/queue/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['id'] for row in response.data], [own_request])
+        self.assertNotIn(other_request, [row['id'] for row in response.data])
+
+    def test_technician_cannot_access_organization_wide_queue(self):
+        self.client.force_authenticate(self.technician)
+
+        response = self.client.get('/api/v1/maintenance/requests/queue/')
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_technician_visibility_only_returns_requests_assigned_to_them(self):
         assigned_request = self._create_request_for_ordering('Assigned request')
         unassigned_request = self._create_request_for_ordering('Unassigned request')
+        another_technician_request = self._create_request_for_ordering('Another technician request')
         self.client.force_authenticate(self.caretaker)
         assignment = self.client.post(
             f'/api/v1/maintenance/requests/{assigned_request}/assign/',
@@ -159,6 +240,12 @@ class MaintenanceRequestApiTests(APITestCase):
             format='json',
         )
         self.assertEqual(assignment.status_code, status.HTTP_200_OK, assignment.data)
+        WorkOrder.objects.filter(request_id=another_technician_request).update(assignee=self.same_org_other_tech)
+        cross_organization_request = self._create_direct_request(
+            self._create_other_organization_unit(),
+            'Other organization assignment',
+            assignee=self.technician,
+        )
 
         self.client.force_authenticate(self.technician)
         response = self.client.get('/api/v1/maintenance/requests/')
@@ -166,6 +253,10 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual([row['id'] for row in response.data], [assigned_request])
         self.assertNotIn(unassigned_request, [row['id'] for row in response.data])
+        self.assertNotIn(another_technician_request, [row['id'] for row in response.data])
+        self.assertNotIn(cross_organization_request, [row['id'] for row in response.data])
+        hidden_detail = self.client.get(f'/api/v1/maintenance/requests/{another_technician_request}/')
+        self.assertEqual(hidden_detail.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_emergency_request_is_priority_one_and_lifecycle_notifies(self):
         self.client.force_authenticate(self.tenant_user)
@@ -204,6 +295,10 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(legacy_issue.status, MaintenanceIssue.Status.IN_PROGRESS)
         self.assertEqual(assigned.data['work_order']['assignee'], self.technician.pk)
         self.assertTrue(Notification.objects.filter(user=self.technician, type='MAINTENANCE_ASSIGNED').exists())
+        linked_issue = self.client.get('/api/v1/maintenance/issues/').data[0]
+        self.assertEqual(linked_issue['operational_request_id'], request_id)
+        self.assertEqual(linked_issue['operational_status'], 'IN_PROGRESS')
+        self.assertEqual(linked_issue['status'], 'IN_PROGRESS')
 
         self.client.force_authenticate(self.technician)
         visible = self.client.get('/api/v1/maintenance/requests/')
@@ -224,6 +319,11 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(completed.data['status'], 'SUBMITTED')
         legacy_issue.refresh_from_db()
         self.assertEqual(legacy_issue.status, MaintenanceIssue.Status.IN_PROGRESS)
+        self.client.force_authenticate(self.caretaker)
+        linked_issue = self.client.get('/api/v1/maintenance/issues/').data[0]
+        self.assertEqual(linked_issue['operational_status'], 'COMPLETED')
+        self.assertEqual(linked_issue['status'], 'IN_PROGRESS')
+        self.client.force_authenticate(self.technician)
         edited = self.client.patch(
             f'/api/v1/maintenance/requests/{request_id}/',
             {'title': 'Changed'},
@@ -238,6 +338,9 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(MaintenanceRequest.objects.get(pk=request_id).status, 'CLOSED')
         legacy_issue.refresh_from_db()
         self.assertEqual(legacy_issue.status, MaintenanceIssue.Status.RESOLVED)
+        linked_issue = self.client.get('/api/v1/maintenance/issues/').data[0]
+        self.assertEqual(linked_issue['operational_status'], 'CLOSED')
+        self.assertEqual(linked_issue['status'], 'RESOLVED')
         self.assertTrue(AuditLog.objects.filter(
             action='maintenance.completion_verified', object_id=str(completed.data['id']),
         ).exists())

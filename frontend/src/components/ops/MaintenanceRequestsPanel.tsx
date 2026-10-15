@@ -6,6 +6,7 @@ import { useRequiresApproval } from "@/hooks/useRequiresApproval";
 import { apiErrorMessage, asList, formatWhen, getList, humanize, type ListPayload } from "@/lib/opsApi";
 import { MAINTENANCE_ASSIGNEE_STAFF_ROLES } from "@/lib/organizationRoles";
 import { rentalBusinessDate } from "@/lib/rentalDate";
+import { ResponsiveTable } from "@/components/ui/ResponsiveTable";
 import "./ops.css";
 
 type UnitRow = { id: number | string; building: number | string; name: string };
@@ -223,9 +224,11 @@ type SupplierOption = { id: number; organization: number; business_name: string 
 export default function MaintenanceRequestsPanel({
   organizationId,
   canWrite,
+  requestScope = "queue",
 }: {
   organizationId: string;
   canWrite: boolean;
+  requestScope?: "queue" | "assigned";
 }) {
   const [requests, setRequests] = useState<MaintenanceRequestRow[]>([]);
   const [units, setUnits] = useState<UnitRow[]>([]);
@@ -248,10 +251,14 @@ export default function MaintenanceRequestsPanel({
   const [jobCostSummary, setJobCostSummary] = useState<JobCostSummary | null>(null);
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   useEffect(() => {
+    if (!canWrite) {
+      setSuppliers([]);
+      return;
+    }
     clientApi.get<SupplierOption[]>("/api/v1/marketplace/commerce/suppliers/")
       .then(result => setSuppliers(result.data.filter(item => String(item.organization) === organizationId)))
       .catch(() => setSuppliers([]));
-  }, [organizationId]);
+  }, [canWrite, organizationId]);
   const [purchaseError, setPurchaseError] = useState("");
   const [purchaseNotice, setPurchaseNotice] = useState("");
   const [purchaseIdempotencyKey, setPurchaseIdempotencyKey] = useState(makeIdempotencyKey);
@@ -276,7 +283,10 @@ export default function MaintenanceRequestsPanel({
     setLoading(true);
     setError("");
     try {
-      const requestRows = await getList<MaintenanceRequestRow>("/api/v1/maintenance/requests/queue/");
+      const endpoint = requestScope === "assigned"
+        ? "/api/v1/maintenance/requests/"
+        : "/api/v1/maintenance/requests/queue/";
+      const requestRows = await getList<MaintenanceRequestRow>(endpoint);
       setRequests(requestRows.filter(row => String(row.organization) === organizationId));
       if (!canWrite) return;
       const [unitRows, buildingRows, propertyRows, tenantRows] = await Promise.all([
@@ -317,7 +327,7 @@ export default function MaintenanceRequestsPanel({
     } finally {
       setLoading(false);
     }
-  }, [canWrite, organizationId]);
+  }, [canWrite, organizationId, requestScope]);
 
   const loadMaterialData = useCallback(async (requestId: string) => {
     const requestRow = requests.find(row => String(row.id) === requestId);
@@ -790,7 +800,9 @@ export default function MaintenanceRequestsPanel({
         <div>
           <span className="ops-kicker">MAINTENANCE</span>
           <h2>Requests & work orders</h2>
-          <p>Open a request, assign it, complete the work order, then close it. Priority comes from the server.</p>
+          <p>{requestScope === "assigned"
+            ? "Work orders appear here only when they are assigned to you."
+            : "Open a request, assign it, complete the work order, then close it. Priority comes from the server."}</p>
         </div>
         <div className="ops-actions">
           <button type="button" className="ops-button" onClick={() => void load()} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
@@ -837,33 +849,37 @@ export default function MaintenanceRequestsPanel({
       {loading && !requests.length && <p className="ops-status">Loading maintenance requests…</p>}
       {!loading && !error && requests.length === 0 && (
         <div className="ops-empty">
-          <strong>No maintenance requests</strong>
-          <p>Reported work for this organization will show priority, status, and the assigned person.</p>
+          <strong>{requestScope === "assigned" ? "No assigned work" : "No maintenance requests"}</strong>
+          <p>{requestScope === "assigned"
+            ? "Work assigned to you will appear here."
+            : "Reported work for this organization will show priority, status, and the assigned person."}</p>
         </div>
       )}
       {requests.length > 0 && (
-        <div className="ops-table-wrap">
-          <table className="ops-table">
-            <thead>
-              <tr><th>Request</th><th>Where</th><th>Tenant</th><th>Priority</th><th>Status</th><th>Assignee</th></tr>
-            </thead>
-            <tbody>
-              {requests.map(row => (
-                <tr key={row.id}>
-                  <td>
-                    <button type="button" className="ops-button" onClick={() => setSelectedId(String(row.id))}>{row.title}</button>
-                    <div className="ops-note">{formatWhen(row.created_at)}</div>
-                  </td>
-                  <td>{unitLabel.get(String(row.unit)) ?? `Unit ${row.unit}`}</td>
-                  <td>{row.tenant ? tenantLabel.get(String(row.tenant)) ?? `Tenant ${row.tenant}` : "—"}</td>
-                  <td><span className={`ops-pill ${row.emergency_override ? "is-hot" : ""}`}>{row.emergency_override ? "Emergency · " : ""}Class {row.priority_class}</span></td>
-                  <td>{humanize(row.status)}</td>
-                  <td>{assigneeName(row.work_order?.assignee)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ResponsiveTable
+          className="ops-table-wrap"
+          tableClassName="ops-table"
+          caption="Maintenance requests and assigned work"
+          rows={requests}
+          getRowKey={row => row.id}
+          columns={[
+            {
+              key: "request",
+              header: "Request",
+              render: row => (
+                <>
+                  <button type="button" className="ops-button" onClick={() => setSelectedId(String(row.id))}>{row.title}</button>
+                  <div className="ops-note">{formatWhen(row.created_at)}</div>
+                </>
+              ),
+            },
+            { key: "where", header: "Where", render: row => unitLabel.get(String(row.unit)) ?? `Unit ${row.unit}` },
+            { key: "tenant", header: "Tenant", render: row => row.tenant ? tenantLabel.get(String(row.tenant)) ?? `Tenant ${row.tenant}` : "—" },
+            { key: "priority", header: "Priority", render: row => <span className={`ops-pill ${row.emergency_override ? "is-hot" : ""}`}>{row.emergency_override ? "Emergency · " : ""}Class {row.priority_class}</span> },
+            { key: "status", header: "Status", render: row => humanize(row.status) },
+            { key: "assignee", header: "Assignee", render: row => assigneeName(row.work_order?.assignee) },
+          ]}
+        />
       )}
       {selected && (
         <div className="ops-detail border-l-4 border-sky-700">

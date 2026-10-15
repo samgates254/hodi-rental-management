@@ -767,13 +767,14 @@ export default function LandlordDashboard() {
   async function inviteAccountant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!organization) return;
-    const email = String(new FormData(event.currentTarget).get("accountant_email") ?? "").trim();
+    const form = event.currentTarget;
+    const email = String(new FormData(form).get("accountant_email") ?? "").trim();
     setIsSaving(true); setTeamError("");
     try {
       await apiRequest("/organizations/accountant-invitations/", token, {
         method: "POST", body: JSON.stringify({ organization: organization.id, email }),
       });
-      event.currentTarget.reset();
+      form.reset();
       setNotice(`Accountant invitation sent to ${email}. They can accept it in the Accountant workspace.`);
     } catch (error) {
       setTeamError(error instanceof Error ? error.message : "The accountant invitation could not be sent.");

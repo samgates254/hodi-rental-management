@@ -23,7 +23,6 @@ import MaintenanceAttachments, { type MaintenanceAttachment } from "./Maintenanc
 import NotificationBell from "./ops/NotificationBell";
 import TenantLinkGate from "./ops/TenantLinkGate";
 import TenantProfileEditor from "./ops/TenantProfileEditor";
-import TenantWorkStatus from "./ops/TenantWorkStatus";
 import StatementPanel from "./tenant/StatementPanel";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { formatMinor, payableHalfShillings, payableWholeShillings, shillingsToCents, wholeShillingsToCents } from "@/lib/money";
@@ -118,6 +117,7 @@ type MaintenanceIssue = {
   category?: string;
   priority?: string;
   status?: string;
+  operational_request_id?: number | string | null;
   operational_status?: string | null;
   repair_outcome?: string | null;
   repair_resolution?: string;
@@ -154,6 +154,7 @@ type SharedMaintenanceIssue = {
   category: string;
   priority: string;
   status: string;
+  operational_request_id?: number | string | null;
   operational_status?: string | null;
   repair_outcome?: string | null;
   repair_resolution?: string;
@@ -231,6 +232,7 @@ function fromSharedIssue(issue: SharedMaintenanceIssue): MaintenanceIssue {
     category: issue.category,
     priority: issue.priority,
     status: issue.status,
+    operational_request_id: issue.operational_request_id,
     operational_status: issue.operational_status,
     repair_outcome: issue.repair_outcome,
     repair_resolution: issue.repair_resolution,
@@ -467,11 +469,31 @@ function formatDate(date?: string) {
       }).format(parsed);
 }
 
+function issueStatus(issue: MaintenanceIssue) {
+  return issue.operational_status ?? issue.status ?? "";
+}
+
+function issueStatusLabel(issue: MaintenanceIssue) {
+  switch (issue.operational_status) {
+    case "OPEN": return "Open";
+    case "IN_PROGRESS": return "In progress";
+    case "COMPLETED": return "Awaiting verification";
+    case "CLOSED": return "Verified and closed";
+    case "CANCELLED": return "Cancelled";
+    default: return humanizeStatus(issue.status);
+  }
+}
+
+function issueIsActive(issue: MaintenanceIssue) {
+  if (issue.operational_status) return !["CLOSED", "CANCELLED"].includes(issue.operational_status);
+  return issueStep(issue.status) < 4;
+}
+
 function statusMatchesFilter(issue: MaintenanceIssue, filter: IssueFilter) {
-  const step = issueStep(issue.status);
-  if (filter === "resolved") return step >= 4;
-  if (filter === "in-progress") return step >= 2 && step <= 3;
-  if (filter === "open") return step < 2;
+  const status = issueStatus(issue);
+  if (filter === "resolved") return ["RESOLVED", "CLOSED", "CANCELLED"].includes(status);
+  if (filter === "in-progress") return ["IN_PROGRESS", "COMPLETED"].includes(status);
+  if (filter === "open") return !["IN_PROGRESS", "COMPLETED", "RESOLVED", "CLOSED", "CANCELLED"].includes(status);
   return true;
 }
 
@@ -479,21 +501,7 @@ function getTenancyProperty(tenancy: Tenancy) {
   return tenancy.property ?? null;
 }
 
-function isTenancy(value: unknown): value is Tenancy {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    ("id" in value || "property" in value || "flat_number" in value),
-  );
-}
 
-function daysUntil(date?: string) {
-  if (!date) return null;
-  const time = new Date(date).getTime();
-  if (!Number.isFinite(time)) return null;
-  return Math.ceil((time - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
-}
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -806,6 +814,9 @@ function IssueCard({
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState("");
   const step = issueStep(issue.status);
+  const canAskCaretakerToClose = issue.operational_status
+    ? ["OPEN", "IN_PROGRESS", "COMPLETED"].includes(issue.operational_status)
+    : step < 4;
   const thumbnail =
     issue.image ??
     (typeof issue.images?.[0] === "string"
@@ -839,8 +850,8 @@ function IssueCard({
         <div className="dashboard-issue-title">
           <div className="dashboard-issue-title-line">
             <h3>{issue.title ?? "Maintenance request"}</h3>
-            <span className={`dashboard-status-badge status-${(issue.status ?? "submitted").toLowerCase().replace(/[^a-z]+/g, "-")}`}>
-              {issue.operational_status === "COMPLETED" ? "Awaiting verification" : issue.operational_status === "CANCELLED" ? "Cancelled" : issue.operational_status === "CLOSED" ? "Verified and closed" : humanizeStatus(issue.status)}
+            <span className={`dashboard-status-badge status-${issueStatus(issue).toLowerCase().replace(/[^a-z]+/g, "-")}`}>
+              {issueStatusLabel(issue)}
             </span>
           </div>
           <p>{issue.category ?? "Other"} · {humanizeStatus(issue.priority ?? "medium")} priority</p>
@@ -876,7 +887,7 @@ function IssueCard({
         </div>
       )}
       <MaintenanceAttachments attachments={issue.attachments} />
-      <IssueTimeline issue={issue} />
+      {!issue.operational_request_id && <IssueTimeline issue={issue} />}
 
       <div className="dashboard-issue-meta">
         <span>Reported {formatDate(issue.date_reported ?? issue.created_at)}</span>
@@ -895,7 +906,7 @@ function IssueCard({
             <li key={`${event.timestamp ?? event.status}-${index}`}>
               <span className="portal-event-dot" />
               <div>
-                <strong>{humanizeStatus(event.status)}</strong>
+                <strong>{issue.operational_request_id ? "Update" : humanizeStatus(event.status)}</strong>
                 <small>{formatDateTime(event.timestamp)}{event.actor_name ? ` · ${event.actor_name}` : ""}{event.actor_phone ? ` · ${event.actor_phone}` : ""}</small>
                 {event.comment && <p>{event.comment}</p>}
                 {event.photos && event.photos.length > 0 && (
@@ -926,7 +937,7 @@ function IssueCard({
             {isSaving ? "Sending…" : "Comment"}
           </Button>
         </form>
-        {step < 4 && (
+        {canAskCaretakerToClose && (
           <Button
             type="button"
             variant="secondary"
@@ -1336,7 +1347,7 @@ export default function ClientDashboard() {
   const rentDueCents = outstandingCents > 0 ? outstandingCents : sharedUnpaidCents;
   const monthlyRentCents = tenancy?.monthly_rent_cents ?? tenancyProperty?.rent_cents;
   const depositCents = tenancy?.deposit_cents;
-  const activeIssuesCount = issues.filter(issue => issueStep(issue.status) < 4).length;
+  const activeIssuesCount = issues.filter(issueIsActive).length;
   const leaseStart = tenancy?.lease_start ?? tenancy?.start_date;
   const leaseEnd = tenancy?.lease_end ?? tenancy?.end_date;
   const leaseStartTimestamp = leaseStart ? new Date(leaseStart).getTime() : NaN;
@@ -1841,7 +1852,7 @@ export default function ClientDashboard() {
               <div>
                 <small>Latest maintenance</small>
                 <strong>{isLoadingIssues ? "Loading updates…" : issueError ? "Updates unavailable" : latestIssue?.title ?? "No requests yet"}</strong>
-                <span>{issueError ? "Open maintenance to retry." : latestIssue ? `${humanizeStatus(latestIssue.status)} · updated ${formatDate(latestIssue.updated_at ?? latestIssue.last_update ?? latestIssue.created_at)}` : "Your reported issues will appear here."}</span>
+                <span>{issueError ? "Open maintenance to retry." : latestIssue ? `${issueStatusLabel(latestIssue)} · updated ${formatDate(latestIssue.updated_at ?? latestIssue.last_update ?? latestIssue.created_at)}` : "Your reported issues will appear here."}</span>
               </div>
               <button type="button" onClick={() => latestIssue ? scrollToSection("maintenance") : setIsReportOpen(true)}>
                 {latestIssue ? "View" : "Report"}
@@ -2244,7 +2255,6 @@ export default function ClientDashboard() {
               <EmptyIssues />
             )}
           </div>}
-          <TenantWorkStatus />
         </section>
 
         <section className="dashboard-section portal-section" id="receipts" aria-labelledby="receipts-title">

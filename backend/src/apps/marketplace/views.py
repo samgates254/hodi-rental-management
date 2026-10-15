@@ -106,19 +106,31 @@ class CommerceOrderViewSet(viewsets.ModelViewSet):
 		from django.db.models import Q
 		ids = organization_ids_for_resource(self.request.user, 'marketplace', 'read')
 		return CommerceOrder.objects.select_related('listing__supplier', 'tenant', 'requested_by').filter(
-			Q(requested_by=self.request.user) | Q(listing__organization_id__in=ids)).distinct()
+			Q(requested_by=self.request.user, listing__organization__is_active=True)
+			| Q(listing__organization_id__in=ids)
+		).distinct()
 	def create(self, request, *args, **kwargs):
 		from apps.leases.models import Lease
 		from rest_framework.exceptions import PermissionDenied
 		try: tenant = request.user.tenant_record
 		except Exception as error: raise PermissionDenied('An active tenant account is required to place a request.') from error
 		today = rental_business_date()
-		if not tenant.is_active or not Lease.objects.filter(tenant=tenant, status='ACTIVE', start_date__lte=today).filter(Q(end_date__isnull=True)|Q(end_date__gte=today)).exists():
+		if (
+			not tenant.is_active
+			or not tenant.organization.is_active
+			or not Lease.objects.filter(tenant=tenant, status='ACTIVE', start_date__lte=today)
+			.filter(Q(end_date__isnull=True) | Q(end_date__gte=today)).exists()
+		):
 			raise PermissionDenied('An active tenancy is required to place a request.')
 		serializer = self.get_serializer(data=request.data)
 		serializer.is_valid(raise_exception=True)
 		listing = serializer.validated_data['listing']
-		if not listing.is_published or listing.availability != 'AVAILABLE' or not listing.supplier.is_active:
+		if (
+			not listing.organization.is_active
+			or not listing.is_published
+			or listing.availability != 'AVAILABLE'
+			or not listing.supplier.is_active
+		):
 			raise ValidationError({'listing': 'This listing is not currently accepting requests.'})
 		order = serializer.save(tenant=tenant, requested_by=request.user)
 		record_audit(action='commerce.order.create', object_type='CommerceOrder', object_id=order.pk,

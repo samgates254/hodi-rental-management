@@ -106,7 +106,7 @@ export default function TechnicianDashboard() {
           <p>Jobs appear only after they are assigned to you. Quotations, material receipts, and completion stay on the work order — nothing on this page is a sample record.</p>
         </section>
         {organizationId ? (
-          <MaintenanceRequestsPanel organizationId={organizationId} canWrite={false} />
+          <MaintenanceRequestsPanel organizationId={organizationId} canWrite={false} requestScope="assigned" />
         ) : (
           <p className="technician-empty" role="status">No organization is selected.</p>
         )}

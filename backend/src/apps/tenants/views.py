@@ -25,7 +25,11 @@ class TenantAccess(BasePermission):
         if organization_ids_for_resource(user, 'tenants', action).exists():
             return True
         if request.method in ('GET', 'HEAD', 'OPTIONS', 'PATCH', 'PUT'):
-            return Tenant.objects.filter(user=user).exists()
+            return Tenant.objects.filter(
+                user=user,
+                is_active=True,
+                organization__is_active=True,
+            ).exists()
         return False
 
 
@@ -40,7 +44,14 @@ class TenantViewSet(viewsets.ModelViewSet):
         organization_ids = organization_ids_for_resource(user, 'tenants', action if action == 'write' else 'read')
         queryset = Tenant.objects.filter(organization_id__in=organization_ids)
         if self.request.method in ('GET', 'HEAD', 'OPTIONS', 'PATCH', 'PUT'):
-            queryset = (queryset | Tenant.objects.filter(user=user)).distinct()
+            queryset = (
+                queryset
+                | Tenant.objects.filter(
+                    user=user,
+                    is_active=True,
+                    organization__is_active=True,
+                )
+            ).distinct()
         return queryset
 
     def perform_create(self, serializer):
