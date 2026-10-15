@@ -17,6 +17,7 @@ import Card from "../components/ui/Card";
 import { Container } from "../components/ui/Container";
 import SectionHead from "../components/ui/SectionHead";
 import { ClientApiError, clientApi, fetchMe } from "../lib/clientApi";
+import { createUUID } from "@/lib/uuid";
 import { daysUntilRentalDate } from "../lib/rentalDate";
 import ReportIssueModal from "./ReportIssueModal";
 import MaintenanceAttachments, { type MaintenanceAttachment } from "./MaintenanceAttachments";
@@ -1526,7 +1527,9 @@ export default function ClientDashboard() {
     }
     setIsInitiatingPayment(true);
     try {
-      const idempotencyKey = window.sessionStorage.getItem(MPESA_IDEMPOTENCY_STORAGE_KEY) || window.crypto.randomUUID();
+      const idempotencyKey =
+        window.sessionStorage.getItem(MPESA_IDEMPOTENCY_STORAGE_KEY) ||
+        createUUID();
       window.sessionStorage.setItem(MPESA_IDEMPOTENCY_STORAGE_KEY, idempotencyKey);
       const response = await clientApi.post<PaymentRequest>(
         "/api/v1/billing/mpesa/initiate/",
