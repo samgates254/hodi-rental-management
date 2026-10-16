@@ -34,7 +34,9 @@ def _release_unit_if_idle(unit):
 def _lock_lease_and_unit(lease):
     unit_id = Lease.objects.values_list('unit_id', flat=True).get(pk=lease.pk)
     unit = Unit.objects.select_for_update().get(pk=unit_id)
-    locked = Lease.objects.select_for_update().select_related('tenant', 'tenant__user').get(pk=lease.pk)
+    locked = Lease.objects.select_for_update(of=('self',)).select_related(
+        'tenant', 'tenant__user',
+    ).get(pk=lease.pk)
     if locked.unit_id != unit.pk:
         raise ValidationError({'unit': 'Lease unit changed concurrently; reload and retry.'})
     return locked, unit

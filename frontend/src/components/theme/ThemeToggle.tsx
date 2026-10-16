@@ -11,7 +11,9 @@ export default function ThemeToggle({ className = "" }: { className?: string }) 
       type="button"
       className={`theme-toggle ${className}`.trim()}
       aria-label={`Switch to ${nextTheme} mode`}
+      aria-pressed={theme === "dark"}
       title={`Switch to ${nextTheme} mode`}
+      suppressHydrationWarning
       onClick={() => setTheme(nextTheme)}
     >
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">

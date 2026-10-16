@@ -19,7 +19,14 @@ import NotificationBell from "@/components/ops/NotificationBell";
 import SubscriptionPanel from "@/components/SubscriptionPanel";
 import UtilitiesWorkspace from "@/components/utilities/UtilitiesWorkspace";
 import ThemeToggle from "@/components/theme/ThemeToggle";
+import { PortfolioAnalytics } from "@/components/landlord/PortfolioAnalytics";
 import { shillingsToCents } from "@/lib/money";
+import {
+  readPage,
+  type AnalyticsInvoice,
+  type AnalyticsPayment,
+  type AnalyticsRequest,
+} from "@/lib/portfolioAnalytics";
 import { rentalBusinessDate } from "@/lib/rentalDate";
 import { CurrencyText } from "@/components/ui/CurrencyText";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -291,6 +298,114 @@ function formatDate(value: string | null) {
       }).format(date);
 }
 
+type RawInvoice = {
+  organization: Identifier;
+  lease: Identifier | null;
+  due_date: string;
+  status: string;
+  total_cents: number;
+  paid_cents: number;
+  balance_cents: number;
+  updated_at?: string | null;
+  charges?: { id: Identifier }[];
+};
+
+type RawPayment = {
+  organization: Identifier;
+  amount_cents: number;
+  received_date: string;
+  status: string;
+  updated_at?: string | null;
+  allocations?: { charge: Identifier; amount_cents: number }[];
+};
+
+type RawRequest = {
+  id: Identifier;
+  organization: Identifier;
+  unit: Identifier;
+  title: string;
+  status: string;
+  category?: string;
+  priority_class?: number;
+  emergency_override?: boolean;
+  requires_approval?: boolean;
+  updated_at?: string | null;
+};
+
+function optionalCents(value: unknown): number | null {
+  const amount = Number(value);
+  return Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
+}
+
+function mapInvoice(row: RawInvoice): AnalyticsInvoice[] {
+  const total = optionalCents(row.total_cents);
+  const paid = optionalCents(row.paid_cents);
+  const balance = optionalCents(row.balance_cents);
+  if (total == null || paid == null || balance == null || !row.due_date || !row.status) return [];
+  return [{
+    organization: textId(row.organization),
+    lease: row.lease == null || row.lease === "" ? null : textId(row.lease),
+    due_date: row.due_date,
+    status: row.status,
+    total_cents: total,
+    paid_cents: paid,
+    balance_cents: balance,
+    updated_at: row.updated_at,
+    charges: (row.charges ?? []).map(charge => ({ id: textId(charge.id) })).filter(charge => charge.id),
+  }];
+}
+
+function mapPayment(row: RawPayment): AnalyticsPayment[] {
+  const amount = optionalCents(row.amount_cents);
+  if (amount == null || !row.received_date || !row.status) return [];
+  const allocations = (row.allocations ?? []).flatMap(allocation => {
+    const part = optionalCents(allocation.amount_cents);
+    const charge = textId(allocation.charge);
+    return part == null || !charge ? [] : [{ charge, amount_cents: part }];
+  });
+  return [{
+    organization: textId(row.organization),
+    amount_cents: amount,
+    received_date: row.received_date,
+    status: row.status,
+    updated_at: row.updated_at,
+    allocations,
+  }];
+}
+
+function mapRequest(row: RawRequest): AnalyticsRequest[] {
+  if (!row.status || !row.title) return [];
+  const priority = Number(row.priority_class);
+  return [{
+    id: textId(row.id),
+    organization: textId(row.organization),
+    unit: textId(row.unit),
+    title: row.title,
+    status: row.status,
+    category: row.category || "OTHER",
+    priority_class: Number.isInteger(priority) && priority > 0 ? priority : 0,
+    emergency_override: Boolean(row.emergency_override),
+    requires_approval: Boolean(row.requires_approval),
+    updated_at: row.updated_at,
+  }];
+}
+
+type OpsSnapshot = {
+  invoices: AnalyticsInvoice[];
+  payments: AnalyticsPayment[];
+  requests: AnalyticsRequest[];
+  financeState: "ready" | "loading" | "error" | "hidden" | "preview";
+  maintenanceState: "ready" | "loading" | "error" | "hidden" | "preview";
+  financePartial: boolean;
+  maintenancePartial: boolean;
+  financeError: string;
+  maintenanceError: string;
+};
+
+function textId(value: unknown): string {
+  return value == null ? "" : String(value);
+}
+
 function displayStatus(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
 }
@@ -349,6 +464,22 @@ export default function LandlordDashboard() {
   const [leaseEndDate, setLeaseEndDate] = useState("");
   const [leaseReason, setLeaseReason] = useState("");
   const [activeSection, setActiveSection] = useState("overview");
+  const [portfolioQuery, setPortfolioQuery] = useState("");
+  const [propertyFilter, setPropertyFilter] = useState("");
+  const [unitStatusFilter, setUnitStatusFilter] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [opsTick, setOpsTick] = useState(0);
+  const [ops, setOps] = useState<OpsSnapshot>({
+    invoices: [],
+    payments: [],
+    requests: [],
+    financeState: "loading",
+    maintenanceState: "loading",
+    financePartial: false,
+    maintenancePartial: false,
+    financeError: "",
+    maintenanceError: "",
+  });
 
   const loadDashboard = useCallback(async (authToken: string) => {
     setIsLoading(true);
@@ -408,6 +539,7 @@ export default function LandlordDashboard() {
       return;
     }
     setAccountType(sessionStorage.getItem("hodi_account_type") ?? "");
+    setFirstName(sessionStorage.getItem("hodi_first_name") ?? "");
     try {
       const savedMemberships: unknown = JSON.parse(sessionStorage.getItem("hodi_memberships") ?? "[]");
       setMemberships(Array.isArray(savedMemberships) ? savedMemberships as OrganizationMembership[] : []);
@@ -499,11 +631,32 @@ export default function LandlordDashboard() {
   const activeLeases = organizationData.leases.filter(lease => lease.status === "ACTIVE");
   const activeLeaseByUnit = new Map<string, Lease>();
   activeLeases.forEach(lease => activeLeaseByUnit.set(String(lease.unit), lease));
-  const monthlyRentMinor = activeLeases.reduce(
-    (total, lease) => total + Number(lease.monthly_rent_minor || 0),
-    0,
+  const portfolioQueryNormalized = portfolioQuery.trim().toLowerCase();
+  const recordMatches = (...parts: Array<string | number | null | undefined>) =>
+    portfolioQueryNormalized.length === 0 ||
+    parts.some(part => String(part ?? "").toLowerCase().includes(portfolioQueryNormalized));
+  const visibleProperties = organizationData.properties.filter(property =>
+    (!propertyFilter || String(property.id) === propertyFilter) &&
+    recordMatches(property.name, property.address, property.city, property.country),
   );
-
+  const visibleTenants = organizationData.tenants.filter(tenant =>
+    recordMatches(tenant.full_name, tenant.first_name, tenant.last_name, tenant.email, tenant.phone_number),
+  );
+  const visibleUnits = organizationData.units.filter(unit => {
+    const building = organizationData.buildings.find(item => String(item.id) === String(unit.building));
+    const property = organizationData.properties.find(item => String(item.id) === String(building?.property));
+    if (propertyFilter && String(property?.id ?? "") !== propertyFilter) return false;
+    if (unitStatusFilter && unit.status !== unitStatusFilter) return false;
+    return recordMatches(unit.name, unit.status, building?.name, property?.name);
+  });
+  const visibleLeases = organizationData.leases.filter(lease => {
+    const tenant = organizationData.tenants.find(item => String(item.id) === String(lease.tenant));
+    const unit = organizationData.units.find(item => String(item.id) === String(lease.unit));
+    const building = organizationData.buildings.find(item => String(item.id) === String(unit?.building));
+    const property = organizationData.properties.find(item => String(item.id) === String(building?.property));
+    if (propertyFilter && String(property?.id ?? "") !== propertyFilter) return false;
+    return recordMatches(lease.reference, lease.status, tenant?.full_name, tenant?.first_name, tenant?.last_name, unit?.name);
+  });
   async function signOut() {
     const activeToken = token;
     sessionStorage.removeItem(TOKEN_KEY);
@@ -767,18 +920,102 @@ export default function LandlordDashboard() {
   async function inviteAccountant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!organization) return;
-    const email = String(new FormData(event.currentTarget).get("accountant_email") ?? "").trim();
+    const form = event.currentTarget;
+    const email = String(new FormData(form).get("accountant_email") ?? "").trim();
     setIsSaving(true); setTeamError("");
     try {
       await apiRequest("/organizations/accountant-invitations/", token, {
         method: "POST", body: JSON.stringify({ organization: organization.id, email }),
       });
-      event.currentTarget.reset();
+      form.reset();
       setNotice(`Accountant invitation sent to ${email}. They can accept it in the Accountant workspace.`);
     } catch (error) {
       setTeamError(error instanceof Error ? error.message : "The accountant invitation could not be sent.");
     } finally { setIsSaving(false); }
   }
+
+  useEffect(() => {
+    if (previewMode) {
+      setOps({
+        invoices: [],
+        payments: [],
+        requests: [],
+        financeState: "preview",
+        maintenanceState: "preview",
+        financePartial: false,
+        maintenancePartial: false,
+        financeError: "",
+        maintenanceError: "",
+      });
+      return;
+    }
+    if (sessionState !== "ready" || !token) return;
+    let cancelled = false;
+    setOps(current => ({
+      ...current,
+      financeState: canReadBilling ? "loading" : "hidden",
+      maintenanceState: canMaintenance ? "loading" : "hidden",
+    }));
+
+    void (async () => {
+      let invoices: AnalyticsInvoice[] = [];
+      let payments: AnalyticsPayment[] = [];
+      let requests: AnalyticsRequest[] = [];
+      let financeState: OpsSnapshot["financeState"] = canReadBilling ? "ready" : "hidden";
+      let maintenanceState: OpsSnapshot["maintenanceState"] = canMaintenance ? "ready" : "hidden";
+      let financePartial = false;
+      let maintenancePartial = false;
+      let financeError = "";
+      let maintenanceError = "";
+
+      if (canReadBilling) {
+        try {
+          const [invoicePayload, paymentPayload] = await Promise.all([
+            apiRequest<RawInvoice[] | { results?: RawInvoice[]; next?: string | null }>("/billing/invoices/", token),
+            apiRequest<RawPayment[] | { results?: RawPayment[]; next?: string | null }>("/billing/ledger-payments/", token),
+          ]);
+          const invoicePage = readPage(invoicePayload);
+          const paymentPage = readPage(paymentPayload);
+          invoices = invoicePage.rows.flatMap(mapInvoice);
+          payments = paymentPage.rows.flatMap(mapPayment);
+          financePartial = invoicePage.partial || paymentPage.partial;
+        } catch (error) {
+          financeState = "error";
+          financeError = error instanceof Error ? error.message : "Billing records could not be loaded.";
+        }
+      }
+
+      if (canMaintenance) {
+        try {
+          const requestPayload = await apiRequest<RawRequest[] | { results?: RawRequest[]; next?: string | null }>("/maintenance/requests/", token);
+          const requestPage = readPage(requestPayload);
+          requests = requestPage.rows.flatMap(mapRequest);
+          maintenancePartial = requestPage.partial;
+        } catch (error) {
+          maintenanceState = "error";
+          maintenanceError = error instanceof Error ? error.message : "Maintenance requests could not be loaded.";
+        }
+      }
+
+      if (!cancelled) {
+        setOps({
+          invoices,
+          payments,
+          requests,
+          financeState,
+          maintenanceState,
+          financePartial,
+          maintenancePartial,
+          financeError,
+          maintenanceError,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canMaintenance, canReadBilling, opsTick, previewMode, sessionState, token]);
 
   useEffect(() => {
     if (!notice) return;
@@ -844,7 +1081,10 @@ export default function LandlordDashboard() {
                 <span className="sr-only">Organization</span>
                 <select
                   value={selectedOrganizationId}
-                  onChange={event => setSelectedOrganizationId(event.target.value)}
+                  onChange={event => {
+                    setSelectedOrganizationId(event.target.value);
+                    setPortfolioQuery("");
+                  }}
                 >
                   {data.organizations.map(item => (
                     <option key={item.id} value={item.id}>{item.name}</option>
@@ -859,7 +1099,10 @@ export default function LandlordDashboard() {
                   className="landlord-icon-button"
                   aria-label="Refresh dashboard"
                   disabled={isLoading}
-                  onClick={() => void loadDashboard(token)}
+                  onClick={() => {
+                    setOpsTick(value => value + 1);
+                    void loadDashboard(token);
+                  }}
                 >
                   <Icon name="refresh" />
                 </button>
@@ -910,51 +1153,67 @@ export default function LandlordDashboard() {
           </section>
         ) : (
           <>
-            {isAccountant ? (
-              <section id="overview" className="landlord-welcome">
-                <div>
-                  <p className="landlord-eyebrow">ACCOUNTS</p>
-                  <h2>Billing workspace</h2>
-                  <p>Invoices, the rent log, ledger allocation, delinquency, and the audit trail for this organization.</p>
-                </div>
-                {isLoading && <span className="landlord-loading-label">Syncing with Hodi…</span>}
-              </section>
-            ) : (
-              <div id="overview" className="ops-mast">
-                <p className="ops-mast-kicker"><span />{isManager ? "Property manager" : "Landlord"}</p>
-                <h2>{organization?.name ?? "Portfolio"}</h2>
-                <p>Properties, units, tenants, and leases for this organization. Counts and rent totals come from saved records.</p>
-                {isLoading && <span className="landlord-banner-sync" role="status">Syncing with HODI…</span>}
-              </div>
-            )}
-
-            {showPortfolio && hasLoadedDashboard && <section className="landlord-metrics" aria-label="Portfolio summary" aria-busy={isLoading}>
-              <article className="landlord-metric-card">
-                <span>Properties</span>
-                <strong>{organizationData.properties.length}</strong>
-                <small>In this organization</small>
-              </article>
-              <article className="landlord-metric-card">
-                <span>Total units</span>
-                <strong>{organizationData.units.length}</strong>
-                <small>{organizationData.units.filter(unit => unit.status === "OCCUPIED").length} marked occupied</small>
-              </article>
-              <article className="landlord-metric-card">
-                <span>Active tenants</span>
-                <strong>{organizationData.tenants.filter(tenant => tenant.is_active).length}</strong>
-                <small>{organizationData.tenants.length} tenant records</small>
-              </article>
-              <article className="landlord-metric-card landlord-metric-card--accent">
-                <span>Monthly rent on active leases</span>
-                <strong><CurrencyText amount={monthlyRentMinor / 100} /></strong>
-                <small>{activeLeases.length} active lease{activeLeases.length === 1 ? "" : "s"}</small>
-              </article>
-            </section>}
-            {showPortfolio && isLoading && !hasLoadedDashboard && (
-              <section className="landlord-metrics landlord-metrics--loading" aria-label="Loading portfolio summary" aria-busy="true">
-                {Array.from({ length: 4 }, (_, index) => <div className="landlord-metric-skeleton" key={index} aria-hidden="true" />)}
-              </section>
-            )}
+            <div id="overview">
+              {hasLoadedDashboard ? (
+                <PortfolioAnalytics
+                  greetingName={firstName.trim()}
+                  showPortfolio={showPortfolio}
+                  canReadBilling={canReadBilling}
+                  canMaintenance={canMaintenance}
+                  organizationId={selectedOrganizationId}
+                  graph={{
+                    properties: organizationData.properties.map(property => ({ id: String(property.id), name: property.name })),
+                    buildings: organizationData.buildings.map(building => ({ id: String(building.id), property: String(building.property) })),
+                    units: organizationData.units.map(unit => ({ id: String(unit.id), building: String(unit.building), status: unit.status })),
+                    leases: organizationData.leases.map(lease => ({
+                      id: String(lease.id),
+                      unit: String(lease.unit),
+                      status: lease.status,
+                      end_date: lease.end_date,
+                      monthly_rent_minor: Number.isSafeInteger(lease.monthly_rent_minor) ? lease.monthly_rent_minor : 0,
+                    })),
+                  }}
+                  invoices={ops.invoices}
+                  payments={ops.payments}
+                  requests={ops.requests}
+                  financeState={ops.financeState}
+                  maintenanceState={ops.maintenanceState}
+                  financePartial={ops.financePartial}
+                  maintenancePartial={ops.maintenancePartial}
+                  financeError={ops.financeError}
+                  maintenanceError={ops.maintenanceError}
+                  propertyId={propertyFilter}
+                  onPropertyId={setPropertyFilter}
+                  onOpen={(section, unitStatus) => {
+                    setUnitStatusFilter(unitStatus ?? "");
+                    setActiveSection(section);
+                    const target = document.getElementById(section);
+                    if (!target) return;
+                    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+                  }}
+                />
+              ) : (
+                <section className="landlord-metrics landlord-metrics--loading" aria-label="Loading portfolio analytics" aria-busy="true">
+                  {Array.from({ length: 4 }, (_, index) => <div className="landlord-metric-skeleton" key={index} aria-hidden="true" />)}
+                </section>
+              )}
+              {showPortfolio && (
+                <label className="landlord-portfolio-search">
+                  <span className="sr-only">Search properties, units, tenants, and leases</span>
+                  <input
+                    type="search"
+                    value={portfolioQuery}
+                    onChange={event => setPortfolioQuery(event.target.value)}
+                    placeholder="Search properties, units, tenants, or leases"
+                  />
+                </label>
+              )}
+              {portfolioQueryNormalized && (
+                <p role="status">Showing records that match “{portfolioQuery.trim()}”.</p>
+              )}
+              {isLoading && <span className="landlord-banner-sync" role="status">Syncing with HODI…</span>}
+            </div>
 
             {showPortfolio && <>
             <section id="properties" className="landlord-section">
@@ -1017,9 +1276,9 @@ export default function LandlordDashboard() {
                   </div>
                 </form>
               )}
-              {organizationData.properties.length ? (
+              {visibleProperties.length ? (
                 <div className="landlord-property-grid">
-                  {organizationData.properties.map(property => {
+                  {visibleProperties.map(property => {
                     const buildings = organizationData.buildings.filter(
                       building => String(building.property) === String(property.id),
                     );
@@ -1046,6 +1305,8 @@ export default function LandlordDashboard() {
                     );
                   })}
                 </div>
+              ) : organizationData.properties.length ? (
+                <p className="landlord-empty-state" role="status">No properties match this search.</p>
               ) : (
                 <EmptyState
                   icon={<Icon name="building" />}
@@ -1160,10 +1421,10 @@ export default function LandlordDashboard() {
                   </div>
                 </form>
               )}
-              {organizationData.tenants.length ? (
+              {visibleTenants.length ? (
                 <ResponsiveTable
                   caption="Organization tenants"
-                  rows={organizationData.tenants}
+                  rows={visibleTenants}
                   getRowKey={tenant => tenant.id}
                   columns={[
                     { key: "tenant", header: "Tenant", render: tenant => <div className="landlord-person"><span className="landlord-avatar">{tenant.first_name.slice(0, 1).toUpperCase()}</span><span><strong>{tenant.full_name || `${tenant.first_name} ${tenant.last_name}`}</strong><small>{tenant.email || "No email provided"}</small></span></div> },
@@ -1176,6 +1437,8 @@ export default function LandlordDashboard() {
                     { key: "status", header: "Status", render: tenant => <span className={`landlord-status ${tenant.is_active ? "is-active" : ""}`}>{tenant.is_active ? "Active" : "Inactive"}</span> },
                   ]}
                 />
+              ) : organizationData.tenants.length ? (
+                <p className="landlord-empty-state" role="status">No tenants match this search.</p>
               ) : (
                 <EmptyState
                   icon={<Icon name="people" />}
@@ -1193,7 +1456,7 @@ export default function LandlordDashboard() {
                   <h2>Leases &amp; occupancy</h2>
                 </div>
                 <div className="landlord-section-actions">
-                  <span className="landlord-section-count">{organizationData.leases.length} records</span>
+                  <span className="landlord-section-count">{visibleLeases.length} of {organizationData.leases.length} records</span>
                   {!previewMode && (
                     <button
                       type="button"
@@ -1246,10 +1509,10 @@ export default function LandlordDashboard() {
                   </div>
                 </form>
               )}
-              {organizationData.leases.length ? (
+              {visibleLeases.length ? (
 <ResponsiveTable
                   caption="Lease records"
-                  rows={organizationData.leases}
+                  rows={visibleLeases}
                   getRowKey={lease => lease.id}
                   columns={[
                     { key: "lease", header: "Lease", render: lease => <strong>{lease.reference}</strong> },
@@ -1329,6 +1592,8 @@ export default function LandlordDashboard() {
                       : []),
                   ]}
                 />
+              ) : organizationData.leases.length ? (
+                <p className="landlord-empty-state" role="status">No leases match this search.</p>
               ) : (
                 <EmptyState
                   icon={<Icon name="lease" />}
@@ -1344,6 +1609,12 @@ export default function LandlordDashboard() {
                 <div>
                   <span className="landlord-eyebrow">UNIT REGISTER</span>
                   <h2>Unit status</h2>
+                  {unitStatusFilter && (
+                    <p>
+                      Showing {displayStatus(unitStatusFilter)} units.{" "}
+                      <button type="button" className="landlord-button landlord-button--quiet" onClick={() => setUnitStatusFilter("")}>Show every status</button>
+                    </p>
+                  )}
                 </div>
                 {!previewMode && (
                   <button
@@ -1387,10 +1658,10 @@ export default function LandlordDashboard() {
                   </div>
                 </form>
               )}
-              {organizationData.units.length ? (
+              {visibleUnits.length ? (
                 <ResponsiveTable
                   caption="Unit records"
-                  rows={organizationData.units}
+                  rows={visibleUnits}
                   getRowKey={unit => unit.id}
                   columns={[
                     { key: "unit", header: "Unit", render: unit => <strong>{unit.name}</strong> },
@@ -1407,6 +1678,8 @@ export default function LandlordDashboard() {
                     { key: "availability", header: "Availability", render: unit => <span className={`landlord-status ${unit.status === "AVAILABLE" ? "is-active" : ""}`}>{displayStatus(unit.status)}</span> },
                   ]}
                 />
+              ) : organizationData.units.length ? (
+                <p className="landlord-empty-state" role="status">No units match this search.</p>
               ) : (
                 <EmptyState
                   icon={<Icon name="building" />}

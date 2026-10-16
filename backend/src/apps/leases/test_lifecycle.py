@@ -1,9 +1,11 @@
 from datetime import date, timedelta
 from datetime import datetime, timezone as datetime_timezone
 from unittest.mock import patch
+from unittest import skipUnless
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import connection
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -74,6 +76,28 @@ class LeaseLifecycleTests(APITestCase):
         amendment = LeaseAmendment.objects.get(lease=self.lease)
         self.assertEqual(amendment.amendment_type, LeaseAmendment.AmendmentType.TERMINATION)
         self.assertTrue(Notification.objects.filter(user=self.tenant_user, type='LEASE_TERMINATED').exists())
+
+    @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL row-lock semantics required.')
+    def test_termination_does_not_lock_nullable_tenant_user_join(self):
+        self.tenant.user = None
+        self.tenant.save(update_fields=('user', 'updated_at'))
+        self.lease.status = Lease.Status.ACTIVE
+        self.lease.save(update_fields=('status', 'updated_at'))
+        self.unit.status = Unit.Status.OCCUPIED
+        self.unit.save(update_fields=('status', 'updated_at'))
+
+        with patch('application.services.leases.rental_business_date', return_value=date(2026, 10, 15)):
+            response = self.client.post(
+                f'/api/v1/leases/{self.lease.pk}/terminate/',
+                {'end_date': '2026-06-01', 'reason': 'Tenant moved out'},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.lease.refresh_from_db()
+        self.unit.refresh_from_db()
+        self.assertEqual(self.lease.status, Lease.Status.TERMINATED)
+        self.assertEqual(self.unit.status, Unit.Status.AVAILABLE)
 
     def test_termination_cannot_release_a_unit_before_its_inclusive_end_date(self):
         self.client.post(f'/api/v1/leases/{self.lease.pk}/activate/')

@@ -545,7 +545,7 @@ class TechnicianProfile(models.Model):
 	skills = models.JSONField(default=list, blank=True)
 	rating_milli = models.PositiveIntegerField(default=4000)
 	acceptance_milli = models.PositiveIntegerField(default=800)
-	verified = models.BooleanField(default=True)
+	verified = models.BooleanField(default=False)
 	available = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)

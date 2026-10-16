@@ -85,7 +85,7 @@ export function Header({ variant = "default" }: { variant?: "default" | "homepag
         </nav>
 
         <div className="hidden items-center gap-2 lg:flex">
-          {!isHomepage && <ThemeToggle />}
+          <ThemeToggle />
           <Button href="/signin" variant="ghost" size="sm">
             {isHomepage ? "Sign in" : "Log in"}
           </Button>
@@ -142,7 +142,7 @@ export function Header({ variant = "default" }: { variant?: "default" | "homepag
             </a>
           ))}
           <div className="mt-3 flex flex-col gap-2 border-t border-border pt-4">
-            {!isHomepage && <ThemeToggle className="w-full" />}
+            <ThemeToggle className="w-full" />
             <a
               href="/signin"
               onClick={close}

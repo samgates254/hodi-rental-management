@@ -104,9 +104,14 @@ export default function TechnicianDashboard() {
         <section id="overview" className="ops-mast">
           <h2>Assigned repair work.</h2>
           <p>Jobs appear only after they are assigned to you. Quotations, material receipts, and completion stay on the work order — nothing on this page is a sample record.</p>
+          <ol className="technician-steps">
+            <li>Open the assigned job. Requests that are not yours stay off this page.</li>
+            <li>Accept or decline only when that action is offered on the work order.</li>
+            <li>Add notes and evidence, then send the quotation and completion through the same order.</li>
+          </ol>
         </section>
         {organizationId ? (
-          <MaintenanceRequestsPanel organizationId={organizationId} canWrite={false} />
+          <MaintenanceRequestsPanel organizationId={organizationId} canWrite={false} requestScope="assigned" />
         ) : (
           <p className="technician-empty" role="status">No organization is selected.</p>
         )}

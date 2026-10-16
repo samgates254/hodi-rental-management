@@ -883,7 +883,7 @@ def assess_turnover_readiness(
 ):
     unit_id = TurnoverAssessment.objects.values_list('unit_id', flat=True).get(pk=assessment.pk)
     unit = Unit.objects.select_for_update().select_related('building__property__organization').get(pk=unit_id)
-    item = TurnoverAssessment.objects.select_for_update().select_related(
+    item = TurnoverAssessment.objects.select_for_update(of=('self',)).select_related(
         'maintenance_request__work_order', 'organization',
     ).get(pk=assessment.pk)
     if (item.unit_id != unit.pk or item.maintenance_request.unit_id != unit.pk

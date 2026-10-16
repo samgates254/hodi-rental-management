@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 from urllib.parse import quote
 
 from .models import AccountProfile
@@ -116,5 +116,5 @@ def reset_user_password(uid, token, password):
 	password_validation.validate_password(password, user)
 	user.set_password(password)
 	user.save(update_fields=('password',))
-	Token.objects.filter(user=user).delete()
+	AuthToken.objects.filter(user=user).delete()
 	return True

@@ -71,6 +71,37 @@ class MpesaReconciliationCommandTests(TestCase):
         audit = AuditLog.objects.get(action='mpesa.stk.reconcile')
         self.assertTrue(audit.metadata['review_required'])
 
+    def test_verified_success_is_not_queried_again_and_remains_reviewable(self):
+        with patch(
+            'infrastructure.payments.mpesa.MpesaClient.stk_query',
+            return_value=self.query_result('0'),
+        ) as query:
+            self.run_command()
+            query.assert_called_once()
+
+            # Make the attempt old enough that retry timing cannot explain
+            # why the next command skips it.
+            MpesaAttempt.objects.filter(pk=self.attempt.pk).update(
+                last_reconciliation_at=timezone.now() - timedelta(hours=1),
+            )
+
+            output = self.run_command()
+            query.assert_called_once()
+
+        self.attempt.refresh_from_db()
+        self.assertEqual(
+            self.attempt.reconciliation_state,
+            MpesaAttempt.ReconciliationState.SUCCESS_NEEDS_RECEIPT,
+        )
+        self.assertEqual(self.attempt.reconciliation_attempts, 1)
+        self.assertEqual(self.attempt.status, MpesaAttempt.Status.STK_SENT)
+        self.assertEqual(Payment.objects.count(), 0)
+        self.assertIn('SUCCESS_NEEDS_RECEIPT=0', output)
+
+        review = self.run_command('--review-required')
+        self.assertIn(str(self.attempt.pk), review)
+        self.assertIn('SUCCESS_NEEDS_RECEIPT', review)
+
     def test_provider_failure_closes_only_matching_attempt(self):
         with patch('infrastructure.payments.mpesa.MpesaClient.stk_query', return_value=self.query_result('1032')):
             self.run_command()

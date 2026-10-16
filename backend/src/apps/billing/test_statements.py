@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 from rest_framework.test import APIClient
 
 from apps.leases.models import Lease, RentSchedule
@@ -278,8 +278,8 @@ class TenantStatementTests(TestCase):
 		self.assertEqual(unknown.status_code, status.HTTP_400_BAD_REQUEST)
 
 	def test_pdf_is_generated_from_the_same_rows(self):
-		token = Token.objects.create(user=self.tenant_user)
-		self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+		_instance, token = AuthToken.objects.create(user=self.tenant_user)
+		self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
 		response = self.client.get('/api/v1/billing/statements/me/pdf/?period=current_month')
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response['Content-Type'], 'application/pdf')
@@ -296,8 +296,8 @@ class TenantStatementTests(TestCase):
 		self.assertNotIn(b'Bena private rent', body)
 
 	def test_real_token_round_trip_matches_force_auth_totals(self):
-		token = Token.objects.create(user=self.tenant_user)
-		self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+		_instance, token = AuthToken.objects.create(user=self.tenant_user)
+		self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
 		response = self.client.get('/api/v1/billing/statements/me/?period=lease')
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data['period']['label'], 'lease')

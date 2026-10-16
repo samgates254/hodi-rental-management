@@ -4,7 +4,7 @@ import Image from "next/image";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage, asList } from "@/lib/opsApi";
-import { minorToShillingsInput, rentLabel, shillingsToCents, type ManagedListing } from "./shared";
+import { isPanoramaCaption, minorToShillingsInput, rentLabel, shillingsToCents, type ManagedListing } from "./shared";
 
 type Id = number | string;
 
@@ -58,6 +58,7 @@ export default function MarketplaceManager({
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<ManagedListing | null>(null);
   const [inquiries, setInquiries] = useState<Record<string, { id: number; name: string; email: string; phone: string; message: string; created_at: string }[]>>({});
+  const [panoramaUpload, setPanoramaUpload] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,6 +177,7 @@ export default function MarketplaceManager({
     const body = new FormData();
     body.set("image", file);
     body.set("is_primary", listing.photos.length ? "false" : "true");
+    if (panoramaUpload[listing.id]) body.set("caption", "360:");
     setSaving(true);
     setError("");
     try {
@@ -332,6 +334,7 @@ export default function MarketplaceManager({
                         {listing.photos.map(photo => (
                           <span key={photo.id}>
                             <AuthThumb url={photo.url} alt={photo.caption || listing.title} />
+                            {isPanoramaCaption(photo.caption) && <span>360° photo</span>}
                             <button type="button" onClick={() => void removePhoto(listing, photo.id)} disabled={saving}>Remove{photo.is_primary ? " primary" : ""}</button>
                           </span>
                         ))}
@@ -349,6 +352,15 @@ export default function MarketplaceManager({
                           }}
                         />
                       </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(panoramaUpload[listing.id])}
+                          onChange={event => setPanoramaUpload(current => ({ ...current, [listing.id]: event.target.checked }))}
+                        />
+                        {" "}Mark the next upload as an equirectangular 360° photograph
+                      </label>
+                      <p>Use this only for a real 360° photo. Visitors can drag around inside it. It is not a 3D scan or a digital twin.</p>
                     </td>
                     <td>
                       <button type="button" className="landlord-button" onClick={() => setEditing(listing)} disabled={saving}>Edit</button>

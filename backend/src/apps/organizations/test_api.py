@@ -133,7 +133,7 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
         self.assertEqual(membership.organization, self.organization)
         self.assertEqual(membership.role, OrganizationMembership.Role.TECHNICIAN)
         profile = TechnicianProfile.objects.get(user=self.candidate)
-        self.assertTrue(profile.verified)
+        self.assertFalse(profile.verified)
         self.assertTrue(profile.available)
 
     def test_owner_can_create_manager_caretaker_and_technician_accounts(self):
@@ -176,7 +176,7 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
 
             if role == OrganizationMembership.Role.TECHNICIAN:
                 technician_profile = TechnicianProfile.objects.get(user=user)
-                self.assertTrue(technician_profile.verified)
+                self.assertFalse(technician_profile.verified)
                 self.assertTrue(technician_profile.available)
 
             login_response = self.client.post(

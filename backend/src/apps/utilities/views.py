@@ -27,6 +27,8 @@ class TenantUtilityView(APIView):
             tenant = request.user.tenant_record
         except Exception:
             return Response([])
+        if not tenant.is_active or not tenant.organization.is_active:
+            return Response([])
         today = rental_business_date()
         # Utility bills are unit-level records, so only expose a bill to a
         # tenant when its entire inclusive billing period belongs to one of

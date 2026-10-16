@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { useMagnetic } from "@/hooks/useMagnetic";
 
 type Variant = "primary" | "secondary" | "ghost" | "outline-light";
 type Size = "md" | "lg" | "sm";
@@ -25,6 +28,7 @@ type BaseProps = {
   variant?: Variant;
   size?: Size;
   className?: string;
+  magnetic?: boolean;
   children: ReactNode;
 };
 
@@ -41,15 +45,21 @@ type ButtonAsLink = BaseProps & {
 export function Button(props: ButtonAsButton | ButtonAsLink) {
   const variant = props.variant ?? "primary";
   const size = props.size ?? "md";
+  const magnetic = props.magnetic ?? (variant === "primary" || variant === "secondary");
   const { className, children } = props;
 
+  const magneticRef = useMagnetic<HTMLAnchorElement | HTMLButtonElement>(
+    magnetic ? 0.32 : 0,
+    magnetic ? 8 : 0
+  );
+
   const classes = cn(
-    "inline-flex items-center justify-center gap-2 rounded-md font-medium tracking-tight transition-colors duration-200",
+    "inline-flex items-center justify-center gap-2 rounded-md font-medium tracking-tight transition-colors duration-200 select-none",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg",
     "disabled:pointer-events-none disabled:opacity-50",
     variants[variant],
     sizes[size],
-    className,
+    className
   );
 
   if ("href" in props && props.href) {
@@ -57,6 +67,7 @@ export function Button(props: ButtonAsButton | ButtonAsLink) {
     if (external) {
       return (
         <a
+          ref={magneticRef as React.Ref<HTMLAnchorElement>}
           href={href}
           className={classes}
           target="_blank"
@@ -67,7 +78,11 @@ export function Button(props: ButtonAsButton | ButtonAsLink) {
       );
     }
     return (
-      <Link href={href} className={classes}>
+      <Link
+        ref={magneticRef as React.Ref<HTMLAnchorElement>}
+        href={href}
+        className={classes}
+      >
         {children}
       </Link>
     );
@@ -87,6 +102,7 @@ export function Button(props: ButtonAsButton | ButtonAsLink) {
 
   return (
     <button
+      ref={magneticRef as React.Ref<HTMLButtonElement>}
       type={type}
       className={classes}
       disabled={disabled}
