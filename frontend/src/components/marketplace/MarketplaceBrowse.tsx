@@ -8,7 +8,7 @@ import { Header } from "@/components/layout/Header";
 import { Container } from "@/components/ui/Container";
 import { clientApi } from "@/lib/clientApi";
 import { apiErrorMessage } from "@/lib/opsApi";
-import { locationLabel, minorToShillingsInput, primaryPhoto, rentLabel, shillingsToCents, type PublicListing } from "./shared";
+import { isPanoramaCaption, locationLabel, minorToShillingsInput, primaryPhoto, rentLabel, shillingsToCents, type PublicListing } from "./shared";
 import { RemotePhoto } from "./RemotePhoto";
 
 type Filters = {
@@ -35,22 +35,19 @@ function BrowseListingCard({ listing }: { listing: PublicListing }) {
   const [failed, setFailed] = useState(false);
   return (
     <li>
-      <Link
-        href={`/marketplace/${listing.id}`}
-        className="group block overflow-hidden border border-emerald-700 bg-surface transition duration-200 hover:-translate-y-0.5"
-      >
-        <div className="relative aspect-[16/10] overflow-hidden bg-soft-teal">
+      <Link href={`/marketplace/${listing.id}`} className="hodi-listing-card group">
+        <div className="hodi-listing-card-media">
           {photo && !failed ? (
             <RemotePhoto
               src={photo.url}
               alt={photo.caption || listing.title}
               fill
               sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-              className="object-cover transition duration-200 group-hover:scale-[1.02]"
+              className="object-cover transition duration-500 motion-safe:group-hover:scale-[1.03]"
               onFail={() => setFailed(true)}
             />
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-text-secondary" aria-label={`No listing photo available for ${listing.title}`}>
+            <div className="hodi-listing-card-empty" aria-label={`No listing photo available for ${listing.title}`}>
               <svg aria-hidden="true" viewBox="0 0 32 32" className="h-9 w-9" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="m4 14 12-9 12 9v13H4z" />
                 <path d="M12 27v-8h8v8M9 14h.01M23 14h.01" />
@@ -58,21 +55,18 @@ function BrowseListingCard({ listing }: { listing: PublicListing }) {
               <span>{photo ? "Photo unavailable" : "No listing photo"}</span>
             </div>
           )}
+          <span className="hodi-listing-card-status">{listing.available ? "Available" : "Unavailable"}</span>
+          {listing.photos.some(item => isPanoramaCaption(item.caption)) && <span className="hodi-listing-card-pano">360° photo</span>}
         </div>
-        <div className="space-y-2 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="font-[family-name:var(--hodi-editorial)] text-xl font-normal leading-snug text-charcoal">{listing.title}</h2>
-            <span className="shrink-0 border border-border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-charcoal">{listing.available ? "Available" : "Unavailable"}</span>
-          </div>
-          <p className="text-sm text-text-secondary">{[listing.property_name, listing.unit_label, locationLabel(listing)].filter(Boolean).join(" · ")}</p>
-          <p className="text-base font-semibold text-charcoal">{rentLabel(listing.monthly_rent_minor)} <span className="font-normal text-text-secondary">/ month</span></p>
-          <p className="text-sm text-text-secondary">
+        <div className="hodi-listing-card-body">
+          <p className="hodi-listing-card-place">{locationLabel(listing) || listing.city}</p>
+          <h2>{listing.title}</h2>
+          <p className="hodi-listing-card-meta">{[listing.property_name, listing.unit_label].filter(Boolean).join(" · ")}</p>
+          <p className="hodi-listing-card-facts">
             {listing.bedrooms} bed · {listing.bathrooms} bath · {listing.furnished ? "Furnished" : "Unfurnished"}
+            {listing.amenities.length > 0 ? ` · ${listing.amenities.slice(0, 3).join(" · ")}` : ""}
           </p>
-          {listing.amenities.length > 0 && (
-            <p className="text-sm text-text-secondary">{listing.amenities.slice(0, 4).join(" · ")}</p>
-          )}
-          <p className="text-sm font-semibold text-teal">View home</p>
+          <p className="hodi-listing-card-rent">{rentLabel(listing.monthly_rent_minor)} <span>/ month</span></p>
         </div>
       </Link>
     </li>
@@ -293,7 +287,7 @@ export function MarketplaceBrowse() {
 
         <Container className="py-8 md:py-12">
           <form
-            className="grid gap-3 rounded-2xl border border-border bg-surface p-4 shadow-soft md:grid-cols-4"
+            className="hodi-market-filters"
             onSubmit={event => {
               event.preventDefault();
               applyFilters(draft);
@@ -343,11 +337,11 @@ export function MarketplaceBrowse() {
                 <option value="-rent">Rent, high to low</option>
               </select>
             </label>
-            <div className="flex items-end gap-2 md:col-span-2">
-              <button type="submit" className="h-11 rounded-xl bg-teal px-5 text-sm font-semibold text-brand-contrast">Search</button>
+            <div className="hodi-market-actions md:col-span-2">
+              <button type="submit" className="hodi-market-submit">Search</button>
               <button
                 type="button"
-                className="h-11 rounded-xl border border-border px-4 text-sm"
+                className="hodi-market-clear"
                 onClick={() => {
                   setDraft(EMPTY_FILTERS);
                   setFilters(EMPTY_FILTERS);
@@ -364,36 +358,52 @@ export function MarketplaceBrowse() {
           {validationError && <p className="mt-3 text-sm text-red-700" role="alert">{validationError}</p>}
 
           <div className="mt-8" aria-live="polite">
-            {loading && <p className="text-text-secondary">Loading published listings…</p>}
+            {loading && (
+              <div role="status" aria-busy="true">
+                <p className="sr-only">Loading published listings…</p>
+                <ul className="hodi-listing-grid" aria-hidden="true">
+                  {Array.from({ length: 6 }, (_, index) => (
+                    <li key={index} className="hodi-listing-card hodi-listing-skeleton">
+                      <div className="hodi-listing-card-media motion-safe:animate-pulse" />
+                      <div className="hodi-listing-card-body">
+                        <div className="h-3 w-1/3 bg-soft-teal motion-safe:animate-pulse" />
+                        <div className="mt-3 h-6 w-4/5 bg-soft-teal motion-safe:animate-pulse" />
+                        <div className="mt-3 h-4 w-1/2 bg-soft-teal motion-safe:animate-pulse" />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!loading && error && (
-              <div className="rounded-2xl border border-border bg-surface p-6" role="alert">
+              <div className="hodi-market-error" role="alert">
                 <p>{error}</p>
-                <button type="button" className="mt-3 text-sm font-semibold text-teal" onClick={() => setRetryKey(value => value + 1)}>Try again</button>
+                <button type="button" className="hodi-text-action" onClick={() => setRetryKey(value => value + 1)}>Try again</button>
               </div>
             )}
             {!loading && !error && listings.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-border bg-surface p-8">
-                <h2 className="text-xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>{hasActiveFilters(filters) ? "No listings match" : "No homes are available yet"}</h2>
-                <p className="mt-2 max-w-lg text-sm leading-relaxed text-text-secondary">
+              <div className="hodi-market-empty">
+                <h2>{hasActiveFilters(filters) ? "No listings match" : "No homes are available yet"}</h2>
+                <p>
                   {hasActiveFilters(filters)
                     ? "Nothing published is available for these filters. Try changing or clearing them. Occupied units and drafts stay off this page."
                     : "Published homes will appear here when an organization makes an available unit public."}
                 </p>
-                {hasActiveFilters(filters) && <button type="button" className="mt-4 text-sm font-semibold text-teal" onClick={() => applyFilters(EMPTY_FILTERS)}>Clear filters</button>}
+                {hasActiveFilters(filters) && <button type="button" className="hodi-text-action" onClick={() => applyFilters(EMPTY_FILTERS)}>Clear filters</button>}
               </div>
             )}
             {!loading && !error && listings.length > 0 && (
               <>
                 <p className="mb-4 text-sm text-text-secondary" role="status">{resultCount} {resultCount === 1 ? "home" : "homes"} found</p>
-                <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                <ul className="hodi-listing-grid">
                   {listings.map(listing => (
                     <BrowseListingCard key={listing.id} listing={listing} />
                   ))}
                 </ul>
-                {(hasPreviousPage || hasNextPage) && <nav className="mt-8 flex items-center justify-between" aria-label="Marketplace result pages">
-                  <button type="button" className="h-10 rounded-lg border border-border bg-surface px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50" onClick={() => changePage(page - 1)} disabled={!hasPreviousPage || loading}>Previous</button>
+                {(hasPreviousPage || hasNextPage) && <nav className="hodi-page-nav" aria-label="Marketplace result pages">
+                  <button type="button" onClick={() => changePage(page - 1)} disabled={!hasPreviousPage || loading}>Previous</button>
                   <span className="text-sm text-text-secondary">Page {page}</span>
-                  <button type="button" className="h-10 rounded-lg border border-border bg-surface px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50" onClick={() => changePage(page + 1)} disabled={!hasNextPage || loading}>Next</button>
+                  <button type="button" onClick={() => changePage(page + 1)} disabled={!hasNextPage || loading}>Next</button>
                 </nav>}
               </>
             )}

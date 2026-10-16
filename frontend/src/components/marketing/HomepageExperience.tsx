@@ -15,12 +15,12 @@ const ArchitecturalHero3D = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="w-full h-full min-h-[460px] flex flex-col items-center justify-center p-8 text-center bg-teal text-white rounded-2xl animate-pulse">
-        <span className="text-xs uppercase tracking-widest text-emerald-200/80 mb-2">
-          Initializing 3D Experience...
+      <div className="flex h-full min-h-[460px] w-full flex-col items-center justify-center bg-[#102820] p-8 text-center text-white">
+        <span className="mb-2 text-[11px] uppercase tracking-[0.16em] text-[#c6a66b]">
+          Illustration
         </span>
         <p className="font-editorial text-lg text-white">
-          Connected Property Operations
+          Preparing the building drawing
         </p>
       </div>
     ),
@@ -267,14 +267,13 @@ export function HomepageExperience() {
           </div>
         </div>
 
-        {/* Interactive 3D Architectural Hero Digital Twin */}
-        <div className="hodi-home-hero-visual hodi-glass-card relative flex flex-col items-center justify-center min-h-[460px] md:min-h-[520px] rounded-2xl overflow-hidden p-2 sm:p-4">
+        <figure className="hodi-home-hero-visual hodi-hero-stage">
           <ArchitecturalHero3D />
-          <figcaption className="w-full mt-2 flex items-center justify-between px-2 text-[11px] text-white/60">
-            <span>HODI Digital Twin · Interactive 3D</span>
-            <span className="hidden sm:inline">Orbit bounded · Live rent &amp; maintenance tooltips</span>
+          <figcaption className="hodi-hero-stage-note">
+            <span>Illustration · not a property scan</span>
+            <small>Drag to orbit</small>
           </figcaption>
-        </div>
+        </figure>
       </section>
 
       <section

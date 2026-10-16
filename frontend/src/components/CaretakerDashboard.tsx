@@ -376,10 +376,10 @@ export default function CaretakerDashboard() {
         </div>
 
         <section className="caretaker-summary" aria-label="Workspace summary">
-          <article><span>Open issues</span><strong>{activeIssues.length}</strong><small>Need follow-up</small></article>
-          <article><span>In progress</span><strong>{issues.filter(issue => issueStatus(issue) === "IN_PROGRESS").length}</strong><small>Being handled</small></article>
-          <article className="is-warning"><span>Rent overdue</span><strong>{overduePayments.length}</strong><small>{formatMoney(overdueTotal)} outstanding</small></article>
-          <article><span>Awaiting payment</span><strong>{pendingPayments.length}</strong><small>{formatMoney(pendingTotal)} pending</small></article>
+          <a href="#issues"><span>Open issues</span><strong>{activeIssues.length}</strong><small>Need follow-up</small></a>
+          <a href="#issues"><span>In progress</span><strong>{issues.filter(issue => issueStatus(issue) === "IN_PROGRESS").length}</strong><small>Being handled</small></a>
+          <a className="is-warning" href="#payments"><span>Rent overdue</span><strong>{overduePayments.length}</strong><small>{formatMoney(overdueTotal)} outstanding</small></a>
+          <a href="#payments"><span>Awaiting payment</span><strong>{pendingPayments.length}</strong><small>{formatMoney(pendingTotal)} pending</small></a>
         </section>
 
         <section className="caretaker-panel" id="issues">

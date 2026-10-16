@@ -35,7 +35,7 @@ const columns = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-border bg-surface">
+    <footer className="hodi-site-footer">
       <Container className="section-pad !py-14 md:!py-16">
         <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-12 lg:gap-8">
           <div className="lg:col-span-4">

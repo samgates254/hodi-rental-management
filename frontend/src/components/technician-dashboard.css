@@ -139,6 +139,17 @@
   color: var(--hodi-muted);
 }
 
+.technician-steps {
+  display: grid;
+  gap: 8px;
+  max-width: 68ch;
+  margin: 14px 0 0;
+  padding-left: 1.2rem;
+  color: var(--hodi-text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .technician-header-actions {
   display: flex;
   flex-wrap: wrap;
@@ -198,6 +209,12 @@
 
 .technician-empty {
   border: 1px solid var(--hodi-border);
+  border-top: 2px solid var(--hodi-gold);
   background: var(--hodi-surface);
   padding: var(--hodi-space-6);
+}
+
+.technician-steps li::marker {
+  color: var(--hodi-gold);
+  font-weight: 700;
 }

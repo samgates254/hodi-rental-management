@@ -29,3 +29,21 @@ backend/.env.repair-backup-*
 
 /backend/.env.save
 
+
+# Local machine configuration; never commit personal dotfiles
+/.bash_profile
+/.bashrc
+/.gitconfig
+/.profile
+/.ripgreprc
+/.zprofile
+/.zshrc
+/.claude/
+/.idea/
+/.vscode/
+/.mcp.json
+/.gitmodules
+
+# Local recovery backups
+*.backup-*
+*.bak-*

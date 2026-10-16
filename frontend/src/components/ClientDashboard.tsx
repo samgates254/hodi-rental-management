@@ -1561,9 +1561,9 @@ export default function ClientDashboard() {
       if (request.payment_settled === true) {
         void loadInvoices();
         void loadPayments();
-      }
-      if (parsedCents > outstandingCents) {
-        setPageNotice(`${formatMinor(parsedCents - outstandingCents)} will be credited to your next rent.`);
+        if (parsedCents > outstandingCents) {
+          setPageNotice("M-Pesa confirmed this payment. Any amount above the invoice balance is recorded as tenant credit.");
+        }
       }
     } catch (error) {
       if (error instanceof ClientApiError && error.status >= 400 && error.status < 500 && error.status !== 429) {

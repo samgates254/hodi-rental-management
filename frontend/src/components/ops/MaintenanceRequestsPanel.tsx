@@ -882,7 +882,7 @@ export default function MaintenanceRequestsPanel({
         />
       )}
       {selected && (
-        <div className="ops-detail border-l-4 border-sky-700">
+        <div className="ops-detail">
           <div className="ops-heading">
             <div>
               <span className="ops-kicker">REQUEST {selected.id}</span>

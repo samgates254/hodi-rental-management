@@ -26,8 +26,8 @@ const SEQUENCE_STEPS = [
     tag: "AUTOMATED RECONCILIATION",
     title: "Direct M-Pesa matching and strict conservation ledger.",
     description:
-      "Every payment automatically matches against open invoices and water/electricity utility meters using HODI's double-entry allocation engine. Zero manual calculations.",
-    highlight: "Real-Time Daraja STK Push & Water Sub-Meters",
+      "Confirmed payments can be allocated to open charges through Hodi's ledger. A payment is not treated as received until that confirmation exists.",
+    highlight: "Confirmed payments stay on the ledger",
   },
   {
     step: "04",
@@ -296,14 +296,14 @@ export function ArchitecturalExplodedSequence() {
     <section
       ref={sectionRef}
       className="relative min-h-[220vh] bg-[#163d32] text-white py-20 overflow-clip"
-      aria-label="Interactive 3D architectural breakdown of HODI property management"
+      aria-label="Illustrated building sequence. It is not a scan of a Hodi property."
     >
       <div className="sticky top-0 h-screen w-full flex items-center justify-center overflow-hidden">
         <Container className="w-full h-full flex flex-col justify-between py-10 md:py-16">
           {/* Top Header */}
           <div className="flex items-center justify-between border-b border-white/15 pb-4">
             <div>
-              <p className="text-[11px] uppercase tracking-widest text-amber-300 font-semibold mb-1">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-[#c6a66b]">
                 3D Architectural Sequence · Scroll-Linked Progression
               </p>
               <h2 className="font-editorial text-2xl md:text-3xl text-white">
@@ -312,7 +312,7 @@ export function ArchitecturalExplodedSequence() {
             </div>
             <div className="hidden sm:flex items-center gap-2 text-xs text-white/60">
               <span>Scroll to Explode</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[#c6a66b]" />
             </div>
           </div>
 
@@ -321,7 +321,7 @@ export function ArchitecturalExplodedSequence() {
             {/* Left Story Card */}
             <div className="lg:col-span-5 z-20">
               <div
-                className="hodi-glass-card p-6 md:p-8 rounded-2xl border"
+                className="hodi-glass-card border p-6 md:p-8"
                 style={{
                   background: "rgba(22, 61, 50, 0.72)",
                   backdropFilter: "blur(20px)",
@@ -331,10 +331,10 @@ export function ArchitecturalExplodedSequence() {
                 }}
               >
                 <div className="flex items-center justify-between gap-4 mb-4">
-                  <span className="text-3xl font-editorial text-amber-300">
+                  <span className="font-editorial text-3xl text-[#c6a66b]">
                     {activeStep.step}
                   </span>
-                  <span className="px-2.5 py-1 rounded text-[11px] font-bold tracking-wider uppercase bg-white/10 text-emerald-300 border border-white/10">
+                  <span className="border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-[#f4efe4]">
                     {activeStep.tag}
                   </span>
                 </div>
@@ -342,12 +342,12 @@ export function ArchitecturalExplodedSequence() {
                 <h3 className="font-editorial text-xl md:text-2xl text-white mb-3 leading-snug">
                   {activeStep.title}
                 </h3>
-                <p className="text-sm md:text-base text-emerald-100/80 leading-relaxed mb-6">
+                <p className="mb-6 text-sm leading-relaxed text-white/80 md:text-base">
                   {activeStep.description}
                 </p>
 
                 <div className="pt-4 border-t border-white/15 flex items-center justify-between text-xs">
-                  <span className="text-amber-200 font-medium">
+                  <span className="font-medium text-[#c6a66b]">
                     {activeStep.highlight}
                   </span>
                   <span className="text-white/50">
@@ -363,7 +363,7 @@ export function ArchitecturalExplodedSequence() {
                     key={s.step}
                     className={`h-1.5 rounded-full transition-all duration-300 ${
                       idx === activeStepIndex
-                        ? "w-8 bg-amber-400"
+                        ? "w-8 bg-[#c6a66b]"
                         : "w-2 bg-white/20"
                     }`}
                   />
@@ -375,7 +375,7 @@ export function ArchitecturalExplodedSequence() {
             <div className="lg:col-span-7 h-[360px] sm:h-[440px] md:h-[520px] relative">
               <canvas
                 ref={canvasRef}
-                className="w-full h-full block rounded-2xl select-none"
+                className="block h-full w-full select-none"
                 style={{ touchAction: "pan-y" }}
                 aria-label="3D model dynamically exploding across floor tiers as page is scrolled"
               />

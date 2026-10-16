@@ -17,42 +17,42 @@ interface UnitData {
 const UNITS_DATA: Record<string, UnitData> = {
   "unit-4b": {
     id: "unit-4b",
-    name: "Penthouse 4B",
-    type: "3-Bed Executive Penthouse",
+    name: "Top floor",
+    type: "Illustrated residence",
     status: "paid",
-    statusText: "Rent Paid · KES 85,000",
-    metric: "Active Lease · M-Pesa Auto-Match",
-    detail: "Statement sent to Sarah K. · Zero arrears",
+    statusText: "Illustration",
+    metric: "A current lease could appear here",
+    detail: "Not a Hodi unit, tenant, or payment",
     floor: 3,
   },
   "unit-3b": {
     id: "unit-3b",
-    name: "Suite 3B",
-    type: "2-Bed Modern Suite",
+    name: "Middle floor",
+    type: "Illustrated residence",
     status: "reconciled",
-    statusText: "Utilities Reconciled",
-    metric: "Water & Power Sub-metered",
-    detail: "Reading: 24.5 m³ · KES 3,850 billed",
+    statusText: "Illustration",
+    metric: "Utility readings would stay with the unit",
+    detail: "No meter reading is shown because this is not a property",
     floor: 2,
   },
   "unit-2a": {
     id: "unit-2a",
-    name: "Unit 2A",
-    type: "2-Bed Garden Balcony",
+    name: "Second floor",
+    type: "Illustrated residence",
     status: "maintenance",
-    statusText: "Maintenance: In Progress",
-    metric: "Plumbing Work Order #204",
-    detail: "Assigned to vetted technician John M.",
+    statusText: "Illustration",
+    metric: "Maintenance status would stay on the work order",
+    detail: "No technician or job is assigned to this drawing",
     floor: 1,
   },
   "unit-1a": {
     id: "unit-1a",
-    name: "Garden Suite 1A",
-    type: "1-Bed Garden Residence",
+    name: "Ground floor",
+    type: "Illustrated residence",
     status: "due",
-    statusText: "Rent Due in 3 Days",
-    metric: "KES 42,000 · Due 5th",
-    detail: "Automated SMS/Email notification queued",
+    statusText: "Illustration",
+    metric: "Rent status would come from the ledger",
+    detail: "No amount or due date is invented for this drawing",
     floor: 0,
   },
 };
@@ -575,13 +575,10 @@ export function ArchitecturalHero3D() {
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full min-h-[460px] max-h-[600px] overflow-hidden rounded-2xl select-none touch-pan-y"
+      className="relative w-full h-full min-h-[460px] max-h-[600px] overflow-hidden select-none touch-pan-y"
       style={{
         background:
           "linear-gradient(145deg, rgba(22, 61, 50, 0.95) 0%, rgba(15, 38, 32, 0.98) 100%)",
-        border: "1px solid rgba(198, 166, 107, 0.22)",
-        boxShadow:
-          "inset 0 1px 1px rgba(255, 255, 255, 0.15), 0 24px 60px -12px rgba(10, 25, 20, 0.4)",
       }}
     >
       {/* Interactive 3D Canvas */}
@@ -590,14 +587,14 @@ export function ArchitecturalHero3D() {
           ref={canvasRef}
           className="w-full h-full cursor-grab active:cursor-grabbing block"
           style={{ touchAction: "pan-y" }}
-          aria-label="Interactive 3D model of a modern apartment complex managed by HODI"
+          aria-label="Illustrated building you can orbit. It is not a scan or a live Hodi property."
         />
       ) : (
         /* Fallback for environments where WebGL is unavailable */
         <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-teal text-white">
-          <p className="font-editorial text-2xl mb-2">Connected Property Operations</p>
+          <p className="font-editorial text-2xl mb-2">Illustrated property operations</p>
           <p className="text-sm opacity-80 max-w-sm">
-            Interactive 3D visualization previewing real-time rental unit states and automated reconciliation.
+            This drawing shows how a building can be explored. It is not a scan, and it does not contain live rent or maintenance records.
           </p>
         </div>
       )}
@@ -626,30 +623,16 @@ export function ArchitecturalHero3D() {
               <span
                 className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider"
                 style={{
-                  background:
-                    hoveredUnit.status === "paid"
-                      ? "rgba(34, 197, 94, 0.2)"
-                      : hoveredUnit.status === "maintenance"
-                      ? "rgba(245, 158, 11, 0.2)"
-                      : hoveredUnit.status === "reconciled"
-                      ? "rgba(59, 130, 246, 0.2)"
-                      : "rgba(198, 166, 107, 0.25)",
-                  color:
-                    hoveredUnit.status === "paid"
-                      ? "#86efac"
-                      : hoveredUnit.status === "maintenance"
-                      ? "#fde047"
-                      : hoveredUnit.status === "reconciled"
-                      ? "#93c5fd"
-                      : "#fef08a",
+                  background: "rgba(198, 166, 107, 0.22)",
+                  color: "#f4efe4",
                   border: "1px solid rgba(255, 255, 255, 0.15)",
                 }}
               >
                 {hoveredUnit.statusText}
               </span>
             </div>
-            <div className="text-[11px] text-emerald-100/90 font-medium">{hoveredUnit.metric}</div>
-            <div className="text-[10px] text-emerald-200/60 mt-0.5">{hoveredUnit.detail}</div>
+            <div className="text-[11px] font-medium text-[#f4efe4]">{hoveredUnit.metric}</div>
+            <div className="mt-0.5 text-[10px] text-[#c6a66b]">{hoveredUnit.detail}</div>
           </div>
         </div>
       )}
@@ -657,14 +640,14 @@ export function ArchitecturalHero3D() {
       {/* Interactive Controls Overlay */}
       <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
         <div className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 text-[11px] text-white/80">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
-          <span>Interactive 3D · Drag to orbit · Hover units</span>
+          <span className="w-2 h-2 rounded-full bg-[#c6a66b]" aria-hidden="true" />
+          <span>Illustration · Drag to orbit · Hover a floor</span>
         </div>
 
         <button
           type="button"
           onClick={toggleExploded}
-          className="pointer-events-auto px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-tight transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+          className="pointer-events-auto px-3.5 py-1.5 text-xs font-semibold tracking-tight transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c6a66b]"
           style={{
             background: isExploded
               ? "rgba(198, 166, 107, 0.95)"

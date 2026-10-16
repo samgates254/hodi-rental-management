@@ -43,7 +43,7 @@
 
 .landlord-sidebar-label {
   margin: 52px 12px 12px;
-  color: #9ca7b5;
+  color: var(--hodi-gold);
 }
 
 .landlord-nav {
@@ -66,12 +66,13 @@
 
 .landlord-nav a:hover,
 .landlord-nav a.is-active {
-  background: #293542;
+  background: rgb(255 255 255 / 0.08);
   color: #fff;
 }
 
 .landlord-nav a.is-active {
-  box-shadow: inset 3px 0 var(--landlord-teal);
+  background: rgb(255 255 255 / 0.08);
+  box-shadow: inset 3px 0 var(--hodi-gold);
 }
 
 .landlord-sidebar-bottom {
@@ -299,6 +300,11 @@
   transition: border-color var(--hodi-transition-fast) ease, box-shadow var(--hodi-transition-fast) ease, transform var(--hodi-transition-fast) ease;
 }
 
+a.landlord-metric-card {
+  color: inherit;
+  text-decoration: none;
+}
+
 .landlord-metric-card:hover,
 .landlord-property-card:hover {
   border-color: color-mix(in srgb, var(--hodi-brand) 35%, var(--landlord-line));
@@ -315,9 +321,10 @@
 
 .landlord-metric-card strong {
   margin-top: 15px;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -.7px;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 2rem;
+  font-weight: 460;
+  letter-spacing: -0.04em;
 }
 
 .landlord-metric-card small {
@@ -333,6 +340,53 @@
 
 .landlord-metric-card--accent strong {
   font-size: 24px;
+}
+
+.landlord-attention {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landlord-attention a {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--hodi-warning) 38%, var(--hodi-border));
+  border-radius: 10px;
+  background: var(--hodi-warning-soft);
+  color: var(--hodi-text);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.landlord-attention a.is-quiet {
+  border-color: var(--hodi-border);
+  background: var(--hodi-surface);
+}
+
+.landlord-attention a:hover,
+.landlord-attention a:focus-visible {
+  border-color: var(--hodi-brand);
+}
+
+.landlord-portfolio-search {
+  display: grid;
+  margin-top: 16px;
+}
+
+.landlord-portfolio-search input {
+  width: min(100%, 28rem);
+  min-height: var(--hodi-control-height);
+  padding: 0 12px;
+  border: 1px solid var(--hodi-border);
+  border-radius: 8px;
+  background: var(--hodi-canvas);
+  color: var(--hodi-text);
 }
 
 .landlord-section {
@@ -458,7 +512,10 @@
 
 .landlord-property-card h3 {
   margin: 17px 0 5px;
-  font-size: 16px;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 1.45rem;
+  font-weight: 460;
+  letter-spacing: -0.03em;
 }
 
 .landlord-property-card > p {
@@ -1187,4 +1244,26 @@
   border-color: color-mix(in srgb, var(--hodi-success) 30%, var(--hodi-border));
   background: var(--hodi-success-soft);
   color: var(--hodi-success);
+}
+
+.landlord-section-heading h2,
+.landlord-topbar h1 {
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-weight: 460;
+  letter-spacing: -0.035em;
+}
+
+.landlord-empty-state,
+.landlord-empty-workspace {
+  border-top: 2px solid var(--hodi-gold);
+}
+
+.landlord-attention a,
+.landlord-section-count,
+.landlord-status {
+  border-radius: 0;
+}
+
+.landlord-table tbody tr:hover {
+  background: color-mix(in srgb, var(--hodi-brand-soft) 55%, transparent);
 }
