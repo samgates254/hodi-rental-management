@@ -6,7 +6,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from apps.audit.models import AuditLog
 from apps.billing.models import MpesaAttempt, Payment
 from application.services.audit import record_audit
-from application.services.billing import allocate_payment, record_payment
+from application.services.billing import allocate_payment, record_verified_mpesa_payment
 from application.services.mpesa_callback import TransactionDateValidationError, validate_stk_transaction_date
 from application.services.mpesa import normalize_kenya_msisdn
 from common.permissions import user_can_access_organization_resource
@@ -92,11 +92,10 @@ def resolve_mpesa_attempt_from_evidence(*, attempt_id, actor, evidence, request=
         raise ValidationError({'receipt': 'This receipt is already recorded against a payment.'})
 
     try:
-        payment = record_payment(
+        payment = record_verified_mpesa_payment(
             tenant=attempt.tenant,
             amount_cents=attempt.amount_cents,
             received_date=evidence['transaction_date'],
-            method=Payment.Method.MPESA,
             actor=actor,
             reference=receipt,
             external_id=receipt,

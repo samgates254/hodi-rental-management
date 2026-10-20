@@ -5,8 +5,9 @@ import "@fontsource/dm-sans/600.css";
 import "@fontsource/dm-sans/700.css";
 import "@fontsource/fraunces/400.css";
 import "@fontsource/fraunces/600.css";
-import Script from "next/script";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
+import { SmoothScrollProvider } from "@/components/providers/SmoothScrollProvider";
+import { AmbientMeshBackground } from "@/components/ui/AmbientMeshBackground";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -55,12 +56,19 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <Script id="hodi-theme-init" strategy="beforeInteractive">
-          {`try { var savedTheme = localStorage.getItem("hodi-theme"); document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light"; } catch (_) { document.documentElement.dataset.theme = "light"; }`}
-        </Script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var saved=localStorage.getItem("hodi-theme");var theme=saved==="dark"||saved==="light"?saved:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.dataset.theme=theme;}catch(e){document.documentElement.dataset.theme="light";}})();`,
+          }}
+        />
       </head>
-      <body className="antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+      <body className="antialiased relative min-h-screen">
+        <AmbientMeshBackground />
+        <ThemeProvider>
+          <SmoothScrollProvider>
+            <div className="relative z-10">{children}</div>
+          </SmoothScrollProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

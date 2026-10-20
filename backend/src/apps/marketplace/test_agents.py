@@ -6,7 +6,7 @@ from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -134,7 +134,7 @@ class AgentMarketplaceWorkflowTests(APITestCase):
 		self.assertIsNone(response.data['token'])
 		self.assertEqual(len(mail.outbox), 1)
 		self.assertIn('/verify-email#token=', mail.outbox[0].body)
-		self.assertFalse(Token.objects.filter(user=user).exists())
+		self.assertFalse(AuthToken.objects.filter(user=user).exists())
 
 	def test_unverified_agent_cannot_be_authorized_or_access_workspace(self):
 		account = self.agent_user.account_profile

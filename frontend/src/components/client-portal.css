@@ -18,7 +18,7 @@
 }
 
 .portal-layout {
-  padding-left: 250px;
+  padding-left: var(--hodi-sidebar-width);
 }
 
 .portal-sidebar {
@@ -26,12 +26,12 @@
   inset: 0 auto 0 0;
   z-index: 20;
   display: flex;
-  width: 250px;
+  width: var(--hodi-sidebar-width);
   flex-direction: column;
   padding: 24px 16px;
   background: var(--hodi-sidebar);
   color: #fff;
-  transition: width .2s ease;
+  transition: width var(--hodi-transition-standard) ease;
 }
 
 .portal-workspace {
@@ -47,7 +47,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 12px clamp(20px, 4vw, 52px);
+  padding: var(--hodi-space-3) var(--hodi-workspace-gutter);
   border-bottom: 1px solid var(--portal-line);
   background: color-mix(in srgb, var(--hodi-surface) 95%, transparent);
   backdrop-filter: blur(12px);
@@ -138,8 +138,8 @@
   right: -15px;
   width: 30px;
   height: 30px;
-  border-color: #3a4653;
-  background: #25313d;
+  border-color: rgb(255 255 255 / 0.16);
+  background: var(--hodi-sidebar);
   color: #fff;
 }
 
@@ -174,7 +174,7 @@
 
 .portal-nav-item {
   display: flex;
-  min-height: 44px;
+  min-height: var(--hodi-nav-item-height);
   align-items: center;
   gap: 13px;
   padding: 0 12px;
@@ -189,7 +189,7 @@
 
 .portal-nav-item:hover,
 .portal-nav-item.is-active {
-  background: #293542;
+  background: rgb(255 255 255 / 0.08);
   color: #fff;
 }
 
@@ -208,9 +208,9 @@
   display: grid;
   gap: 9px;
   padding: 14px;
-  border: 1px solid #35414c;
+  border: 1px solid rgb(255 255 255 / 0.12);
   border-radius: 10px;
-  background: #202d38;
+  background: rgb(0 0 0 / 0.18);
 }
 
 .portal-sidebar-help > span {
@@ -219,8 +219,8 @@
   height: 32px;
   place-items: center;
   border-radius: 8px;
-  background: #293c45;
-  color: #59d5ce;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--hodi-gold);
 }
 
 .portal-sidebar-help > div {
@@ -246,20 +246,20 @@
   justify-content: space-between;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid #405360;
+  border: 1px solid rgb(255 255 255 / 0.16);
   border-radius: 7px;
-  background: #293c45;
-  color: #b5f0ec;
+  background: rgb(255 255 255 / 0.06);
+  color: var(--hodi-ivory);
   cursor: pointer;
   font: inherit;
   font-size: 11px;
   font-weight: 650;
-  transition: background-color .18s ease, border-color .18s ease;
+  transition: background-color var(--hodi-transition-fast) ease, border-color var(--hodi-transition-fast) ease;
 }
 
 .portal-sidebar-help > button:hover {
-  border-color: #59d5ce;
-  background: #314955;
+  border-color: var(--hodi-gold);
+  background: rgb(255 255 255 / 0.12);
 }
 
 .portal-sidebar-bottom > button {
@@ -307,7 +307,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 12px clamp(20px, 4vw, 52px);
+  padding: var(--hodi-space-3) var(--hodi-workspace-gutter);
   border-bottom: 1px solid var(--portal-line);
   background: color-mix(in srgb, var(--hodi-surface) 95%, transparent);
   backdrop-filter: blur(12px);
@@ -521,7 +521,7 @@
 }
 
 .portal-page-heading h1 {
-  font-size: clamp(28px, 3vw, 38px);
+  font-size: var(--hodi-type-page-title);
 }
 
 .portal-page-heading > div > p:last-child,
@@ -592,8 +592,11 @@
 }
 
 .portal-rent-summary-value {
-  font-size: 25px;
-  line-height: 1.15;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 2rem;
+  font-weight: 460;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
 }
 
 .portal-rent-summary > button {
@@ -813,7 +816,7 @@
 }
 
 .portal-section-heading h2 {
-  font-size: 23px;
+  font-size: var(--hodi-type-section);
 }
 
 .portal-section-eyebrow {
@@ -1041,7 +1044,7 @@
   width: 14px;
   height: 14px;
   place-items: center;
-  border: 1px solid #abb6c0;
+  border: var(--hodi-border-width) solid var(--hodi-border);
   border-radius: 50%;
 }
 
@@ -1260,7 +1263,7 @@
   gap: 12px;
   margin-bottom: 18px;
   padding: 15px;
-  border: 1px solid #d4e5e4;
+  border: var(--hodi-border-width) solid color-mix(in srgb, var(--hodi-brand) 20%, var(--hodi-border));
   border-radius: 9px;
   background: var(--hodi-brand-soft);
 }
@@ -2014,7 +2017,7 @@
   align-items: center;
   padding: 2px;
   border-radius: 20px;
-  background: #cbd3d7;
+  background: var(--hodi-neutral-soft);
 }
 
 .dashboard-toggle-track span {
@@ -2022,7 +2025,7 @@
   height: 15px;
   border-radius: 50%;
   background: var(--hodi-surface);
-  transition: transform .15s ease;
+  transition: transform var(--hodi-transition-fast) ease;
 }
 
 .dashboard-available-toggle input:checked + .dashboard-toggle-track {
@@ -2159,9 +2162,9 @@
   }
 
   .portal-sidebar {
-    width: 250px;
+    width: var(--hodi-sidebar-width);
     transform: translateX(-102%);
-    transition: transform .2s ease;
+    transition: transform var(--hodi-transition-standard) ease;
   }
 
   .mobile-menu-open .portal-sidebar {
@@ -2222,7 +2225,7 @@
     border: 0;
     background: rgb(17 25 33 / 45%);
     opacity: 0;
-    transition: opacity .2s ease, visibility .2s ease;
+    transition: opacity var(--hodi-transition-standard) ease, visibility var(--hodi-transition-standard) ease;
   }
 
   .mobile-menu-open .portal-sidebar-scrim {
@@ -2584,8 +2587,8 @@
 .portal-sidebar nav a:focus-visible,
 .portal-bottom-nav button:focus-visible,
 .portal-amount-chips button:focus-visible {
-  outline: 2px solid #c6a66b;
-  outline-offset: 2px;
+  outline: var(--hodi-focus-width) solid var(--hodi-gold);
+  outline-offset: var(--hodi-focus-offset);
 }
 
 
@@ -2602,7 +2605,7 @@
 .dashboard-no-tenancy,
 .portal-empty-inline {
   border-radius: 0;
-  border-top: 2px solid #c6a66b;
+  border-top: 2px solid var(--hodi-gold);
 }
 
 .portal-invoice-list,
@@ -2615,4 +2618,26 @@
 .portal-payment-card button,
 .portal-amount-chips button {
   min-height: 44px;
+}
+
+.portal-rent-summary,
+.portal-kpi,
+.statement-figures div,
+.dashboard-empty-state,
+.portal-table-empty {
+  border-radius: 0;
+  border-top: 2px solid var(--hodi-gold);
+}
+
+.portal-rent-summary-heading > div > span,
+.statement-figures small {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.statement-figures strong {
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 460;
+  letter-spacing: -0.03em;
 }

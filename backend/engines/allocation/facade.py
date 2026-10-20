@@ -189,3 +189,12 @@ def allocate(
         state=result.state,
         postings=result.postings,
     )
+
+
+__all__ = [
+    "AllocationCharge",
+    "AllocationFacadeResult",
+    "AllocationError",
+    "MoneyError",
+    "allocate",
+]

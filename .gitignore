@@ -1,20 +1,27 @@
 __pycache__/
 *.py[cod]
 .env
+*.sqlite3
+db.sqlite3
 backend/db.sqlite3
 backend/.env
+.venv/
+backend/.venv/
+env/
+backend/env/
 /staticfiles/
 /backend/staticfiles/
 .pytest_cache/
 .coverage
 
 backend/media/
-
-backend/env/
+backend/maintenance/
 
 frontend/node_modules/
 frontend/.next/
 frontend/tsconfig.tsbuildinfo
+frontend/*.snap
+frontend/*.assert
 
 backend/.env.backup
 backend/.env.repair-backup-*
@@ -22,5 +29,21 @@ backend/.env.repair-backup-*
 
 /backend/.env.save
 
-# Local Python virtual environment
-backend/.venv/
+
+# Local machine configuration; never commit personal dotfiles
+/.bash_profile
+/.bashrc
+/.gitconfig
+/.profile
+/.ripgreprc
+/.zprofile
+/.zshrc
+/.claude/
+/.idea/
+/.vscode/
+/.mcp.json
+/.gitmodules
+
+# Local recovery backups
+*.backup-*
+*.bak-*

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { clientApi, ClientApiError, fetchMe, logout, type MeResponse } from "@/lib/clientApi";
 import { formatMinor } from "@/lib/money";
 import { Logo } from "@/components/layout/Logo";
+import ThemeToggle from "@/components/theme/ThemeToggle";
 import { useAggregatedBalances } from "@/hooks/useAggregatedBalances";
 
 type Invite = {
@@ -136,6 +137,7 @@ export default function AccountantWorkspace() {
             </nav>
           )}
           <div className="hodi-record-header-actions">
+            <ThemeToggle />
             <button type="button" className="secondary" onClick={() => void refresh()} disabled={loading}>
               {loading ? "Refreshing…" : "Refresh"}
             </button>
@@ -223,7 +225,7 @@ export default function AccountantWorkspace() {
 
             <h2 id="invoices">Invoice report</h2>
             <div className="hodi-record-table-wrap">
-              <table>
+              <table className="hodi-record-invoice-table">
                 <thead>
                   <tr>
                     <th>Invoice</th>
@@ -252,7 +254,7 @@ export default function AccountantWorkspace() {
 
             <h2 id="payments">Recorded rent transactions</h2>
             <div className="hodi-record-table-wrap">
-              <table>
+              <table className="hodi-record-payment-table">
                 <thead>
                   <tr>
                     <th>Payment</th>

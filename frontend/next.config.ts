@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  eslint: { ignoreDuringBuilds: true },
+  eslint: { ignoreDuringBuilds: false },
   typescript: { ignoreBuildErrors: false },
   devIndicators: false,
   skipTrailingSlashRedirect: true,
@@ -25,8 +25,6 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com", pathname: "/**" },
-      { protocol: "https", hostname: "**", pathname: "/**" },
-      { protocol: "http", hostname: "**", pathname: "/**" },
     ],
   },
 };

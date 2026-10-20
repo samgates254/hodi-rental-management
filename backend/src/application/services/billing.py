@@ -9,6 +9,7 @@ from rest_framework.exceptions import APIException, ValidationError
 from apps.billing.models import (
     CHARGE_TYPES,
     Charge,
+    ChargeJournalEntry,
     DEPOSIT_CHARGE_TYPES,
     DocumentStatus,
     Invoice,
@@ -24,11 +25,13 @@ from apps.leases.models import RentSchedule
 from apps.organizations.models import Organization
 from application.services.audit import record_audit
 from application.services.notifications import notify_user
-from engines.allocation.facade import AllocationCharge, allocate
-from engines.proration.facade import prorate_move_in
-from rental_os.algorithms.allocation import AllocationError
-from rental_os.algorithms.money import MoneyError
-from rental_os.algorithms.proration import ProrationError
+from engines.allocation.facade import (
+    AllocationCharge,
+    AllocationError,
+    MoneyError,
+    allocate,
+)
+from engines.proration.facade import ProrationError, prorate_move_in
 
 
 def _utc_stamp(moment):
@@ -37,6 +40,63 @@ def _utc_stamp(moment):
     moment = moment.astimezone(datetime_timezone.utc)
     return moment.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
+
+
+def _charge_journal_accounts(charge_type):
+    """Return receivable and income/liability accounts for a supported charge."""
+    normalized = (charge_type or '').strip().upper()
+
+    if normalized in DEPOSIT_CHARGE_TYPES:
+        return ('1100', '2100')
+    if normalized in ('RENT', 'BASE_RENT'):
+        return ('1100', '4010')
+    if normalized in CHARGE_TYPES:
+        return ('1100', '4020')
+
+    raise ValidationError({
+        'charge_type': f'Unsupported charge type for accounting: {normalized or "(blank)"}.',
+    })
+
+
+def _create_charge_journal(charge):
+    """Create the original balanced journal for one posted charge."""
+    debit_account, credit_account = _charge_journal_accounts(charge.charge_type)
+
+    existing = ChargeJournalEntry.objects.filter(
+        charge=charge,
+        reverses__isnull=True,
+    )
+    if existing.exists():
+        # Idempotency is safe only if the complete original journal is correct.
+        lines = list(existing.order_by('account', 'direction'))
+        expected = {
+            (debit_account, 'DEBIT', charge.amount_cents),
+            (credit_account, 'CREDIT', charge.amount_cents),
+        }
+        actual = {
+            (line.account, line.direction, line.amount_cents)
+            for line in lines
+        }
+        if len(lines) != 2 or actual != expected:
+            raise ValidationError({
+                'journal': f'Existing journal for charge {charge.pk} is inconsistent.',
+            })
+        return lines
+
+    return [
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=debit_account,
+            direction=ChargeJournalEntry.Direction.DEBIT,
+            amount_cents=charge.amount_cents,
+        ),
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=credit_account,
+            direction=ChargeJournalEntry.Direction.CREDIT,
+            amount_cents=charge.amount_cents,
+        ),
+    ]
 
 def recompute_invoice_totals(invoice):
     charges = list(invoice.charges.all())
@@ -198,12 +258,17 @@ def post_invoice(invoice, *, actor, request=None):
     charges = list(invoice.charges.select_for_update().all())
     if not charges:
         raise ValidationError({'charges': 'Add at least one charge before posting.'})
+    # Validate every charge before changing invoice or charge state.
     for charge in charges:
         if charge.lifecycle != DocumentStatus.DRAFT:
             raise ValidationError({'charges': 'Every charge must still be a draft.'})
+        _charge_journal_accounts(charge.charge_type)
+
+    for charge in charges:
         charge.lifecycle = DocumentStatus.POSTED
         charge.balance_cents = charge.amount_cents
         charge.save(update_fields=('lifecycle', 'balance_cents', 'updated_at'))
+        _create_charge_journal(charge)
     invoice.status = DocumentStatus.POSTED
     invoice.save(update_fields=('status', 'updated_at'))
     recompute_invoice_totals(invoice)
@@ -229,19 +294,116 @@ def post_invoice(invoice, *, actor, request=None):
 
 @transaction.atomic
 def void_invoice(invoice, *, actor, request=None):
-    invoice = Invoice.objects.select_for_update().select_related('organization').get(pk=invoice.pk)
+    invoice = (
+        Invoice.objects.select_for_update()
+        .select_related('organization')
+        .get(pk=invoice.pk)
+    )
     if invoice.status != DocumentStatus.POSTED:
         raise ValidationError({'status': 'Only a posted invoice can be voided.'})
     if PaymentAllocation.objects.filter(charge__invoice=invoice).exists():
-        raise ValidationError({'status': 'Invoices with payment allocations cannot be voided.'})
-    invoice.charges.select_for_update().update(
-        lifecycle=DocumentStatus.VOIDED,
-        balance_cents=0,
-        updated_at=timezone.now(),
-    )
+        raise ValidationError({
+            'status': 'Invoices with payment allocations cannot be voided.',
+        })
+
+    charges = list(invoice.charges.select_for_update().order_by('pk'))
+    reversal_plan = []
+
+    # Validate every original journal and every existing reversal before
+    # creating reversal entries or changing invoice/charge state.
+    for charge in charges:
+        debit_account, credit_account = _charge_journal_accounts(
+            charge.charge_type
+        )
+
+        originals = list(
+            ChargeJournalEntry.objects.select_for_update()
+            .filter(charge=charge, reverses__isnull=True)
+            .order_by('pk')
+        )
+
+        expected_originals = {
+            (
+                debit_account,
+                ChargeJournalEntry.Direction.DEBIT,
+                charge.amount_cents,
+            ),
+            (
+                credit_account,
+                ChargeJournalEntry.Direction.CREDIT,
+                charge.amount_cents,
+            ),
+        }
+        actual_originals = {
+            (entry.account, entry.direction, entry.amount_cents)
+            for entry in originals
+        }
+
+        if len(originals) != 2 or actual_originals != expected_originals:
+            raise ValidationError({
+                'journal': (
+                    f'Original journal for charge {charge.pk} is missing '
+                    'entries or is inconsistent. Invoice was not voided.'
+                ),
+            })
+
+        for original in originals:
+            reversals = list(
+                original.reversal_entries.select_for_update().order_by('pk')
+            )
+
+            opposite_direction = (
+                ChargeJournalEntry.Direction.CREDIT
+                if original.direction == ChargeJournalEntry.Direction.DEBIT
+                else ChargeJournalEntry.Direction.DEBIT
+            )
+
+            if len(reversals) > 1:
+                raise ValidationError({
+                    'journal': (
+                        f'Multiple reversals exist for journal entry '
+                        f'{original.pk}. Invoice was not voided.'
+                    ),
+                })
+
+            if reversals:
+                reversal = reversals[0]
+                if (
+                    reversal.charge_id != charge.pk
+                    or reversal.account != original.account
+                    or reversal.direction != opposite_direction
+                    or reversal.amount_cents != original.amount_cents
+                    or reversal.reverses_id != original.pk
+                ):
+                    raise ValidationError({
+                        'journal': (
+                            f'Reversal for journal entry {original.pk} is '
+                            'inconsistent. Invoice was not voided.'
+                        ),
+                    })
+            else:
+                reversal_plan.append((charge, original, opposite_direction))
+
+    # The complete set of existing journals is valid. Create only missing
+    # reversals; the database uniqueness constraint protects against duplicates.
+    for charge, original, opposite_direction in reversal_plan:
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=original.account,
+            direction=opposite_direction,
+            amount_cents=original.amount_cents,
+            reverses=original,
+        )
+
+    for charge in charges:
+        charge.lifecycle = DocumentStatus.VOIDED
+        charge.balance_cents = 0
+        charge.save(update_fields=('lifecycle', 'balance_cents', 'updated_at'))
+
     invoice.status = DocumentStatus.VOIDED
     invoice.balance_cents = 0
     invoice.save(update_fields=('status', 'balance_cents', 'updated_at'))
+
     record_audit(
         action='invoice.void',
         object_type='Invoice',
@@ -255,7 +417,7 @@ def void_invoice(invoice, *, actor, request=None):
 
 
 @transaction.atomic
-def record_payment(
+def _record_payment(
     *,
     tenant,
     amount_cents,
@@ -307,6 +469,61 @@ def record_payment(
         request=request,
     )
     return payment
+
+
+def record_payment(
+    *,
+    tenant,
+    amount_cents,
+    received_date,
+    method,
+    actor,
+    reference='',
+    external_id='',
+    request=None,
+):
+    """Record an ordinary payment; provider payments require verified settlement."""
+    if method == Payment.Method.MPESA:
+        raise ValidationError({
+            'method': 'M-Pesa payments are recorded only after verified provider settlement.',
+        })
+    return _record_payment(
+        tenant=tenant,
+        amount_cents=amount_cents,
+        received_date=received_date,
+        method=method,
+        actor=actor,
+        reference=reference,
+        external_id=external_id,
+        request=request,
+    )
+
+
+def record_verified_mpesa_payment(
+    *,
+    tenant,
+    amount_cents,
+    received_date,
+    actor,
+    reference,
+    external_id,
+    request=None,
+):
+    """Create an M-Pesa payment from a trusted settlement workflow only."""
+    if not reference or not external_id or reference != external_id:
+        raise ValidationError({
+            'external_id': 'A verified M-Pesa receipt is required.',
+        })
+    return _record_payment(
+        tenant=tenant,
+        amount_cents=amount_cents,
+        received_date=received_date,
+        method=Payment.Method.MPESA,
+        actor=actor,
+        reference=reference,
+        external_id=external_id,
+        request=request,
+    )
 
 
 def _matches_manual_receipt(payment, *, tenant, amount_cents, received_date, method, reference):
@@ -456,17 +673,24 @@ def allocate_payment(payment, *, policy_id, policy_version, actor, request=None)
         raise ValidationError({'status': 'Only a pending payment can be allocated.'})
     if policy_id != 'CANONICAL_PRIORITY' or policy_version != 2:
         raise ValidationError({'policy_id': 'Allocation is locked to CANONICAL_PRIORITY version 2.'})
+    eligible_charges = Charge.objects.filter(
+        tenant_id=payment.tenant_id,
+        organization_id=payment.organization_id,
+        lifecycle=DocumentStatus.POSTED,
+        balance_cents__gt=0,
+        currency='KES',
+    ).exclude(charge_type__in=DEPOSIT_CHARGE_TYPES)
+    # Invoice rows serialize balance recomputations shared by charges on the
+    # same invoice. Acquire these locks in primary-key order before charge
+    # locks; reversals use the same order.
+    invoice_ids = eligible_charges.order_by().values_list('invoice_id', flat=True).distinct()
+    locked_invoices = list(
+        Invoice.objects.select_for_update(of=('self',))
+        .filter(pk__in=invoice_ids).order_by('pk')
+    )
     charges = list(
-        Charge.objects.select_for_update()
-        .filter(
-            tenant_id=payment.tenant_id,
-            organization_id=payment.organization_id,
-            lifecycle=DocumentStatus.POSTED,
-            balance_cents__gt=0,
-            currency='KES',
-        )
-        .exclude(charge_type__in=DEPOSIT_CHARGE_TYPES)
-        .select_related('invoice')
+        Charge.objects.select_for_update(of=('self',))
+        .filter(pk__in=eligible_charges.values('pk')).order_by('invoice_id', 'pk')
     )
     items = [
         AllocationCharge(
@@ -539,8 +763,9 @@ def allocate_payment(payment, *, policy_id, policy_version, actor, request=None)
         'policy_version',
         'updated_at',
     ))
-    for invoice in Invoice.objects.filter(pk__in=touched_invoices):
-        recompute_invoice_totals(invoice)
+    for invoice in locked_invoices:
+        if invoice.pk in touched_invoices:
+            recompute_invoice_totals(invoice)
     record_audit(
         action='payment.allocate',
         object_type='Payment',
@@ -581,7 +806,7 @@ def reverse_payment(payment, *, reason, actor, request=None):
     if not reason:
         raise ValidationError({'reason': 'A non-empty reversal reason is required.'})
 
-    payment = Payment.objects.select_for_update().select_related(
+    payment = Payment.objects.select_for_update(of=('self',)).select_related(
         'organization', 'tenant', 'tenant__user',
     ).get(pk=payment.pk)
     existing = PaymentReversal.objects.filter(payment=payment).first()
@@ -597,7 +822,7 @@ def reverse_payment(payment, *, reason, actor, request=None):
         raise ValidationError({'status': 'Only a posted, allocated payment can be reversed.'})
 
     allocations = list(
-        PaymentAllocation.objects.select_for_update()
+        PaymentAllocation.objects.select_for_update(of=('self',))
         .filter(payment=payment)
         .select_related('charge')
         .order_by('charge_id', 'pk')
@@ -640,7 +865,23 @@ def reverse_payment(payment, *, reason, actor, request=None):
         )
         return reversal
 
-    if any(row.charge.lifecycle != DocumentStatus.POSTED for row in allocations):
+    touched_charge_ids = {row.charge_id for row in allocations}
+    touched_invoice_ids = set(
+        Charge.objects.filter(pk__in=touched_charge_ids).values_list('invoice_id', flat=True)
+    )
+    locked_invoices = list(
+        Invoice.objects.select_for_update(of=('self',))
+        .filter(pk__in=touched_invoice_ids).order_by('pk')
+    )
+    touched_charges = {
+        charge.pk: charge
+        for charge in Charge.objects.select_for_update(of=('self',))
+        .filter(pk__in=touched_charge_ids).order_by('invoice_id', 'pk')
+    }
+    if any(
+        touched_charges[row.charge_id].lifecycle != DocumentStatus.POSTED
+        for row in allocations
+    ):
         raise ValidationError({'status': 'A payment allocation no longer references a posted charge.'})
 
     reversal = PaymentReversal.objects.create(
@@ -650,7 +891,6 @@ def reverse_payment(payment, *, reason, actor, request=None):
         amount_cents=payment.amount_cents,
         status=PaymentReversal.Status.REVERSED,
     )
-    touched_charges = {row.charge_id: row.charge for row in allocations}
     for allocation in allocations:
         PaymentReversalAllocation.objects.create(
             reversal=reversal,
@@ -669,7 +909,6 @@ def reverse_payment(payment, *, reason, actor, request=None):
 
     payment.status = Payment.Status.REVERSED
     payment.save(update_fields=('status', 'updated_at'))
-    touched_invoice_ids = set()
     for charge in touched_charges.values():
         active_allocations = PaymentAllocation.objects.filter(
             charge=charge,
@@ -679,8 +918,7 @@ def reverse_payment(payment, *, reason, actor, request=None):
             raise ValidationError({'status': 'Active allocations exceed the charge amount; review is required.'})
         charge.balance_cents = charge.amount_cents - active_allocations
         charge.save(update_fields=('balance_cents', 'updated_at'))
-        touched_invoice_ids.add(charge.invoice_id)
-    for invoice in Invoice.objects.filter(pk__in=touched_invoice_ids).order_by('pk'):
+    for invoice in locked_invoices:
         recompute_invoice_totals(invoice)
 
     record_audit(
@@ -714,8 +952,11 @@ def reverse_payment(payment, *, reason, actor, request=None):
 
 
 def assess_tenant_delinquency(*, tenant, as_of, grace_days):
-    from engines.delinquency.facade import DelinquencyObligation, assess
-    from rental_os.algorithms.delinquency import DelinquencyError
+    from engines.delinquency.facade import (
+        DelinquencyError,
+        DelinquencyObligation,
+        assess,
+    )
 
     if type(as_of) is not date:
         raise ValidationError({'as_of': 'as_of must be a civil date.'})

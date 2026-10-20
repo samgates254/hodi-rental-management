@@ -88,7 +88,7 @@ export default function AgentEmailVerification() {
           <Logo size={40} className="w-fit" />
           <ThemeToggle />
         </div>
-        <section className="rounded-2xl border border-border bg-surface p-6 shadow-soft sm:p-9">
+        <section className="hodi-auth-sheet">
           <p className="text-[10px] font-bold tracking-[0.16em] text-text-secondary">PROPERTY AGENT</p>
           <h1 className="mt-3 font-[family-name:var(--hodi-editorial)] text-3xl font-normal tracking-tight">
             {busy ? "Verifying your email" : verified ? "Email confirmed" : "Verification link unavailable"}

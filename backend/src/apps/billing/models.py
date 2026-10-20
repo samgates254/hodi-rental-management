@@ -239,6 +239,11 @@ class Payment(models.Model):
 		ordering = ('-received_date', '-created_at')
 		constraints = [
 			models.UniqueConstraint(
+				fields=('external_id',),
+				condition=~Q(external_id='') & Q(method='MPESA'),
+				name='unique_mpesa_payment_external_id',
+			),
+			models.UniqueConstraint(
 				fields=('organization', 'external_id'),
 				condition=~Q(external_id=''),
 				name='unique_ledger_payment_external_id_per_org',
@@ -498,3 +503,58 @@ class MpesaAttempt(models.Model):
 
 	def __str__(self):
 		return f'MpesaAttempt {self.pk} ({self.status})'
+
+
+class ChargeJournalEntry(models.Model):
+    """Append-only double-entry journal entries for posted tenant charges."""
+
+    class Direction(models.TextChoices):
+        DEBIT = 'DEBIT', 'Debit'
+        CREDIT = 'CREDIT', 'Credit'
+
+    charge = models.ForeignKey(
+        Charge,
+        on_delete=models.PROTECT,
+        related_name='journal_entries',
+    )
+    account = models.CharField(max_length=8)
+    direction = models.CharField(max_length=8, choices=Direction.choices)
+    amount_cents = models.PositiveBigIntegerField()
+    reverses = models.ForeignKey(
+        'self',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='reversal_entries',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('pk',)
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(amount_cents__gt=0),
+                name='charge_journal_amount_positive',
+            ),
+            models.UniqueConstraint(
+                fields=('charge', 'account', 'direction'),
+                condition=Q(reverses__isnull=True),
+                name='unique_original_charge_journal_line',
+            ),
+            models.UniqueConstraint(
+                fields=('reverses',),
+                condition=Q(reverses__isnull=False),
+                name='unique_charge_journal_reversal',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError('Charge journal entries are append-only.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Charge journal entries are append-only.')
+
+    def __str__(self):
+        return f'{self.direction} {self.account} {self.amount_cents}'

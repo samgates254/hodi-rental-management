@@ -77,60 +77,62 @@ export function MarketplaceDetail({ listingId }: { listingId: string }) {
   return (
     <>
       <Header />
-      <main id="main" className="bg-bg">
+      <main id="main" className="hodi-listing-page">
         <Container className="py-8 md:py-12">
-          <Link href="/marketplace" className="text-sm font-semibold text-teal">Back to marketplace</Link>
+          <Link href="/marketplace" className="hodi-back-link">Back to marketplace</Link>
           {loading && (
-            <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]" role="status" aria-label="Loading listing" aria-busy="true">
-              <div className="aspect-[16/10] rounded-2xl border border-border bg-surface" />
-              <div className="space-y-3">
-                <div className="h-8 w-2/3 rounded-lg bg-surface" />
-                <div className="h-4 w-1/2 rounded bg-surface" />
-                <p className="text-sm text-text-secondary">Loading listing details…</p>
+            <div className="hodi-listing-layout mt-8" role="status" aria-label="Loading listing" aria-busy="true">
+              <div className="hodi-listing-stage motion-safe:animate-pulse" />
+              <div className="hodi-inquiry">
+                <div className="h-8 w-2/3 bg-soft-teal motion-safe:animate-pulse" />
+                <p className="mt-4 text-sm text-text-secondary">Loading listing details…</p>
               </div>
             </div>
           )}
           {!loading && error && (
-            <div className="mt-8 rounded-2xl border border-border bg-surface p-6" role="alert">
-              <h1 className="text-2xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>Listing unavailable</h1>
-              <p className="mt-2 text-sm text-text-secondary">{error} Drafts, occupied units, and homes with an active lease are not shown.</p>
+            <div className="mt-8 border border-border bg-surface p-8" role="alert">
+              <h1 className="hodi-listing-title">Listing unavailable</h1>
+              <p className="mt-3 max-w-xl text-sm leading-relaxed text-text-secondary">{error} Drafts, occupied units, and homes with an active lease are not shown.</p>
             </div>
           )}
           {!loading && listing && (
-            <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
-              <div>
+            <div className="hodi-listing-layout">
+              <article>
                 <Gallery photos={listing.photos} title={listing.title} />
-                <p className="mt-6 text-xs font-semibold uppercase tracking-[0.14em] text-teal">{listing.available ? "Available" : "Unavailable"}</p>
-                <h1 className="mt-2 text-3xl text-charcoal md:text-4xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>{listing.title}</h1>
-                <p className="mt-2 text-text-secondary">{locationLabel(listing)} · {listing.property_name} · {listing.unit_label}</p>
-                <p className="mt-4 text-2xl font-semibold text-charcoal">{rentLabel(listing.monthly_rent_minor)} <span className="text-base font-normal text-text-secondary">/ month</span></p>
-                <dl className="mt-6 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                  <div className="rounded-xl border border-border bg-surface p-3"><dt className="text-text-secondary">Bedrooms</dt><dd className="font-semibold">{listing.bedrooms}</dd></div>
-                  <div className="rounded-xl border border-border bg-surface p-3"><dt className="text-text-secondary">Bathrooms</dt><dd className="font-semibold">{listing.bathrooms}</dd></div>
-                  <div className="rounded-xl border border-border bg-surface p-3"><dt className="text-text-secondary">Furnishing</dt><dd className="font-semibold">{listing.furnished ? "Furnished" : "Unfurnished"}</dd></div>
-                  <div className="rounded-xl border border-border bg-surface p-3"><dt className="text-text-secondary">Size</dt><dd className="font-semibold">{listing.size_sqm ? `${listing.size_sqm} m²` : "—"}</dd></div>
+                <header className="hodi-listing-heading">
+                  <p>{listing.available ? "Available" : "Unavailable"} · {locationLabel(listing)}</p>
+                  <h1 className="hodi-listing-title">{listing.title}</h1>
+                  <p className="hodi-listing-rent">{rentLabel(listing.monthly_rent_minor)} <span>/ month</span></p>
+                  <p className="hodi-listing-where">{listing.property_name} · {listing.unit_label}</p>
+                </header>
+                <dl className="hodi-listing-facts">
+                  <div><dt>Bedrooms</dt><dd>{listing.bedrooms}</dd></div>
+                  <div><dt>Bathrooms</dt><dd>{listing.bathrooms}</dd></div>
+                  <div><dt>Furnishing</dt><dd>{listing.furnished ? "Furnished" : "Unfurnished"}</dd></div>
+                  <div><dt>Size</dt><dd>{listing.size_sqm ? `${listing.size_sqm} m²` : "—"}</dd></div>
+                  {listing.floor != null && <div><dt>Floor</dt><dd>{listing.floor}</dd></div>}
                 </dl>
-                {listing.description && <p className="mt-6 max-w-2xl leading-relaxed text-text">{listing.description}</p>}
+                {listing.description && <p className="hodi-listing-copy">{listing.description}</p>}
                 {listing.amenities.length > 0 && (
-                  <ul className="mt-6 flex flex-wrap gap-2">
+                  <ul className="hodi-listing-amenities">
                     {listing.amenities.map(amenity => (
-                      <li key={amenity} className="rounded-full bg-soft-teal px-3 py-1 text-sm text-charcoal">{amenity}</li>
+                      <li key={amenity}>{amenity}</li>
                     ))}
                   </ul>
                 )}
-              </div>
-              <aside className="h-fit rounded-2xl border border-emerald-700 bg-surface p-5 shadow-soft">
-                <h2 className="text-xl" style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>Ask about this home</h2>
-                <p className="mt-2 text-sm leading-relaxed text-text-secondary">Your contact details go to the agent or property organization managing the listing. A viewing request is not a booking.</p>
-                <form className="mt-4 space-y-3" onSubmit={event => void sendInquiry(event)}>
-                  <label className="block text-sm text-text-secondary">Name<input className="auth-input mt-1" name="name" required maxLength={120} /></label>
-                  <label className="block text-sm text-text-secondary">Email<input className="auth-input mt-1" name="email" type="email" required /></label>
-                  <label className="block text-sm text-text-secondary">Phone<input className="auth-input mt-1" name="phone" maxLength={30} /></label>
-                  <label className="block text-sm text-text-secondary">Request a viewing (optional)<input className="auth-input mt-1" name="viewing_requested_for" type="datetime-local" /><span className="text-xs text-text-secondary">Choose a future date and time.</span></label>
-                  <label className="block text-sm text-text-secondary">Message<textarea className="auth-input mt-1 min-h-28" name="message" required maxLength={2000} /></label>
+              </article>
+              <aside className="hodi-inquiry">
+                <h2>Ask about this home</h2>
+                <p>Your contact details go to the agent or property organization managing the listing. A viewing request is not a booking.</p>
+                <form onSubmit={event => void sendInquiry(event)}>
+                  <label>Name<input className="auth-input mt-1" name="name" required maxLength={120} /></label>
+                  <label>Email<input className="auth-input mt-1" name="email" type="email" required /></label>
+                  <label>Phone<input className="auth-input mt-1" name="phone" maxLength={30} /></label>
+                  <label>Request a viewing (optional)<input className="auth-input mt-1" name="viewing_requested_for" type="datetime-local" /><span>Choose a future date and time.</span></label>
+                  <label>Message<textarea className="auth-input mt-1 min-h-28" name="message" required maxLength={2000} /></label>
                   {inquiryError && <p className="text-sm text-red-700" role="alert">{inquiryError}</p>}
                   {inquiryNotice && <p className="text-sm text-charcoal" role="status">{inquiryNotice}</p>}
-                  <button type="submit" disabled={sending} className="h-11 w-full rounded-xl bg-teal text-sm font-semibold text-brand-contrast disabled:opacity-60">
+                  <button type="submit" disabled={sending}>
                     {sending ? "Sending…" : "Send inquiry"}
                   </button>
                 </form>

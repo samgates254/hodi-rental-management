@@ -7,7 +7,7 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import AccountProfile
@@ -661,8 +661,8 @@ class AccountAndPlatformSecurityTests(SecurityWorldMixin, APITestCase):
         }, format='json')
         self.assertEqual(login.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertNotIn('does not exist', str(login.data).lower())
-        token = Token.objects.create(user=self.owner_a)
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+        _instance, token = AuthToken.objects.create(user=self.owner_a)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
         self.assertEqual(self.client.get('/api/v1/accounts/me/').status_code, status.HTTP_200_OK)
         self.assertEqual(self.client.post('/api/v1/accounts/logout/').status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(self.client.get('/api/v1/accounts/me/').status_code, status.HTTP_401_UNAUTHORIZED)

@@ -355,12 +355,14 @@ export default function BillingWorkspace({
   }
 
   const draftInvoices = invoices.filter(invoice => invoice.status === "DRAFT");
+  const postedOpenInvoices = invoices.filter(invoice => invoice.status === "POSTED" && invoice.balance_cents > 0);
+  const postedOpenCents = postedOpenInvoices.reduce((total, invoice) => total + Number(invoice.balance_cents || 0), 0);
 
   return (
-    <section className="ops-panel border-l-4 border-l-emerald-700 bg-emerald-50/40" id="billing">
+    <section className="ops-panel" id="billing">
       <div className="ops-heading">
         <div>
-          <span className="ops-kicker flex items-center gap-2">BILLING <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 text-emerald-800" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 3.75h14v16.5l-2.2-1.6-2.2 1.6-2.2-1.6-2.2 1.6-2.2-1.6L5 20.25V3.75Z" /><path d="M8.5 8h7M8.5 12h7M8.5 16h4" /></svg></span>
+          <span className="ops-kicker">BILLING</span>
           <h2>Invoices, rent log, and ledger</h2>
           <p>Rent payments stay on the rent log. Ledger allocation is a separate accounting step and uses the server’s result.</p>
         </div>
@@ -379,6 +381,14 @@ export default function BillingWorkspace({
       {error && <p className="ops-alert" role="alert">{error}</p>}
       {notice && <p className="ops-success" role="status">{notice}</p>}
       {loading && <p className="ops-status">Loading billing records…</p>}
+      {!loading && !error && (
+        <p className="ops-balance-note" role="status">
+          {postedOpenInvoices.length === 0
+            ? "No posted invoice in the loaded list has a balance due."
+            : `${formatCents(postedOpenCents)} is still due on ${postedOpenInvoices.length} posted invoice${postedOpenInvoices.length === 1 ? "" : "s"} in the loaded list.`}
+          {" "}A payment stays unpaid until the ledger confirms it. Pending entries are not included here.
+        </p>
+      )}
 
       {tab === "invoices" && (
         <>

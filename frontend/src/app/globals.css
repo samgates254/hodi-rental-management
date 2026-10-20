@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* The toggle writes data-theme. Do not follow the operating-system scheme separately. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
 @theme inline {
   --color-charcoal: var(--hodi-text);
   --color-contrast-surface: var(--hodi-contrast-surface);
@@ -12,6 +15,11 @@
   --color-text: var(--hodi-text);
   --color-text-secondary: var(--hodi-muted);
   --color-border: var(--hodi-border);
+  --color-success: var(--hodi-success);
+  --color-warning: var(--hodi-warning);
+  --color-error: var(--hodi-error);
+  --color-info: var(--hodi-info);
+  --color-status-neutral: var(--hodi-neutral);
   --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-display: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-editorial: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
@@ -46,7 +54,43 @@
   --hodi-error-soft: #fff0ef;
   --hodi-info: #3164aa;
   --hodi-info-soft: #eaf1fb;
+  --hodi-neutral: #59645d;
+  --hodi-neutral-soft: #eff1ef;
+  --hodi-chart-1: #163d32;
+  --hodi-chart-2: #c6a66b;
+  --hodi-chart-3: #8aa396;
+  --hodi-chart-4: #9a6432;
+  --hodi-chart-track: #e7e5de;
   --hodi-shadow: 0 1px 2px rgb(23 32 51 / 0.04), 0 8px 24px rgb(23 32 51 / 0.055);
+  --hodi-shadow-raised: 0 10px 28px rgb(23 32 51 / 0.1);
+  --hodi-space-1: 0.25rem;
+  --hodi-space-2: 0.5rem;
+  --hodi-space-3: 0.75rem;
+  --hodi-space-4: 1rem;
+  --hodi-space-6: 1.5rem;
+  --hodi-space-8: 2rem;
+  --hodi-type-xs: 0.75rem;
+  --hodi-type-sm: 0.875rem;
+  --hodi-type-body: 1rem;
+  --hodi-type-section: 1.25rem;
+  --hodi-type-page-title: clamp(1.5rem, 2vw, 1.75rem);
+  --hodi-type-workspace-summary: clamp(1.375rem, 1.9vw, 1.5rem);
+  --hodi-content-workspace: 72rem;
+  --hodi-content-wide: 100rem;
+  --hodi-workspace-gutter: clamp(1rem, 3vw, 2.625rem);
+  --hodi-workspace-header-height: 5.75rem;
+  --hodi-sidebar-width: 15.5rem;
+  --hodi-nav-item-height: 2.75rem;
+  --hodi-control-height: 2.75rem;
+  --hodi-radius-control: 0.5rem;
+  --hodi-radius-panel: 0.75rem;
+  --hodi-border-width: 1px;
+  --hodi-table-cell-x: 1rem;
+  --hodi-table-cell-y: 0.75rem;
+  --hodi-focus-width: 2px;
+  --hodi-focus-offset: 3px;
+  --hodi-transition-fast: 160ms;
+  --hodi-transition-standard: 200ms;
   --color-bg: var(--hodi-canvas);
   --color-surface: var(--hodi-surface);
   --color-text: var(--hodi-text);
@@ -56,28 +100,36 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --hodi-canvas: #0b1220;
-  --hodi-surface: #111b2e;
-  --hodi-surface-raised: #162238;
-  --hodi-text: #f1f5f9;
-  --hodi-muted: #a3b1c6;
-  --hodi-border: #273449;
-  --hodi-brand: #84b19f;
-  --hodi-brand-hover: #a5c9bb;
-  --hodi-brand-contrast: #0b1220;
-  --hodi-brand-soft: #12372f;
-  --hodi-focus: #a5c9bb;
-  --hodi-sidebar: #080e19;
-  --hodi-contrast-surface: #111b2e;
-  --hodi-success: #4ade80;
-  --hodi-success-soft: #133326;
-  --hodi-warning: #fbbf24;
-  --hodi-warning-soft: #3b2c13;
-  --hodi-error: #f87171;
-  --hodi-error-soft: #3c2026;
-  --hodi-info: #93c5fd;
-  --hodi-info-soft: #192b45;
+  --hodi-canvas: #0e1714;
+  --hodi-surface: #17241e;
+  --hodi-surface-raised: #1e2e27;
+  --hodi-text: #f4efe4;
+  --hodi-muted: #b7c4bb;
+  --hodi-border: #31443b;
+  --hodi-brand: #d7c4a0;
+  --hodi-brand-hover: #e6d7b8;
+  --hodi-brand-contrast: #102820;
+  --hodi-brand-soft: #24352e;
+  --hodi-focus: #d7c4a0;
+  --hodi-sidebar: #08110e;
+  --hodi-contrast-surface: #102820;
+  --hodi-success: #8dcea8;
+  --hodi-success-soft: #173328;
+  --hodi-warning: #e2b56a;
+  --hodi-warning-soft: #3a2e18;
+  --hodi-error: #f0a3a0;
+  --hodi-error-soft: #3c2424;
+  --hodi-info: #b7c9c0;
+  --hodi-info-soft: #1c2c32;
+  --hodi-neutral: #c9d4ce;
+  --hodi-neutral-soft: #24302b;
+  --hodi-chart-1: #d7c4a0;
+  --hodi-chart-2: #8fb9a4;
+  --hodi-chart-3: #6f8f84;
+  --hodi-chart-4: #e2b56a;
+  --hodi-chart-track: #2c4038;
   --hodi-shadow: 0 1px 2px rgb(0 0 0 / 0.22), 0 10px 28px rgb(0 0 0 / 0.2);
+  --hodi-shadow-raised: 0 12px 30px rgb(0 0 0 / 0.3);
   --color-bg: var(--hodi-canvas);
   --color-surface: var(--hodi-surface);
   --color-text: var(--hodi-text);
@@ -101,6 +153,7 @@
     background: var(--hodi-canvas);
     color: var(--hodi-text);
     font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-size: var(--hodi-type-body);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -115,7 +168,7 @@
 
   button:not(:disabled),
   a {
-    transition-duration: 160ms;
+    transition-duration: var(--hodi-transition-fast);
   }
 
   button:not(:disabled),
@@ -135,8 +188,8 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--hodi-focus);
-    outline-offset: 3px;
+    outline: var(--hodi-focus-width) solid var(--hodi-focus);
+    outline-offset: var(--hodi-focus-offset);
   }
 
   button,
@@ -198,7 +251,7 @@
 
   .auth-input {
     width: 100%;
-    border-radius: 0.75rem;
+    border-radius: 0.375rem;
     border: 1px solid var(--hodi-border);
     background: var(--hodi-surface);
     padding: 0.625rem 0.875rem;
@@ -206,7 +259,7 @@
     line-height: 1.25rem;
     color: var(--hodi-text);
     outline: none;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color var(--hodi-transition-fast) ease, box-shadow var(--hodi-transition-fast) ease;
   }
 
   .auth-input::placeholder {
@@ -266,7 +319,7 @@
     font-weight: 650;
     line-height: 1;
     cursor: pointer;
-    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+    transition: background-color var(--hodi-transition-fast) ease, border-color var(--hodi-transition-fast) ease, color var(--hodi-transition-fast) ease;
   }
 
   .theme-toggle:hover {
@@ -465,7 +518,7 @@
   .hodi-home {
     --hodi-forest: #163d32; --hodi-ivory: #f7f5f0; --hodi-gold: #c6a66b;
     --hodi-editorial: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-    background: var(--hodi-ivory); color: #202923;
+    background: var(--hodi-canvas); color: var(--hodi-text);
   }
   .hodi-home-header { border-color: transparent; background: var(--hodi-ivory); color: #202923; box-shadow: none; backdrop-filter: none; }
   .hodi-home-header { --hodi-canvas: #f7f5f0; --hodi-surface: #f7f5f0; --hodi-text: #202923; --hodi-muted: #707a73; --hodi-border: #e7e5de; --hodi-brand: #163d32; --hodi-brand-soft: #e7eee9; --hodi-brand-contrast: #fff; }
@@ -505,7 +558,21 @@
   .hodi-section-intro h2 { font-size: clamp(2rem, 3.35vw, 3rem); }
   .hodi-section-intro-copy p, .hodi-feature-copy > p, .hodi-properties-heading > p { margin: 0; color: #707a73; font-size: 1rem; line-height: 1.7; }
   .hodi-section-intro-copy small { display: block; margin-top: 1rem; color: #707a73; font-size: .75rem; line-height: 1.5; }
-  .hodi-dashboard-preview { overflow: hidden; border: 1px solid #e7e5de; border-radius: 1rem; background: #fff; box-shadow: 0 18px 44px rgb(32 41 35 / .09), 0 2px 6px rgb(32 41 35 / .04); }
+  .hodi-dashboard-preview {
+    overflow: hidden;
+    border: 1px solid rgba(22, 61, 50, 0.08);
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.75), 0 20px 48px -10px rgba(22, 61, 50, 0.09), 0 2px 6px rgba(22, 61, 50, 0.04);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+  }
+  :root[data-theme="dark"] .hodi-dashboard-preview {
+    background: rgba(17, 27, 46, 0.82);
+    border-color: rgba(132, 177, 159, 0.14);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 20px 48px -10px rgba(0, 0, 0, 0.35);
+  }
   .hodi-preview-bar { display: grid; grid-template-columns: 1fr auto 1fr; min-height: 2.75rem; align-items: center; gap: 1rem; padding-inline: 1.25rem; background: #eef1ec; color: #707a73; font-size: .65rem; letter-spacing: .045em; }
   .hodi-preview-bar > span:last-child { text-align: right; letter-spacing: 0; }
   .hodi-window-dots { display: inline-flex; gap: .3rem; }
@@ -545,7 +612,24 @@
   .hodi-feature-copy li::before { content: "✓"; margin-right: .65rem; color: var(--hodi-forest); }
   .hodi-text-link { display: inline-flex; align-items: center; gap: .65rem; margin-top: 1.5rem; color: var(--hodi-forest); font-size: .85rem; font-weight: 650; text-decoration: none; }
   .hodi-text-link:hover { text-decoration: underline; text-underline-offset: .25rem; }
-  .hodi-rent-preview, .hodi-utilities-preview, .hodi-tenant-preview { min-width: 0; overflow: hidden; border: 1px solid #e7e5de; border-radius: .65rem; background: #fff; box-shadow: 0 12px 32px rgb(32 41 35 / .055); }
+  .hodi-rent-preview, .hodi-utilities-preview, .hodi-tenant-preview {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid rgba(22, 61, 50, 0.08);
+    border-radius: .85rem;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.75), 0 16px 36px -8px rgba(22, 61, 50, 0.07);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+  }
+  :root[data-theme="dark"] .hodi-rent-preview,
+  :root[data-theme="dark"] .hodi-utilities-preview,
+  :root[data-theme="dark"] .hodi-tenant-preview {
+    background: rgba(17, 27, 46, 0.85);
+    border-color: rgba(132, 177, 159, 0.14);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 16px 36px -8px rgba(0, 0, 0, 0.35);
+  }
   .hodi-mini-window-head { display: flex; min-height: 3rem; align-items: center; justify-content: space-between; gap: .75rem; padding-inline: 1rem; border-bottom: 1px solid #e7e5de; color: var(--hodi-forest); font-size: .72rem; font-weight: 600; }
   .hodi-mini-window-head > span:last-child { color: #707a73; font-size: .58rem; font-weight: 500; letter-spacing: .04em; }
   .hodi-table-head, .hodi-table-empty { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: .65rem; padding: 1rem; }
@@ -952,9 +1036,9 @@ main .auth-form-panel {
 }
 
 .hodi-record-wrap {
-  width: min(72rem, calc(100% - 2rem));
+  width: min(var(--hodi-content-workspace), calc(100% - var(--hodi-space-8)));
   margin-inline: auto;
-  padding: 2.25rem 0 4.5rem;
+  padding: var(--hodi-space-8) 0 calc(var(--hodi-space-8) + var(--hodi-space-4));
 }
 
 .hodi-record-topbar {
@@ -979,7 +1063,7 @@ main .auth-form-panel {
   align-items: center;
   padding: 0.55rem 0.7rem;
   color: var(--hodi-muted);
-  font-size: 0.875rem;
+  font-size: var(--hodi-type-sm);
   font-weight: 600;
   text-decoration: none;
 }
@@ -1014,7 +1098,7 @@ main .auth-form-panel {
 
 .hodi-record-back {
   color: var(--hodi-brand);
-  font-size: 0.875rem;
+  font-size: var(--hodi-type-sm);
   font-weight: 650;
   text-decoration: none;
 }
@@ -1022,7 +1106,7 @@ main .auth-form-panel {
 .hodi-record-kicker {
   margin: 1.6rem 0 0;
   color: #a8874f;
-  font-size: 0.75rem;
+  font-size: var(--hodi-type-xs);
   font-weight: 650;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -1032,7 +1116,7 @@ main .auth-form-panel {
   margin: 0.35rem 0 0;
   color: var(--hodi-brand);
   font-family: var(--font-editorial), Georgia, serif;
-  font-size: clamp(2rem, 4vw, 3.15rem);
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
   font-weight: 500;
   letter-spacing: -0.03em;
   line-height: 1.08;
@@ -1042,8 +1126,14 @@ main .auth-form-panel {
   margin: 2rem 0 0.4rem;
   color: var(--hodi-brand);
   font-family: var(--font-editorial), Georgia, serif;
-  font-size: 1.55rem;
+  font-size: var(--hodi-type-section);
   font-weight: 500;
+}
+
+.hodi-record-table-wrap {
+  border: var(--hodi-border-width) solid var(--hodi-border);
+  border-radius: var(--hodi-radius-panel);
+  background: var(--hodi-surface);
 }
 
 .hodi-record-lead {
@@ -1066,16 +1156,16 @@ main .auth-form-panel {
   display: grid;
   gap: 0.35rem;
   color: var(--hodi-muted);
-  font-size: 0.8rem;
+  font-size: var(--hodi-type-xs);
 }
 
 .hodi-record select,
 .hodi-record input,
 .hodi-record textarea {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--hodi-control-height);
   border: 1px solid var(--hodi-border);
-  border-radius: 0.35rem;
+  border-radius: var(--hodi-radius-control);
   background: var(--hodi-surface);
   color: var(--hodi-text);
   padding: 0.6rem 0.75rem;
@@ -1086,7 +1176,7 @@ main .auth-form-panel {
 }
 
 .hodi-record button {
-  min-height: 44px;
+  min-height: var(--hodi-control-height);
   padding: 0.55rem 0.95rem;
   border: 0;
   background: var(--hodi-brand);
@@ -1113,7 +1203,8 @@ main .auth-form-panel {
 .hodi-record-card,
 .hodi-record-stat,
 .hodi-record-invite {
-  border: 1px solid var(--hodi-border);
+  border: var(--hodi-border-width) solid var(--hodi-border);
+  border-radius: var(--hodi-radius-panel);
   background: var(--hodi-surface);
   padding: 1rem;
 }
@@ -1152,7 +1243,7 @@ main .auth-form-panel {
 
 .hodi-record-meta {
   color: var(--hodi-muted);
-  font-size: 0.75rem;
+  font-size: var(--hodi-type-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -1180,7 +1271,7 @@ main .auth-form-panel {
 .hodi-record-stat span {
   display: block;
   color: var(--hodi-muted);
-  font-size: 0.75rem;
+  font-size: var(--hodi-type-xs);
 }
 
 .hodi-record-stat strong {
@@ -1204,18 +1295,27 @@ main .auth-form-panel {
 
 .hodi-record th,
 .hodi-record td {
-  padding: 0.75rem 0.55rem;
-  border-bottom: 1px solid var(--hodi-border);
+  padding: var(--hodi-table-cell-y) var(--hodi-table-cell-x);
+  border-bottom: var(--hodi-border-width) solid var(--hodi-border);
   text-align: left;
   vertical-align: top;
 }
 
 .hodi-record th {
   color: var(--hodi-muted);
-  font-size: 0.72rem;
+  font-size: var(--hodi-type-xs);
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.hodi-record-invoice-table td:nth-child(n + 4),
+.hodi-record-invoice-table th:nth-child(n + 4),
+.hodi-record-payment-table td:nth-child(n + 5),
+.hodi-record-payment-table th:nth-child(n + 5) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .hodi-record-row {
@@ -1745,3 +1845,857 @@ header.hodi-site-header nav a:hover {
     padding: 1.25rem 1.15rem 2.5rem;
   }
 }
+
+/* ==========================================================================
+   Elevated Materiality: Frosted Glassmorphism & Hairline Insets
+   ========================================================================== */
+
+.hodi-glass-card {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(22, 61, 50, 0.08);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.65),
+    0 10px 30px -5px rgba(22, 61, 50, 0.04),
+    0 1px 3px rgba(22, 61, 50, 0.02);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+:root[data-theme="dark"] .hodi-glass-card {
+  background: rgba(17, 27, 46, 0.78);
+  border-color: rgba(132, 177, 159, 0.14);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.08),
+    0 10px 30px -5px rgba(0, 0, 0, 0.3);
+}
+
+.hodi-glass-card:hover {
+  border-color: rgba(22, 61, 50, 0.16);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.85),
+    0 18px 44px -6px rgba(22, 61, 50, 0.08),
+    0 2px 6px rgba(22, 61, 50, 0.03);
+}
+
+:root[data-theme="dark"] .hodi-glass-card:hover {
+  border-color: rgba(132, 177, 159, 0.25);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.12),
+    0 18px 44px -6px rgba(0, 0, 0, 0.45);
+}
+
+/* Mesh drift keyframes for ambient organic lighting */
+@keyframes ambientDrift1 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(8%, 10%, 0) scale(1.08); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes ambientDrift2 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-10%, -8%, 0) scale(1.06); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes ambientDrift3 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6%, -12%, 0) scale(1.1); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.animate-ambient-drift-1 {
+  animation: ambientDrift1 28s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-ambient-drift-2 {
+  animation: ambientDrift2 34s ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-ambient-drift-3 {
+  animation: ambientDrift3 24s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ambient-drift-1,
+  .animate-ambient-drift-2,
+  .animate-ambient-drift-3 {
+    animation: none;
+  }
+}
+
+.hodi-home-hero-visual.hodi-hero-stage {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(0.75rem, 1.6vw, 1.35rem);
+  background: #102820;
+}
+
+.hodi-home-hero-visual.hodi-hero-stage figcaption {
+  position: static;
+  inset: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 0;
+  margin: 0.75rem 0 0;
+  padding: 0 0.15rem;
+  background: transparent;
+  color: rgb(255 255 255 / 0.74);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hodi-home-hero-visual.hodi-hero-stage figcaption small {
+  color: var(--hodi-gold);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+}
+
+.hodi-site-footer {
+  border-top: 1px solid var(--hodi-border);
+  background: var(--hodi-surface);
+}
+
+.hodi-site-footer::before {
+  content: "";
+  display: block;
+  height: 2px;
+  background: var(--hodi-gold);
+}
+
+.hodi-market-filters {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0;
+  padding: 1.15rem;
+  border: 1px solid var(--hodi-border);
+  border-top: 2px solid var(--hodi-gold);
+  background: var(--hodi-surface);
+}
+
+.hodi-market-filters label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--hodi-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (min-width: 768px) {
+  .hodi-market-filters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: end;
+  }
+}
+
+.hodi-listing-grid {
+  display: grid;
+  gap: 1.75rem 1.25rem;
+}
+
+@media (min-width: 640px) {
+  .hodi-listing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .hodi-listing-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.hodi-listing-card {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  background: var(--hodi-surface);
+}
+
+.hodi-listing-card-media,
+.hodi-listing-stage {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #d7e0da;
+}
+
+.hodi-listing-stage {
+  aspect-ratio: 16 / 10;
+  background: #102820;
+}
+
+.hodi-listing-card-empty {
+  display: flex;
+  height: 100%;
+  min-height: 12rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--hodi-muted);
+  font-size: 0.875rem;
+}
+
+.hodi-listing-card-status,
+.hodi-listing-card-pano {
+  position: absolute;
+  top: 0.8rem;
+  z-index: 1;
+  padding: 0.35rem 0.55rem;
+  background: var(--hodi-ivory);
+  color: var(--hodi-forest);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hodi-listing-card-status { left: 0.8rem; }
+.hodi-listing-card-pano { right: 0.8rem; }
+
+.hodi-listing-card-body { padding: 1rem 0.15rem 0.2rem; }
+
+.hodi-listing-card-place {
+  margin: 0;
+  color: var(--hodi-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hodi-listing-card h2,
+.hodi-listing-title,
+.hodi-inquiry h2 {
+  margin: 0.35rem 0 0;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-weight: 460;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+
+.hodi-listing-card h2 { font-size: 1.55rem; color: var(--hodi-text); }
+
+.hodi-listing-card-meta,
+.hodi-listing-card-facts,
+.hodi-listing-where {
+  margin: 0.4rem 0 0;
+  color: var(--hodi-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.hodi-listing-card-rent,
+.hodi-listing-rent {
+  margin: 0.85rem 0 0;
+  color: var(--hodi-text);
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.hodi-listing-card-rent span,
+.hodi-listing-rent span {
+  color: var(--hodi-muted);
+  font-weight: 450;
+}
+
+.hodi-listing-page { background: var(--hodi-canvas); }
+
+.hodi-back-link {
+  color: var(--hodi-brand);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.hodi-back-link:hover { text-decoration: underline; }
+
+.hodi-listing-layout {
+  display: grid;
+  gap: 2rem;
+  margin-top: 1.5rem;
+}
+
+@media (min-width: 1024px) {
+  .hodi-listing-layout {
+    grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.7fr);
+    align-items: start;
+    gap: 2.5rem;
+  }
+}
+
+.hodi-listing-heading { margin-top: 1.5rem; }
+
+.hodi-listing-heading > p:first-child {
+  margin: 0;
+  color: var(--hodi-brand);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hodi-listing-title {
+  margin-top: 0.45rem;
+  color: var(--hodi-text);
+  font-size: clamp(2.2rem, 4vw, 3.4rem);
+}
+
+.hodi-listing-rent { font-size: 1.35rem; }
+
+.hodi-listing-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 1.5rem 0 0;
+  border-top: 1px solid var(--hodi-border);
+}
+
+.hodi-listing-facts div {
+  padding: 0.9rem 0.2rem;
+  border-bottom: 1px solid var(--hodi-border);
+}
+
+.hodi-listing-facts dt {
+  color: var(--hodi-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hodi-listing-facts dd {
+  margin: 0.2rem 0 0;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 460;
+}
+
+.hodi-listing-copy {
+  max-width: 42rem;
+  margin: 1.5rem 0 0;
+  color: var(--hodi-text);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.hodi-listing-amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hodi-listing-amenities li {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--hodi-border);
+  background: var(--hodi-surface);
+  font-size: 0.85rem;
+}
+
+.hodi-inquiry {
+  position: sticky;
+  top: 5.5rem;
+  padding: 1.35rem 1.25rem 1.4rem;
+  border: 1px solid var(--hodi-border);
+  border-top: 2px solid var(--hodi-gold);
+  background: var(--hodi-surface);
+}
+
+.hodi-inquiry h2 { font-size: 1.8rem; }
+
+.hodi-inquiry > p,
+.hodi-inquiry label span {
+  color: var(--hodi-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.hodi-inquiry form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.hodi-inquiry label {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--hodi-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hodi-inquiry button[type="submit"] {
+  min-height: 2.9rem;
+  border: 0;
+  background: var(--hodi-brand);
+  color: var(--hodi-brand-contrast);
+  font-weight: 700;
+}
+
+.hodi-inquiry button[type="submit"]:disabled { opacity: 0.6; }
+
+.hodi-stage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.1rem;
+  color: var(--hodi-muted);
+  font-size: 0.875rem;
+}
+
+.hodi-stage-bar button {
+  min-height: 2.75rem;
+  border: 1px solid var(--hodi-border);
+  background: var(--hodi-surface);
+  padding: 0 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.hodi-stage-thumb {
+  position: relative;
+  height: 4.4rem;
+  width: 5.6rem;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--hodi-border);
+  background: var(--hodi-surface);
+}
+
+.hodi-stage-thumb.is-active { border-color: var(--hodi-forest); outline: 1px solid var(--hodi-gold); }
+
+@media (max-width: 1023px) {
+  .hodi-inquiry { position: static; }
+}
+
+.hodi-listing-card-media .hodi-listing-card-empty {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  background: #d7e0da;
+  color: #3d4a44;
+}
+
+.hodi-listing-stage.hodi-listing-card-empty {
+  color: #f4efe4;
+}
+
+.hodi-stage-missing {
+  display: flex;
+  height: 100%;
+  min-height: 12rem;
+  align-items: center;
+  justify-content: center;
+  color: #f4efe4;
+  font-size: 0.875rem;
+}
+
+.hodi-listing-card-media::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  height: 2px;
+  background: var(--hodi-gold);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 280ms ease;
+}
+
+.hodi-listing-card:hover .hodi-listing-card-media::after,
+.hodi-listing-card:focus-visible .hodi-listing-card-media::after {
+  transform: scaleX(1);
+}
+
+.hodi-inquiry label span {
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.hodi-market-actions {
+  display: flex;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.hodi-market-submit,
+.hodi-market-clear,
+.hodi-page-nav button,
+.hodi-stage-bar button {
+  border-radius: 0.125rem;
+}
+
+.hodi-market-submit {
+  min-height: 2.75rem;
+  border: 0;
+  background: var(--hodi-brand);
+  padding: 0 1.15rem;
+  color: var(--hodi-brand-contrast);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hodi-market-clear {
+  min-height: 2.75rem;
+  border: 1px solid var(--hodi-border);
+  background: transparent;
+  padding: 0 0.9rem;
+  color: var(--hodi-text);
+  font-size: 0.875rem;
+}
+
+.hodi-market-empty,
+.hodi-market-error {
+  padding: 2.25rem 0.15rem 0.5rem;
+  border-top: 1px solid var(--hodi-border);
+}
+
+.hodi-market-empty h2 {
+  margin: 0;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: clamp(1.7rem, 3vw, 2.3rem);
+  font-weight: 460;
+  letter-spacing: -0.03em;
+}
+
+.hodi-market-empty p,
+.hodi-market-error p {
+  max-width: 36rem;
+  margin-top: 0.65rem;
+  color: var(--hodi-muted);
+  line-height: 1.6;
+}
+
+.hodi-text-action {
+  margin-top: 1rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--hodi-brand);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hodi-page-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2rem;
+}
+
+.hodi-page-nav button {
+  min-height: 2.5rem;
+  border: 1px solid var(--hodi-border);
+  background: var(--hodi-surface);
+  padding: 0 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hodi-page-nav button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.hodi-auth-sheet {
+  border: 1px solid var(--hodi-border);
+  border-top: 2px solid var(--hodi-gold);
+  background: var(--hodi-surface);
+  padding: 1.6rem 1.5rem 1.8rem;
+}
+
+.hodi-auth-sheet h1 {
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-weight: 460;
+  letter-spacing: -0.03em;
+}
+
+.hodi-workspace-choice {
+  width: 100%;
+  border: 1px solid var(--hodi-border);
+  background: var(--hodi-surface);
+  padding: 1rem 1.05rem;
+  text-align: left;
+}
+
+.hodi-workspace-choice:hover,
+.hodi-workspace-choice:focus-visible {
+  border-color: var(--hodi-brand);
+}
+
+.hodi-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3rem 1.25rem;
+  text-align: center;
+}
+
+.hodi-empty-mark {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid var(--hodi-border);
+  background: var(--hodi-surface);
+  color: var(--hodi-brand);
+}
+
+.hodi-empty h2 {
+  margin-top: 1rem;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 1.7rem;
+  font-weight: 460;
+  letter-spacing: -0.03em;
+}
+
+.hodi-commerce-panel,
+.hodi-commerce-order {
+  border: 1px solid var(--hodi-border);
+  border-top: 2px solid var(--hodi-gold);
+  background: var(--hodi-surface);
+  color: var(--hodi-text);
+}
+
+.hodi-commerce-panel {
+  margin: 28px 0;
+  padding: 22px;
+}
+
+.hodi-commerce-order {
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.hodi-payment-pending {
+  margin-top: 0.5rem;
+  border-left: 3px solid var(--hodi-warning);
+  background: var(--hodi-warning-soft);
+  padding: 0.55rem 0.7rem;
+  color: var(--hodi-text);
+  font-size: 0.875rem;
+}
+
+.hodi-gallery-lightbox {
+  background: #102820;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hodi-listing-card img,
+  .hodi-listing-card-media::after {
+    transition: none;
+  }
+}
+
+.hodi-ambient-orb {
+  mix-blend-mode: multiply;
+}
+
+:root[data-theme="dark"] .hodi-ambient-orb {
+  mix-blend-mode: screen;
+  opacity: 0.18;
+}
+
+/* Homepage and editorial surfaces pin light colors. Dark mode remaps those
+   surfaces without changing forest hero plates or ivory caption chips. */
+:root[data-theme="dark"] .hodi-home-header,
+:root[data-theme="dark"] .hodi-home-footer {
+  background: var(--hodi-canvas);
+  color: var(--hodi-text);
+  --hodi-canvas: #0e1714;
+  --hodi-surface: #17241e;
+  --hodi-surface-raised: #1e2e27;
+  --hodi-text: #f4efe4;
+  --hodi-muted: #b7c4bb;
+  --hodi-border: #31443b;
+  --hodi-brand: #d7c4a0;
+  --hodi-brand-hover: #e6d7b8;
+  --hodi-brand-soft: #24352e;
+  --hodi-brand-contrast: #102820;
+  --hodi-focus: #d7c4a0;
+}
+
+:root[data-theme="dark"] .hodi-home-header nav a,
+:root[data-theme="dark"] .hodi-home-header .group > span:last-child {
+  color: var(--hodi-text);
+}
+
+:root[data-theme="dark"] .hodi-home-header nav a:hover {
+  color: var(--hodi-gold);
+  background: var(--hodi-brand-soft);
+}
+
+:root[data-theme="dark"] .hodi-home-header .theme-toggle {
+  border-color: var(--hodi-border);
+  background: transparent;
+  color: var(--hodi-text);
+}
+
+:root[data-theme="dark"] .hodi-home-header .theme-toggle:hover {
+  background: var(--hodi-brand-soft);
+}
+
+:root[data-theme="dark"] .hodi-section-label,
+:root[data-theme="dark"] .hodi-section-intro h2,
+:root[data-theme="dark"] .hodi-feature-copy h2,
+:root[data-theme="dark"] .hodi-properties-heading h2,
+:root[data-theme="dark"] .hodi-start-heading h2,
+:root[data-theme="dark"] .hodi-start-steps h3,
+:root[data-theme="dark"] .hodi-dashboard-welcome h3,
+:root[data-theme="dark"] .hodi-text-link,
+:root[data-theme="dark"] .hodi-feature-copy li,
+:root[data-theme="dark"] .hodi-feature-copy li::before,
+:root[data-theme="dark"] .hodi-mini-window-head,
+:root[data-theme="dark"] .hodi-tenant-profile strong,
+:root[data-theme="dark"] .hodi-request-note strong,
+:root[data-theme="dark"] .hodi-property-gallery strong,
+:root[data-theme="dark"] .hodi-dashboard-empty > div > strong,
+:root[data-theme="dark"] .hodi-preview-stats strong,
+:root[data-theme="dark"] .hodi-table-empty strong,
+:root[data-theme="dark"] .hodi-utility-row strong,
+:root[data-theme="dark"] .hodi-tenant-fields b {
+  color: var(--hodi-text);
+}
+
+:root[data-theme="dark"] .hodi-section-label {
+  color: var(--hodi-gold);
+}
+
+:root[data-theme="dark"] .hodi-home-hero-copy .hodi-section-label,
+:root[data-theme="dark"] .hodi-home-cta .hodi-section-label {
+  color: #cfd9d1;
+}
+
+:root[data-theme="dark"] .hodi-section-intro-copy p,
+:root[data-theme="dark"] .hodi-section-intro-copy small,
+:root[data-theme="dark"] .hodi-feature-copy > p,
+:root[data-theme="dark"] .hodi-properties-heading > p,
+:root[data-theme="dark"] .hodi-property-gallery span,
+:root[data-theme="dark"] .hodi-property-disclaimer,
+:root[data-theme="dark"] .hodi-start-steps p,
+:root[data-theme="dark"] .hodi-capability-strip,
+:root[data-theme="dark"] .hodi-preview-bar,
+:root[data-theme="dark"] .hodi-dashboard-topline,
+:root[data-theme="dark"] .hodi-dashboard-welcome p,
+:root[data-theme="dark"] .hodi-dashboard-empty > div > p,
+:root[data-theme="dark"] .hodi-dashboard-empty > div > span,
+:root[data-theme="dark"] .hodi-dashboard-empty ul,
+:root[data-theme="dark"] .hodi-preview-footnote,
+:root[data-theme="dark"] .hodi-preview-stats span,
+:root[data-theme="dark"] .hodi-mini-window-head > span:last-child,
+:root[data-theme="dark"] .hodi-table-head,
+:root[data-theme="dark"] .hodi-table-empty,
+:root[data-theme="dark"] .hodi-rent-preview > p,
+:root[data-theme="dark"] .hodi-utilities-preview > p,
+:root[data-theme="dark"] .hodi-tenant-preview > p,
+:root[data-theme="dark"] .hodi-utility-row small,
+:root[data-theme="dark"] .hodi-utility-row > b,
+:root[data-theme="dark"] .hodi-tenant-profile small,
+:root[data-theme="dark"] .hodi-tenant-profile span:last-child,
+:root[data-theme="dark"] .hodi-tenant-fields span,
+:root[data-theme="dark"] .hodi-request-note small,
+:root[data-theme="dark"] .hodi-request-note > span,
+:root[data-theme="dark"] .hodi-request-note em,
+:root[data-theme="dark"] .hodi-request-note p {
+  color: var(--hodi-muted);
+}
+
+:root[data-theme="dark"] .hodi-feature-rent,
+:root[data-theme="dark"] .hodi-feature-tenants,
+:root[data-theme="dark"] .hodi-start-section,
+:root[data-theme="dark"] .hodi-property-gallery article,
+:root[data-theme="dark"] .hodi-request-note,
+:root[data-theme="dark"] .hodi-role-jump,
+:root[data-theme="dark"] .hodi-photo-essay-grid article,
+:root[data-theme="dark"] .hodi-dashboard-preview,
+:root[data-theme="dark"] .hodi-rent-preview,
+:root[data-theme="dark"] .hodi-utilities-preview,
+:root[data-theme="dark"] .hodi-tenant-preview {
+  background: var(--hodi-surface);
+  border-color: var(--hodi-border);
+  color: var(--hodi-text);
+}
+
+:root[data-theme="dark"] .hodi-feature-maintenance,
+:root[data-theme="dark"] .hodi-properties-section,
+:root[data-theme="dark"] .hodi-feature-utilities,
+:root[data-theme="dark"] .hodi-photo-essay,
+:root[data-theme="dark"] .hodi-editorial-hero:not(.is-forest),
+:root[data-theme="dark"] .hodi-auth,
+:root[data-theme="dark"] .hodi-session-gate {
+  background: var(--hodi-canvas);
+  color: var(--hodi-text);
+}
+
+:root[data-theme="dark"] .hodi-feature-section,
+:root[data-theme="dark"] .hodi-properties-section,
+:root[data-theme="dark"] .hodi-start-section,
+:root[data-theme="dark"] .hodi-preview-stats > div,
+:root[data-theme="dark"] .hodi-dashboard-empty,
+:root[data-theme="dark"] .hodi-mini-window-head,
+:root[data-theme="dark"] .hodi-table-head,
+:root[data-theme="dark"] .hodi-utility-row,
+:root[data-theme="dark"] .hodi-tenant-profile,
+:root[data-theme="dark"] .hodi-property-gallery article,
+:root[data-theme="dark"] .hodi-start-steps li {
+  border-color: var(--hodi-border);
+}
+
+:root[data-theme="dark"] .hodi-preview-bar,
+:root[data-theme="dark"] .hodi-dashboard-empty ul,
+:root[data-theme="dark"] .hodi-request-note em,
+:root[data-theme="dark"] .hodi-utility-icon,
+:root[data-theme="dark"] .hodi-profile-mark {
+  background: var(--hodi-surface-raised);
+  color: var(--hodi-muted);
+}
+
+:root[data-theme="dark"] .hodi-editorial-hero:not(.is-forest) .hodi-editorial-copy h1,
+:root[data-theme="dark"] .hodi-photo-essay-head h2,
+:root[data-theme="dark"] .hodi-role-jump + .hodi-photo-essay h2,
+:root[data-theme="dark"] .hodi-photo-essay-grid strong,
+:root[data-theme="dark"] .hodi-role-jump a,
+:root[data-theme="dark"] .hodi-session-gate {
+  color: var(--hodi-text);
+}
+
+:root[data-theme="dark"] .hodi-editorial-hero:not(.is-forest) .hodi-editorial-copy > p,
+:root[data-theme="dark"] .hodi-photo-essay-grid span,
+:root[data-theme="dark"] .hodi-photo-disclaimer,
+:root[data-theme="dark"] .hodi-role-jump span {
+  color: var(--hodi-muted);
+}
+
+:root[data-theme="dark"] header.hodi-site-header:not(.hodi-home-header) {
+  background: color-mix(in srgb, var(--hodi-canvas) 92%, transparent);
+}
+
+:root[data-theme="dark"] header.hodi-site-header nav a:hover {
+  color: var(--hodi-gold);
+}
+

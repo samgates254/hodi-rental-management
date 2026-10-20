@@ -1,10 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 
 export type Theme = "light" | "dark";
 
 const STORAGE_KEY = "hodi-theme";
+const CHANGE_EVENT = "hodi-theme-change";
+let memoryTheme: Theme | null = null;
+
 type ThemeContextValue = { theme: Theme; setTheme: (theme: Theme) => void };
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
@@ -12,43 +15,56 @@ function isTheme(value: string | null): value is Theme {
   return value === "light" || value === "dark";
 }
 
+function savedTheme(): Theme | null {
+  try {
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (isTheme(saved)) return saved;
+  } catch {
+    // Storage can be blocked. The in-memory choice still applies for this tab.
+  }
+  return memoryTheme;
+}
+
+function systemTheme(): Theme {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function currentTheme(): Theme {
+  return savedTheme() ?? systemTheme();
+}
+
+function applyTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme;
+}
+
+function subscribe(onStoreChange: () => void) {
+  const notify = () => {
+    applyTheme(currentTheme());
+    onStoreChange();
+  };
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  window.addEventListener(CHANGE_EVENT, notify);
+  window.addEventListener("storage", notify);
+  media.addEventListener("change", notify);
+  return () => {
+    window.removeEventListener(CHANGE_EVENT, notify);
+    window.removeEventListener("storage", notify);
+    media.removeEventListener("change", notify);
+  };
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("light");
-
-  useEffect(() => {
-    const initial = document.documentElement.dataset.theme;
-    let saved: string | null = null;
-    try {
-      saved = window.localStorage.getItem(STORAGE_KEY);
-    } catch {
-      // The in-memory theme remains available when browser storage is blocked.
-    }
-    const restored: Theme = isTheme(saved)
-      ? saved
-      : isTheme(initial ?? null)
-        ? (initial as Theme)
-        : "light";
-    document.documentElement.dataset.theme = restored;
-    setThemeState(restored);
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== STORAGE_KEY) return;
-      const next = isTheme(event.newValue) ? event.newValue : "light";
-      document.documentElement.dataset.theme = next;
-      setThemeState(next);
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  const theme = useSyncExternalStore(subscribe, currentTheme, () => "light" as Theme);
 
   const setTheme = useCallback((next: Theme) => {
-    document.documentElement.dataset.theme = next;
+    memoryTheme = next;
+    applyTheme(next);
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
-      // Keep the current page usable if browser storage is unavailable.
+      // The selected theme still applies for this page when storage is blocked.
     }
-    setThemeState(next);
+    window.dispatchEvent(new Event(CHANGE_EVENT));
   }, []);
 
   const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
