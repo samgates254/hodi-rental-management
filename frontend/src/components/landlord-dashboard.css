@@ -145,7 +145,7 @@
 }
 
 .landlord-preview-banner a {
-  color: inherit;
+  color: var(--hodi-brand);
   font-weight: 700;
   text-decoration: underline;
   white-space: nowrap;

@@ -1,7 +1,13 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from unittest import skipUnless
+
 from django.contrib.auth import get_user_model
+from django.db import close_old_connections, connection
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from django.test import TransactionTestCase
+from rest_framework.test import APITestCase, APIClient
 
 from apps.maintenance.models import TechnicianProfile
 from apps.organizations.models import Organization, OrganizationMembership
@@ -336,3 +342,52 @@ class OrganizationMembershipAuthorizationTests(APITestCase):
         self.owner_membership.refresh_from_db()
         self.assertTrue(self.owner_membership.is_active)
         self.assertEqual(self.owner_membership.role, OrganizationMembership.Role.OWNER)
+
+
+@skipUnless(connection.vendor == 'postgresql', 'Concurrent row-lock test requires PostgreSQL.')
+class OrganizationOwnerConcurrencyTests(TransactionTestCase):
+    def test_concurrent_owner_deactivation_keeps_one_active_owner(self):
+        user_model = get_user_model()
+        organization = Organization.objects.create(name='Owner Concurrency Homes')
+        owner_ids = []
+        membership_ids = []
+        for index in range(2):
+            user = user_model.objects.create_user(username=f'owner-concurrency-{index}', password='test')
+            membership = OrganizationMembership.objects.create(
+                organization=organization,
+                user=user,
+                role=OrganizationMembership.Role.OWNER,
+            )
+            owner_ids.append(user.pk)
+            membership_ids.append(membership.pk)
+
+        barrier = Barrier(2, timeout=10)
+
+        def deactivate_own_membership(index):
+            try:
+                close_old_connections()
+                user = user_model.objects.get(pk=owner_ids[index])
+                client = APIClient()
+                client.force_authenticate(user)
+                client.raise_request_exception = False
+                barrier.wait(timeout=10)
+                return client.patch(
+                    reverse('organizations:membership-detail', args=(membership_ids[index],)),
+                    {'is_active': False},
+                    format='json',
+                ).status_code
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            status_codes = list(pool.map(deactivate_own_membership, range(2)))
+
+        self.assertCountEqual(status_codes, [status.HTTP_200_OK, status.HTTP_400_BAD_REQUEST])
+        self.assertEqual(
+            OrganizationMembership.objects.filter(
+                organization=organization,
+                role=OrganizationMembership.Role.OWNER,
+                is_active=True,
+            ).count(),
+            1,
+        )

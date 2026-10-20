@@ -22,6 +22,8 @@ from apps.properties.models import Building, Property, Unit
 from apps.subscriptions.models import SubscriptionInvoice, SubscriptionPayment
 from apps.tenants.models import Tenant
 from common.rental_dates import rental_business_date
+from rest_framework.exceptions import PermissionDenied
+from application.services.maintenance import submit_completion, verify_completion
 
 
 class MaintenanceRequestApiTests(APITestCase):
@@ -368,6 +370,34 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['assignments'][0]['technician_id'], str(self.technician.pk))
         self.assertEqual(response.data['unmatched_job_ids'], [])
+
+    def test_match_preview_rejects_oversized_job_lists_before_matching(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post('/api/v1/maintenance/match/', {
+            'organization': self.organization.pk,
+            'jobs': [{'job_id': f'job-{index}'} for index in range(51)],
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('jobs', response.data)
+
+    def test_match_preview_rejects_oversized_technician_sets(self):
+        for index in range(49):
+            user = get_user_model().objects.create_user(
+                username=f'extra-match-tech-{index}',
+                password='password',
+            )
+            OrganizationMembership.objects.create(
+                organization=self.organization,
+                user=user,
+                role=OrganizationMembership.Role.TECHNICIAN,
+            )
+        self.client.force_authenticate(self.owner)
+        response = self.client.post('/api/v1/maintenance/match/', {
+            'organization': self.organization.pk,
+            'jobs': [{'job_id': 'job-1'}],
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('technicians', response.data)
 
     def test_match_preview_excludes_unverified_and_profileless_technicians(self):
         unverified = get_user_model().objects.create_user(username='unverified-tech', password='password')
@@ -1512,3 +1542,143 @@ class MaintenanceRequestApiTests(APITestCase):
         self.assertEqual(updated.status_code, status.HTTP_200_OK)
         issue.refresh_from_db()
         self.assertEqual(issue.title, 'Old wiring')
+
+    def test_revoked_technician_cannot_start_assigned_work(self):
+        self.client.force_authenticate(self.tenant_user)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'title': 'Revoked technician access test',
+            'description': 'Verify access after membership revocation.',
+            'hazard': 2,
+            'category': 'PLUMBING',
+        }, format='json')
+
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        request_id = created.data['id']
+
+        self.client.force_authenticate(self.caretaker)
+        assigned = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/assign/',
+            {'user_id': self.technician.pk},
+            format='json',
+        )
+        self.assertEqual(assigned.status_code, status.HTTP_200_OK, assigned.data)
+
+        OrganizationMembership.objects.filter(
+            organization=self.organization,
+            user=self.technician,
+        ).update(is_active=False)
+
+        self.client.force_authenticate(self.technician)
+        response = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/start/',
+            {},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        work_order = WorkOrder.objects.get(request_id=request_id)
+        self.assertEqual(work_order.status, WorkOrder.Status.ASSIGNED)
+
+
+    def test_revoked_technician_cannot_submit_completion_through_service(self):
+        self.client.force_authenticate(self.tenant_user)
+        created = self.client.post('/api/v1/maintenance/requests/', {
+            'title': 'Completion authorization test',
+            'description': 'Verify revoked membership blocks service completion.',
+            'hazard': 2,
+            'category': 'PLUMBING',
+        }, format='json')
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        request_id = created.data['id']
+
+        self.client.force_authenticate(self.caretaker)
+        assigned = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/assign/',
+            {'user_id': self.technician.pk},
+            format='json',
+        )
+        self.assertEqual(assigned.status_code, status.HTTP_200_OK, assigned.data)
+
+        self.client.force_authenticate(self.technician)
+        started = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/start/', {}, format='json',
+        )
+        self.assertEqual(started.status_code, status.HTTP_200_OK, started.data)
+
+        order = WorkOrder.objects.get(request_id=request_id)
+        self.assertEqual(order.status, WorkOrder.Status.IN_PROGRESS)
+        before_count = RepairCompletion.objects.filter(work_order=order).count()
+
+        OrganizationMembership.objects.filter(
+            organization=self.organization,
+            user=self.technician,
+        ).update(is_active=False)
+
+        with self.assertRaises(PermissionDenied):
+            submit_completion(
+                order,
+                actor=self.technician,
+                data={
+                    'diagnosis': 'Worn washer',
+                    'failure_category': 'WEAR',
+                    'resolution_summary': 'Replaced the washer.',
+                    'outcome': RepairCompletion.Outcome.FIXED,
+                    'labour_cost_cents': 500,
+                    'materials_cost_cents': 0,
+                    'other_cost_cents': 0,
+                },
+                materials=[],
+            )
+
+        self.assertEqual(
+            RepairCompletion.objects.filter(work_order=order).count(),
+            before_count,
+        )
+        order.refresh_from_db()
+        self.assertEqual(order.status, WorkOrder.Status.IN_PROGRESS)
+        self.assertEqual(
+            MaintenanceRequest.objects.get(pk=request_id).status,
+            MaintenanceRequest.Status.IN_PROGRESS,
+        )
+
+    def test_accountant_cannot_verify_completion_through_service(self):
+        request_id, _, _ = self._approved_material_request()
+
+        self.client.force_authenticate(self.technician)
+        started = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/start/', {}, format='json',
+        )
+        self.assertEqual(started.status_code, status.HTTP_200_OK, started.data)
+
+        submitted = self.client.post(
+            f'/api/v1/maintenance/requests/{request_id}/complete/',
+            {
+                'diagnosis': 'Worn valve',
+                'failure_category': 'WEAR',
+                'resolution_summary': 'Valve replaced.',
+                'outcome': 'FIXED',
+                'labour_cost_cents': 500,
+                'materials_cost_cents': 0,
+                'other_cost_cents': 0,
+            },
+            format='json',
+        )
+        self.assertEqual(submitted.status_code, status.HTTP_201_CREATED, submitted.data)
+
+        completion = RepairCompletion.objects.get(pk=submitted.data['id'])
+        request_row = MaintenanceRequest.objects.get(pk=request_id)
+        self.assertEqual(completion.status, RepairCompletion.Status.SUBMITTED)
+        self.assertEqual(request_row.status, MaintenanceRequest.Status.COMPLETED)
+
+        with self.assertRaises(PermissionDenied):
+            verify_completion(
+                completion,
+                actor=self.accountant,
+                approved=True,
+                notes='Attempted direct service verification.',
+            )
+
+        completion.refresh_from_db()
+        request_row.refresh_from_db()
+        self.assertEqual(completion.status, RepairCompletion.Status.SUBMITTED)
+        self.assertEqual(request_row.status, MaintenanceRequest.Status.COMPLETED)

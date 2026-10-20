@@ -8,9 +8,13 @@ import {
   occupancy,
   pendingApproval,
   periodRange,
+  portfolioPerformance,
   postedOpenInvoices,
+  propertyMatches,
+  sortProperties,
   type AnalyticsInvoice,
   type AnalyticsPayment,
+  type AnalyticsRequest,
   type PortfolioGraph,
 } from "./portfolioAnalytics.ts";
 
@@ -145,6 +149,60 @@ test("collection trend is empty when the period has no settled payments", () => 
   assert.equal(october.empty, false);
   assert.equal(october.points.find(point => point.key === "2026-10-06")?.cents, 4000);
   assert.equal(october.points.find(point => point.key === "2026-10-08")?.cents, 0);
+});
+
+test("property performance uses saved location, leases, and attributed balances", () => {
+  const located: PortfolioGraph = {
+    ...graph,
+    properties: [
+      { id: "p1", name: "Acacia", address: "12 Ngong Road", city: "Nairobi", country: "Kenya", is_active: true },
+      { id: "p2", name: "Riverside", city: "Nairobi", is_active: false },
+    ],
+  };
+  const openRequest: AnalyticsRequest = {
+    id: "r1",
+    organization: "1",
+    unit: "u2",
+    title: "Leak",
+    status: "OPEN",
+    category: "PLUMBING",
+    priority_class: 1,
+    emergency_override: false,
+    requires_approval: false,
+  };
+  const approvalRequest: AnalyticsRequest = {
+    ...openRequest,
+    id: "r4",
+    priority_class: 3,
+    requires_approval: true,
+  };
+  const closedRequest: AnalyticsRequest = { ...openRequest, id: "r2", unit: "u1", status: "CLOSED" };
+  const looseRequest: AnalyticsRequest = { ...openRequest, id: "r3", unit: "missing" };
+  const rows = portfolioPerformance(located, invoices, [openRequest, approvalRequest, closedRequest, looseRequest]);
+  const acacia = rows.find(row => row.id === "p1");
+  const riverside = rows.find(row => row.id === "p2");
+  assert.equal(acacia?.city, "Nairobi");
+  assert.equal(acacia?.address, "12 Ngong Road");
+  assert.equal(acacia?.occupied, 1);
+  assert.equal(acacia?.vacant, 1);
+  assert.equal(acacia?.activeUnits, 2);
+  assert.equal(acacia?.totalUnits, 2);
+  assert.equal(acacia?.occupancyRate, 50);
+  assert.equal(acacia?.activeLeaseRentMinor, 10000);
+  assert.equal(acacia?.outstandingCents, 6000);
+  assert.equal(acacia?.attentionCount, 2);
+  assert.equal(riverside?.occupancyRate, 0);
+  assert.equal(riverside?.inactive, 1);
+  assert.equal(riverside?.activeLeaseRentMinor, null);
+  assert.equal(riverside?.outstandingCents, 0);
+  assert.equal(riverside?.isActive, false);
+  assert.equal(riverside?.attentionCount, 0);
+  assert.equal(propertyMatches(acacia!, "ngong"), true);
+  assert.equal(propertyMatches(acacia!, "kilimani"), false);
+  const byOutstanding = sortProperties(rows, "outstanding");
+  assert.equal(byOutstanding[0]?.id, "p1");
+  const byOccupancy = sortProperties(rows, "occupancy");
+  assert.equal(byOccupancy[0]?.id, "p2");
 });
 
 test("maintenance attention follows saved status and priority", () => {

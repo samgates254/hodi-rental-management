@@ -10,9 +10,11 @@ import logging
 import re
 import hashlib
 import json
+from datetime import timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
+from django.utils import timezone
 
 from rest_framework.exceptions import APIException, NotFound, ValidationError
 
@@ -41,6 +43,8 @@ from rental_os.algorithms.money import MoneyError, require_cents
 logger = logging.getLogger(__name__)
 
 KENYA_MSISDN = re.compile(r'^254[17]\d{8}$')
+MAX_STK_PROMPTS_PER_TENANT_PER_HOUR = 5
+MAX_STK_PROMPTS_PER_DESTINATION_PER_HOUR = 3
 
 
 class MpesaUnavailable(APIException):
@@ -203,6 +207,19 @@ def initiate_mpesa_stk(
                             'idempotency_key': 'This key was already used for a different payment request.',
                         })
                     return existing
+
+            recent_prompts = MpesaAttempt.objects.filter(
+                tenant=tenant,
+                created_at__gte=timezone.now() - timedelta(hours=1),
+            )
+            if recent_prompts.count() >= MAX_STK_PROMPTS_PER_TENANT_PER_HOUR:
+                raise ValidationError({
+                    'detail': 'Too many M-Pesa payment prompts were requested. Try again later.',
+                })
+            if recent_prompts.filter(phone_number=phone).count() >= MAX_STK_PROMPTS_PER_DESTINATION_PER_HOUR:
+                raise ValidationError({
+                    'detail': 'Too many M-Pesa payment prompts were sent to this phone. Try again later.',
+                })
 
             available_cents = _available_stk_balance(tenant=tenant)
             if available_cents <= 0:

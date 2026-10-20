@@ -1,4 +1,4 @@
-Django==5.2.8
+Django==5.2.18
 google-auth[requests]>=2.35,<3
 djangorestframework==3.18.1
 psycopg[binary]==3.3.6

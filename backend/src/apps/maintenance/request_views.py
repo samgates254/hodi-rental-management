@@ -13,6 +13,7 @@ from apps.leases.models import Lease
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.tenants.models import Tenant
 from application.services.maintenance import (
+    MAX_MATCH_PREVIEW_JOBS,
     _ensure_legacy_issue,
     accept_assignment,
     add_completion_evidence,
@@ -675,6 +676,10 @@ class MatchPreviewView(APIView):
         jobs = request.data.get('jobs') or []
         if not isinstance(jobs, list):
             raise ValidationError({'jobs': 'jobs must be a list.'})
+        if len(jobs) > MAX_MATCH_PREVIEW_JOBS:
+            raise ValidationError({
+                'jobs': f'Provide no more than {MAX_MATCH_PREVIEW_JOBS} jobs per preview.',
+            })
         return Response(preview_matches(organization=organization, jobs=jobs))
 
 

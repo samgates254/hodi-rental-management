@@ -3,6 +3,7 @@
 export type PeriodId = "month" | "30" | "90" | "year";
 
 export type AnalyticsInvoice = {
+  id?: string;
   organization: string;
   lease: string | null;
   due_date: string;
@@ -15,8 +16,11 @@ export type AnalyticsInvoice = {
 };
 
 export type AnalyticsPayment = {
+  id?: string;
   organization: string;
   amount_cents: number;
+  method?: string;
+  reference?: string;
   received_date: string;
   status: string;
   updated_at?: string | null;
@@ -32,7 +36,14 @@ export type AnalyticsLease = {
   end_date: string | null;
   monthly_rent_minor: number;
 };
-export type AnalyticsProperty = { id: string; name: string };
+export type AnalyticsProperty = {
+  id: string;
+  name: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  is_active?: boolean;
+};
 export type AnalyticsRequest = {
   id: string;
   organization: string;
@@ -333,27 +344,100 @@ export function maintenanceByPriority(requests: AnalyticsRequest[]): CountSlice[
 export type PropertyPerformance = {
   id: string;
   name: string;
+  address: string;
+  city: string;
+  country: string;
+  isActive: boolean | null;
   occupied: number;
   vacant: number;
   maintenance: number;
+  inactive: number;
+  activeUnits: number;
+  totalUnits: number;
+  occupancyRate: number | null;
   activeLeaseRentMinor: number | null;
+  outstandingCents: number | null;
+  attentionCount: number;
 };
 
-export function portfolioPerformance(graph: PortfolioGraph): PropertyPerformance[] {
+export type PropertySort = "name" | "occupancy" | "lease" | "outstanding";
+
+function outstandingForProperty(propertyId: string, invoices: AnalyticsInvoice[], graph: PortfolioGraph): number | null {
+  const balances: number[] = [];
+  for (const invoice of invoices) {
+    if (invoice.status !== "POSTED" || !(invoice.balance_cents > 0) || !invoice.lease) continue;
+    if (propertyIdForLease(invoice.lease, graph) !== propertyId) continue;
+    balances.push(invoice.balance_cents);
+  }
+  if (balances.length === 0) return 0;
+  return sumCents(balances);
+}
+
+/** Per-property figures from loaded units, leases, posted invoices, and maintenance requests. */
+export function portfolioPerformance(
+  graph: PortfolioGraph,
+  invoices: AnalyticsInvoice[] = [],
+  requests: AnalyticsRequest[] = [],
+): PropertyPerformance[] {
   return graph.properties.map(property => {
     const units = graph.units.filter(unit => propertyIdForUnit(unit.id, graph) === property.id);
+    const occupied = units.filter(unit => unit.status === "OCCUPIED").length;
+    const vacant = units.filter(unit => unit.status === "AVAILABLE").length;
+    const maintenance = units.filter(unit => unit.status === "MAINTENANCE").length;
+    const inactive = units.filter(unit => unit.status === "INACTIVE").length;
+    const activeUnits = occupied + vacant + maintenance;
     const rentValues = graph.leases
       .filter(lease => lease.status === "ACTIVE" && propertyIdForLease(lease.id, graph) === property.id)
       .map(lease => lease.monthly_rent_minor);
     return {
       id: property.id,
       name: property.name,
-      occupied: units.filter(unit => unit.status === "OCCUPIED").length,
-      vacant: units.filter(unit => unit.status === "AVAILABLE").length,
-      maintenance: units.filter(unit => unit.status === "MAINTENANCE").length,
-      activeLeaseRentMinor: sumCents(rentValues),
+      address: property.address?.trim() ?? "",
+      city: property.city?.trim() ?? "",
+      country: property.country?.trim() ?? "",
+      isActive: property.is_active === undefined ? null : property.is_active,
+      occupied,
+      vacant,
+      maintenance,
+      inactive,
+      activeUnits,
+      totalUnits: units.length,
+      occupancyRate: activeUnits === 0 ? null : Math.round((occupied * 1000) / activeUnits) / 10,
+      activeLeaseRentMinor: rentValues.length === 0 ? null : sumCents(rentValues),
+      outstandingCents: outstandingForProperty(property.id, invoices, graph),
+      attentionCount: requests.filter(request =>
+        (needsAttention(request) || pendingApproval(request)) &&
+        propertyIdForUnit(request.unit, graph) === property.id,
+      ).length,
     };
   });
+}
+
+function nullsLast(left: number | null, right: number | null, direction: "asc" | "desc"): number {
+  if (left == null && right == null) return 0;
+  if (left == null) return 1;
+  if (right == null) return -1;
+  return direction === "asc" ? left - right : right - left;
+}
+
+export function sortProperties(rows: PropertyPerformance[], sort: PropertySort): PropertyPerformance[] {
+  const byName = (left: PropertyPerformance, right: PropertyPerformance) => left.name.localeCompare(right.name, "en");
+  return [...rows].sort((left, right) => {
+    const ranked = sort === "name"
+      ? byName(left, right)
+      : sort === "occupancy"
+        ? nullsLast(left.occupancyRate, right.occupancyRate, "asc")
+        : sort === "lease"
+          ? nullsLast(left.activeLeaseRentMinor, right.activeLeaseRentMinor, "desc")
+          : nullsLast(left.outstandingCents, right.outstandingCents, "desc");
+    return ranked || byName(left, right);
+  });
+}
+
+export function propertyMatches(property: PropertyPerformance, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [property.name, property.address, property.city, property.country].some(value => value.toLowerCase().includes(needle));
 }
 
 export function needsAttention(request: AnalyticsRequest): boolean {

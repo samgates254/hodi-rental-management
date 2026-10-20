@@ -20,6 +20,7 @@ import SubscriptionPanel from "@/components/SubscriptionPanel";
 import UtilitiesWorkspace from "@/components/utilities/UtilitiesWorkspace";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { PortfolioAnalytics } from "@/components/landlord/PortfolioAnalytics";
+import { PropertyCommandCenter } from "@/components/landlord/PropertyCommandCenter";
 import { shillingsToCents } from "@/lib/money";
 import {
   readPage,
@@ -299,6 +300,7 @@ function formatDate(value: string | null) {
 }
 
 type RawInvoice = {
+  id?: Identifier;
   organization: Identifier;
   lease: Identifier | null;
   due_date: string;
@@ -311,8 +313,11 @@ type RawInvoice = {
 };
 
 type RawPayment = {
+  id?: Identifier;
   organization: Identifier;
   amount_cents: number;
+  method?: string;
+  reference?: string;
   received_date: string;
   status: string;
   updated_at?: string | null;
@@ -342,7 +347,9 @@ function mapInvoice(row: RawInvoice): AnalyticsInvoice[] {
   const paid = optionalCents(row.paid_cents);
   const balance = optionalCents(row.balance_cents);
   if (total == null || paid == null || balance == null || !row.due_date || !row.status) return [];
+  const id = textId(row.id);
   return [{
+    ...(id ? { id } : {}),
     organization: textId(row.organization),
     lease: row.lease == null || row.lease === "" ? null : textId(row.lease),
     due_date: row.due_date,
@@ -363,9 +370,15 @@ function mapPayment(row: RawPayment): AnalyticsPayment[] {
     const charge = textId(allocation.charge);
     return part == null || !charge ? [] : [{ charge, amount_cents: part }];
   });
+  const id = textId(row.id);
+  const method = row.method?.trim() ?? "";
+  const reference = row.reference?.trim() ?? "";
   return [{
+    ...(id ? { id } : {}),
     organization: textId(row.organization),
     amount_cents: amount,
+    ...(method ? { method } : {}),
+    ...(reference ? { reference } : {}),
     received_date: row.received_date,
     status: row.status,
     updated_at: row.updated_at,
@@ -466,6 +479,7 @@ export default function LandlordDashboard() {
   const [activeSection, setActiveSection] = useState("overview");
   const [portfolioQuery, setPortfolioQuery] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("");
+  const [commandPropertyId, setCommandPropertyId] = useState("");
   const [unitStatusFilter, setUnitStatusFilter] = useState("");
   const [firstName, setFirstName] = useState("");
   const [opsTick, setOpsTick] = useState(0);
@@ -565,6 +579,18 @@ export default function LandlordDashboard() {
   const canWriteLedger = (isOwner || isAccountant) && !previewMode;
   const canMaintenance = isOwner || isManager;
   const canAudit = isOwner || isManager || isAccountant;
+
+  useEffect(() => {
+    setCommandPropertyId("");
+  }, [selectedOrganizationId]);
+
+  useEffect(() => {
+    if (!commandPropertyId) return;
+    const target = document.getElementById("properties");
+    if (!target) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }, [commandPropertyId]);
 
   useEffect(() => {
     if (previewMode) {
@@ -1025,6 +1051,28 @@ export default function LandlordDashboard() {
 
   const sectionClass = (id: string) => (activeSection === id ? "is-active" : undefined);
 
+  function scrollToSection(section: string) {
+    setActiveSection(section);
+    const target = document.getElementById(section);
+    if (!target) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }
+
+  function openPropertyWorkspace(id: string) {
+    setPropertyFilter(id);
+    setCommandPropertyId(id);
+    scrollToSection("properties");
+  }
+
+  function navigateWorkspace(section: string, options?: { unitStatus?: string; query?: string }) {
+    if (options && "unitStatus" in options) setUnitStatusFilter(options.unitStatus ?? "");
+    if (options && "query" in options) setPortfolioQuery(options.query ?? "");
+    scrollToSection(section);
+  }
+
+  const commandProperty = organizationData.properties.find(item => String(item.id) === commandPropertyId) ?? null;
+
   if (sessionState !== "ready" || !token) {
     return (
       <main className="hodi-session-gate" aria-live="polite">
@@ -1162,7 +1210,14 @@ export default function LandlordDashboard() {
                   canMaintenance={canMaintenance}
                   organizationId={selectedOrganizationId}
                   graph={{
-                    properties: organizationData.properties.map(property => ({ id: String(property.id), name: property.name })),
+                    properties: organizationData.properties.map(property => ({
+                      id: String(property.id),
+                      name: property.name,
+                      address: property.address,
+                      city: property.city,
+                      country: property.country,
+                      is_active: property.is_active,
+                    })),
                     buildings: organizationData.buildings.map(building => ({ id: String(building.id), property: String(building.property) })),
                     units: organizationData.units.map(unit => ({ id: String(unit.id), building: String(unit.building), status: unit.status })),
                     leases: organizationData.leases.map(lease => ({
@@ -1184,6 +1239,7 @@ export default function LandlordDashboard() {
                   maintenanceError={ops.maintenanceError}
                   propertyId={propertyFilter}
                   onPropertyId={setPropertyFilter}
+                  onOpenProperty={openPropertyWorkspace}
                   onOpen={(section, unitStatus) => {
                     setUnitStatusFilter(unitStatus ?? "");
                     setActiveSection(section);
@@ -1276,7 +1332,45 @@ export default function LandlordDashboard() {
                   </div>
                 </form>
               )}
-              {visibleProperties.length ? (
+              {commandPropertyId && !commandProperty ? (
+                <p className="landlord-empty-state" role="status">
+                  That property is not in this organization.{" "}
+                  <button type="button" className="landlord-button landlord-button--quiet" onClick={() => setCommandPropertyId("")}>Back to properties</button>
+                </p>
+              ) : commandProperty ? (
+                <PropertyCommandCenter
+                  property={commandProperty}
+                  buildings={organizationData.buildings}
+                  units={organizationData.units}
+                  tenants={organizationData.tenants}
+                  leases={organizationData.leases}
+                  invoices={ops.invoices.filter(invoice => invoice.organization === selectedOrganizationId)}
+                  payments={ops.payments.filter(payment => payment.organization === selectedOrganizationId)}
+                  requests={ops.requests}
+                  financeState={ops.financeState}
+                  maintenanceState={ops.maintenanceState}
+                  financePartial={ops.financePartial}
+                  maintenancePartial={ops.maintenancePartial}
+                  financeError={ops.financeError}
+                  maintenanceError={ops.maintenanceError}
+                  organizationId={selectedOrganizationId}
+                  canReadListings={canWritePortfolio}
+                  canReadBilling={canReadBilling}
+                  canMaintenance={canMaintenance}
+                  canAudit={canAudit}
+                  canWritePortfolio={canWritePortfolio}
+                  previewMode={previewMode}
+                  onBack={() => {
+                    setCommandPropertyId("");
+                    setPropertyFilter("");
+                  }}
+                  onNavigate={navigateWorkspace}
+                  onAddUnit={() => {
+                    setUnitFormOpen(true);
+                    navigateWorkspace("units");
+                  }}
+                />
+              ) : visibleProperties.length ? (
                 <div className="landlord-property-grid">
                   {visibleProperties.map(property => {
                     const buildings = organizationData.buildings.filter(
@@ -1287,7 +1381,7 @@ export default function LandlordDashboard() {
                     );
                     const occupiedCount = propertyUnits.filter(unit => unit.status === "OCCUPIED").length;
                     return (
-                      <article className="landlord-property-card" key={property.id}>
+                      <button type="button" className="landlord-property-card" key={property.id} onClick={() => openPropertyWorkspace(String(property.id))}>
                         <div className="landlord-property-card-top">
                           <span className="landlord-property-icon"><Icon name="building" /></span>
                           <span className={`landlord-status ${property.is_active ? "is-active" : ""}`}>
@@ -1301,7 +1395,7 @@ export default function LandlordDashboard() {
                           <span>{propertyUnits.length} unit{propertyUnits.length === 1 ? "" : "s"}</span>
                           <span>{occupiedCount} occupied</span>
                         </div>
-                      </article>
+                      </button>
                     );
                   })}
                 </div>

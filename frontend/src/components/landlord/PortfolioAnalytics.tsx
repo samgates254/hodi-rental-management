@@ -17,6 +17,9 @@ import {
   periodRange,
   portfolioPerformance,
   postedOpenInvoices,
+  propertyMatches,
+  sortProperties,
+  type PropertySort,
   scopeRequests,
   sumCents,
   type AnalyticsInvoice,
@@ -47,6 +50,7 @@ type PortfolioAnalyticsProps = {
   maintenanceError: string;
   propertyId: string;
   onPropertyId: (propertyId: string) => void;
+  onOpenProperty?: (propertyId: string) => void;
   onOpen: (section: string, unitStatus?: string) => void;
 };
 
@@ -126,9 +130,19 @@ export function PortfolioAnalytics({
   maintenanceError,
   propertyId,
   onPropertyId,
+  onOpenProperty,
   onOpen,
 }: PortfolioAnalyticsProps) {
+  const openPropertyRecord = (id: string) => {
+    if (onOpenProperty) onOpenProperty(id);
+    else {
+      onPropertyId(id);
+      onOpen("properties");
+    }
+  };
   const [period, setPeriod] = useState<PeriodId>("month");
+  const [propertyQuery, setPropertyQuery] = useState("");
+  const [propertySort, setPropertySort] = useState<PropertySort>("name");
   const [tip, setTip] = useState<{ x: number; y: number; title: string; value: string } | null>(null);
   const today = rentalBusinessDate();
   const range = periodRange(today, period);
@@ -167,7 +181,6 @@ export function PortfolioAnalytics({
     const days = daysUntilRentalDate(lease.end_date);
     return days != null && days >= 0 && days <= 30;
   });
-  const portfolio = useMemo(() => portfolioPerformance(graph), [graph]);
   const updated = latestTimestamp([
     ...orgInvoices.map(invoice => invoice.updated_at),
     ...orgPayments.map(payment => payment.updated_at),
@@ -178,24 +191,38 @@ export function PortfolioAnalytics({
   const financeReady = financeState === "ready";
   const maintenanceReady = maintenanceState === "ready";
   const bucket = period === "month" || period === "30" ? "day" : "month";
+  const activeSort: PropertySort = !financeReady && propertySort === "outstanding" ? "name" : propertySort;
+  const allPropertyRows = useMemo(() => {
+    return portfolioPerformance(
+      graph,
+      financeReady ? orgInvoices : [],
+      maintenanceReady ? requests.filter(request => request.organization === organizationId) : [],
+    );
+  }, [financeReady, graph, maintenanceReady, orgInvoices, organizationId, requests]);
+  const propertyRows = useMemo(() => {
+    return sortProperties(allPropertyRows, activeSort).filter(property => propertyMatches(property, propertyQuery));
+  }, [activeSort, allPropertyRows, propertyQuery]);
 
   const attention = [
     financeReady && overdueInvoices.length > 0 ? {
       id: "overdue",
       label: `${overdueInvoices.length} posted invoice${overdueInvoices.length === 1 ? "" : "s"} past the due date`,
       detail: money(overdueCents),
+      action: "Review billing",
       section: "billing",
     } : null,
     showPortfolio && ending.length > 0 ? {
       id: "leases",
       label: `${ending.length} active lease${ending.length === 1 ? "" : "s"} end within 30 days`,
       detail: "Leases",
+      action: "Open leases",
       section: "leases",
     } : null,
     showPortfolio && units.vacant > 0 ? {
       id: "vacant",
       label: `${units.vacant} unit${units.vacant === 1 ? "" : "s"} marked available`,
       detail: "Units",
+      action: "Open available units",
       section: "units",
       status: "AVAILABLE",
     } : null,
@@ -203,15 +230,17 @@ export function PortfolioAnalytics({
       id: "urgent",
       label: `${urgent.length} open request${urgent.length === 1 ? "" : "s"} at class 1 or emergency`,
       detail: urgent[0]?.title ?? "Maintenance",
+      action: "Open maintenance",
       section: "maintenance-requests",
     } : null,
     maintenanceReady && approvals.length > 0 ? {
       id: "approval",
-      label: `${approvals.length} open request${approvals.length === 1 ? "" : "s"} marked as requiring approval`,
+      label: `${approvals.length} open request${approvals.length === 1 ? "" : "s"} waiting for approval`,
       detail: "Maintenance",
+      action: "Review approvals",
       section: "maintenance-requests",
     } : null,
-  ].filter((item): item is { id: string; label: string; detail: string; section: string; status?: string } => item != null);
+  ].filter((item): item is { id: string; label: string; detail: string; action: string; section: string; status?: string } => item != null);
 
   return (
     <section className="analytics" aria-label="Portfolio analytics">
@@ -240,6 +269,35 @@ export function PortfolioAnalytics({
               </select>
             </label>
           )}
+        </div>
+      </div>
+
+      <div className="analytics-pulse" aria-label="Portfolio pulse">
+        <div className="analytics-pulse-lead">
+          <p className="analytics-kicker">Portfolio pulse</p>
+          <p className="analytics-pulse-title">
+            {attention.length > 0
+              ? `${attention.length} live signal${attention.length === 1 ? "" : "s"} need a look.`
+              : "No follow-ups in the loaded records."}
+          </p>
+          <p className="analytics-note">
+            {propertyId ? "This view is scoped to the selected property." : "A quick read across the current organization scope."}
+          </p>
+        </div>
+        <div className="analytics-pulse-stat">
+          <span>Occupancy</span>
+          <strong>{units.rate == null ? "—" : `${units.rate}%`}</strong>
+          <small>{units.active === 0 ? "No active units" : `${units.occupied} of ${units.active} active units`}</small>
+        </div>
+        <div className="analytics-pulse-stat">
+          <span>Attention</span>
+          <strong>{attention.length}</strong>
+          <small>{attention.length === 1 ? "recorded signal" : "recorded signals"}</small>
+        </div>
+        <div className="analytics-pulse-stat">
+          <span>Ledger</span>
+          <strong>{financeReady ? (rate ? `${rate.percent}%` : "—") : "—"}</strong>
+          <small>{financeReady ? "collection rate" : financeNote(financeState, "collection rate", financeError)}</small>
         </div>
       </div>
 
@@ -306,18 +364,24 @@ export function PortfolioAnalytics({
             <div className="analytics-panel-head">
               <div>
                 <h3>Occupancy</h3>
-                <p className="analytics-note">Saved unit statuses. Inactive units stay out of the rate. Each row opens that status in the unit register.</p>
+                <p className="analytics-note">Inactive units stay out of the rate. A segment or row opens that status in the unit register.</p>
               </div>
-              <p className="analytics-figure">{units.rate == null ? "—" : `${units.rate}%`}<small>of active units</small></p>
+              <p className="analytics-figure">{units.rate == null ? "—" : `${units.rate}%`}<small>{units.rate == null ? "no active units" : "of active units"}</small></p>
             </div>
             {units.active + units.inactive === 0 ? (
               <p className="analytics-empty">No units are saved for this scope.</p>
             ) : (
               <>
-              {units.active > 0 && (
-                <Mix
-                  counts={[units.occupied, units.vacant, units.maintenance]}
-                  colors={["var(--hodi-chart-1)", "var(--hodi-chart-2)", "var(--hodi-chart-4)"]}
+              {units.active === 0 ? (
+                <p className="analytics-empty">No active units. Occupancy is not shown as zero.</p>
+              ) : (
+                <SplitBar
+                  segments={[
+                    { key: "OCCUPIED", label: "Occupied", count: units.occupied, color: "var(--hodi-chart-1)" },
+                    { key: "AVAILABLE", label: "Vacant", count: units.vacant, color: "var(--hodi-chart-2)" },
+                    { key: "MAINTENANCE", label: "Maintenance", count: units.maintenance, color: "var(--hodi-chart-4)" },
+                  ]}
+                  onSelect={status => onOpen("units", status)}
                 />
               )}
               <BarList
@@ -385,43 +449,114 @@ export function PortfolioAnalytics({
           )}
         </article>
 
-        {showPortfolio && portfolio.length > 0 && (
+        {showPortfolio && graph.properties.length > 0 && (
           <article className="analytics-panel analytics-span">
             <h3>Portfolio</h3>
-            <p className="analytics-note">Unit status and monthly rent on active leases. The rent column is the lease amount, not money collected. A property name filters this page. Units opens the register for that property.</p>
-            <div className="analytics-plot">
-              <table>
-                <caption className="analytics-sr">Unit status and active lease rent by property</caption>
-                <thead>
-                  <tr>
-                    <th>Property</th>
-                    <th className="analytics-num">Occupied</th>
-                    <th className="analytics-num">Vacant</th>
-                    <th className="analytics-num">Maintenance</th>
-                    <th className="analytics-num">Lease rent / month</th>
-                    <th>Register</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {portfolio.map(property => (
-                    <tr key={property.id}>
-                      <td>
-                        <button type="button" className="analytics-link" onClick={() => onPropertyId(property.id)}>{property.name}</button>
-                        <Mix
-                          counts={[property.occupied, property.vacant, property.maintenance]}
-                          colors={["var(--hodi-chart-1)", "var(--hodi-chart-2)", "var(--hodi-chart-4)"]}
-                        />
-                      </td>
-                      <td className="analytics-num">{property.occupied}</td>
-                      <td className="analytics-num">{property.vacant}</td>
-                      <td className="analytics-num">{property.maintenance}</td>
-                      <td className="analytics-num analytics-money">{money(property.activeLeaseRentMinor)}</td>
-                      <td><button type="button" className="analytics-text-button" onClick={() => { onPropertyId(property.id); onOpen("units"); }}>Units</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <p className="analytics-note">Lease rent is the monthly amount on active leases, not cash collected. Outstanding is the current posted balance attributed through a lease. A dash means that figure is not available. Property opens the record. Units opens its register.</p>
+            <div className="analytics-portfolio-tools">
+              <label>
+                Find a property
+                <input
+                  type="search"
+                  value={propertyQuery}
+                  onChange={event => setPropertyQuery(event.target.value)}
+                  placeholder="Name, city, or address"
+                />
+              </label>
+              <label>
+                Sort
+                <select value={activeSort} onChange={event => setPropertySort(event.target.value as PropertySort)}>
+                  <option value="name">Property name</option>
+                  <option value="occupancy">Occupancy, lowest first</option>
+                  <option value="lease">Active lease rent</option>
+                  <option value="outstanding" disabled={!financeReady}>Outstanding balance</option>
+                </select>
+              </label>
             </div>
+            <p className="analytics-note" role="status">{propertyRows.length} of {graph.properties.length} {graph.properties.length === 1 ? "property" : "properties"}</p>
+            {propertyRows.length === 0 ? (
+              <p className="analytics-empty">No property matches that name or location.</p>
+            ) : (
+              <>
+                <div className="analytics-plot analytics-portfolio-table">
+                  <table>
+                    <caption className="analytics-sr">Property performance from saved units, leases, posted balances, and open maintenance</caption>
+                    <thead>
+                      <tr>
+                        <th>Property</th>
+                        <th className="analytics-num">Active / total</th>
+                        <th className="analytics-num">Occupied</th>
+                        <th className="analytics-num">Vacant</th>
+                        <th className="analytics-num">Rate</th>
+                        <th className="analytics-num">Lease rent / month</th>
+                        <th className="analytics-num">Outstanding</th>
+                        <th className="analytics-num">Attention</th>
+                        <th>Records</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {propertyRows.map(property => (
+                        <tr key={property.id} className={property.id === propertyId ? "is-selected" : undefined} aria-current={property.id === propertyId ? "true" : undefined}>
+                          <td>
+                            <button type="button" className="analytics-link" onClick={() => openPropertyRecord(property.id)}>{property.name}</button>
+                            {locationText(property) && <small className="analytics-location">{locationText(property)}</small>}
+                            <span className={`analytics-property-status ${property.isActive === false ? "is-inactive" : property.isActive === true ? "is-active" : "is-unknown"}`}>
+                              {property.isActive === false ? "Inactive" : property.isActive === true ? "Active" : "Status unavailable"}
+                            </span>
+                            <Mix
+                              counts={[property.occupied, property.vacant, property.maintenance]}
+                              colors={["var(--hodi-chart-1)", "var(--hodi-chart-2)", "var(--hodi-chart-4)"]}
+                            />
+                          </td>
+                          <td className="analytics-num">{property.activeUnits} of {property.totalUnits}</td>
+                          <td className="analytics-num">{property.occupied}</td>
+                          <td className="analytics-num">{property.vacant}</td>
+                          <td className="analytics-num">{property.occupancyRate == null ? "—" : `${property.occupancyRate}%`}</td>
+                          <td className="analytics-num analytics-money">{property.activeLeaseRentMinor == null ? "—" : money(property.activeLeaseRentMinor)}</td>
+                          <td className="analytics-num analytics-money">{financeReady ? money(property.outstandingCents) : "—"}</td>
+                          <td className="analytics-num">{maintenanceReady ? property.attentionCount : "—"}</td>
+                          <td className="analytics-record-links">
+                            <button type="button" className="analytics-text-button" onClick={() => openPropertyRecord(property.id)}>Property</button>
+                            <button type="button" className="analytics-text-button" onClick={() => { onPropertyId(property.id); onOpen("units"); }}>Units</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <ul className="analytics-property-cards">
+                  {propertyRows.map(property => (
+                    <li key={property.id} className={property.id === propertyId ? "analytics-property-card is-selected" : "analytics-property-card"}>
+                      <div>
+                        <button type="button" className="analytics-link" onClick={() => openPropertyRecord(property.id)}>{property.name}</button>
+                        {locationText(property) && <small className="analytics-location">{locationText(property)}</small>}
+                        <span className={`analytics-property-status ${property.isActive === false ? "is-inactive" : property.isActive === true ? "is-active" : "is-unknown"}`}>
+                          {property.isActive === false ? "Inactive" : property.isActive === true ? "Active" : "Status unavailable"}
+                        </span>
+                      </div>
+                      <Mix
+                        counts={[property.occupied, property.vacant, property.maintenance]}
+                        colors={["var(--hodi-chart-1)", "var(--hodi-chart-2)", "var(--hodi-chart-4)"]}
+                      />
+                      <dl className="analytics-property-facts">
+                        <div><dt>Active units</dt><dd>{property.activeUnits} of {property.totalUnits}</dd></div>
+                        <div><dt>Occupancy</dt><dd>{property.occupancyRate == null ? "—" : `${property.occupancyRate}%`}</dd></div>
+                        <div><dt>Occupied</dt><dd>{property.occupied}</dd></div>
+                        <div><dt>Vacant</dt><dd>{property.vacant}</dd></div>
+                        <div><dt>Lease rent / month</dt><dd>{property.activeLeaseRentMinor == null ? "—" : money(property.activeLeaseRentMinor)}</dd></div>
+                        <div><dt>Outstanding</dt><dd>{financeReady ? money(property.outstandingCents) : "—"}</dd></div>
+                        <div><dt>Attention</dt><dd>{maintenanceReady ? property.attentionCount : "—"}</dd></div>
+                        <div><dt>Maintenance units</dt><dd>{property.maintenance}</dd></div>
+                      </dl>
+                      <div className="analytics-property-actions">
+                        <button type="button" className="analytics-text-button" onClick={() => openPropertyRecord(property.id)}>Property</button>
+                        <button type="button" className="analytics-text-button" onClick={() => { onPropertyId(property.id); onOpen("units"); }}>Units</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </article>
         )}
       </div>
@@ -440,7 +575,7 @@ export function PortfolioAnalytics({
                     <strong>{item.label}</strong>
                     <small>{item.detail}</small>
                   </span>
-                  <span className="analytics-attention-go">Open</span>
+                  <span className="analytics-attention-go">{item.action}</span>
                 </button>
               </li>
             ))}
@@ -510,6 +645,34 @@ function EmptyCollection({ start, end, onOpen }: { start: string; end: string; o
   );
 }
 
+function locationText(property: { address: string; city: string; country: string }): string {
+  return [property.address, property.city, property.country].filter(Boolean).join(", ");
+}
+
+function SplitBar({
+  segments,
+  onSelect,
+}: {
+  segments: { key: string; label: string; count: number; color: string }[];
+  onSelect: (key: string) => void;
+}) {
+  const total = segments.reduce((sum, segment) => sum + segment.count, 0);
+  if (total <= 0) return null;
+  return (
+    <div className="analytics-split" role="group" aria-label="Active unit mix">
+      {segments.map(segment => segment.count > 0 ? (
+        <button
+          key={segment.key}
+          type="button"
+          style={{ width: `${(segment.count / total) * 100}%`, background: segment.color }}
+          aria-label={`${segment.label}, ${segment.count} of ${total} active units. Open the matching records.`}
+          onClick={() => onSelect(segment.key)}
+        />
+      ) : null)}
+    </div>
+  );
+}
+
 function Mix({ counts, colors }: { counts: number[]; colors: string[] }) {
   const total = counts.reduce((sum, count) => sum + count, 0);
   if (total <= 0) return null;
@@ -548,7 +711,7 @@ function BarList({
         return (
           <li key={row.key}>
             <button type="button" onClick={() => onSelect(row.key)} aria-label={`${row.label}, ${row.display ?? row.count}. Open the matching records.`}>
-              <span>{row.label}</span>
+              <span className="analytics-bar-label"><i style={{ background: row.color }} aria-hidden="true" />{row.label}</span>
               <span className="analytics-bar-track" aria-hidden="true">
                 <span style={{ width: `${width}%`, minWidth: row.count > 0 ? "2px" : 0, background: row.color }} />
               </span>

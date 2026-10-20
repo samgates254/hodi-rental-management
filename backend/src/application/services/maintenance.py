@@ -520,6 +520,22 @@ def start_work(maintenance_request, *, actor, request=None):
     work_order = WorkOrder.objects.select_for_update().get(request=row)
     if row.status != MaintenanceRequest.Status.IN_PROGRESS or work_order.assignee_id != actor.pk:
         raise PermissionDenied('Only the assigned technician can start this work.')
+    if not actor.is_active:
+        raise PermissionDenied('The assigned user is inactive.')
+    membership = OrganizationMembership.objects.filter(
+        user=actor,
+        organization_id=row.organization_id,
+        organization__is_active=True,
+        is_active=True,
+    ).first()
+    allowed_start_roles = (
+        OrganizationMembership.Role.OWNER,
+        OrganizationMembership.Role.PROPERTY_MANAGER,
+        OrganizationMembership.Role.CARETAKER,
+        OrganizationMembership.Role.TECHNICIAN,
+    )
+    if membership is None or membership.role not in allowed_start_roles:
+        raise PermissionDenied('An active authorized organization membership is required.')
     if work_order.status not in (WorkOrder.Status.ASSIGNED, WorkOrder.Status.IN_PROGRESS):
         raise ValidationError({'status': 'This work order cannot be started in its current state.'})
     membership = OrganizationMembership.objects.filter(
@@ -1134,6 +1150,24 @@ def submit_completion(work_order, *, actor, data, materials, request=None):
         raise ValidationError({'status': 'Only in-progress work can be submitted for verification.'})
     if order.assignee_id != actor.pk:
         raise PermissionDenied('Only the assigned technician can submit completion.')
+    if not actor.is_active:
+        raise PermissionDenied('The assigned user is inactive.')
+    membership = OrganizationMembership.objects.filter(
+        user=actor,
+        organization_id=row.organization_id,
+        organization__is_active=True,
+        is_active=True,
+    ).first()
+    allowed_completion_roles = (
+        OrganizationMembership.Role.OWNER,
+        OrganizationMembership.Role.PROPERTY_MANAGER,
+        OrganizationMembership.Role.CARETAKER,
+        OrganizationMembership.Role.TECHNICIAN,
+    )
+    if membership is None or membership.role not in allowed_completion_roles:
+        raise PermissionDenied('An active authorized organization membership is required.')
+    if membership.role == OrganizationMembership.Role.TECHNICIAN:
+        _validate_technician(row, actor)
     latest_quote = order.quotations.order_by('-created_at', '-pk').first()
     if row.requires_approval and not row.safety_override and (
         latest_quote is None or latest_quote.status != RepairQuotation.Status.APPROVED
@@ -1224,6 +1258,16 @@ def verify_completion(
     row = MaintenanceRequest.objects.select_for_update().select_related('unit__building__property').get(pk=request_id)
     order = WorkOrder.objects.select_for_update().get(pk=order_id)
     item = RepairCompletion.objects.select_for_update().get(pk=completion.pk)
+    if not _has_organization_role(
+        actor,
+        row.organization_id,
+        (
+            OrganizationMembership.Role.OWNER,
+            OrganizationMembership.Role.PROPERTY_MANAGER,
+            OrganizationMembership.Role.CARETAKER,
+        ),
+    ):
+        raise PermissionDenied('Only authorized maintenance staff can verify repairs.')
     if item.status != RepairCompletion.Status.SUBMITTED or row.status != MaintenanceRequest.Status.COMPLETED:
         raise ValidationError({'status': 'Only submitted completion can be verified.'})
     if item.submitted_by_id == actor.pk:
@@ -1293,13 +1337,29 @@ def add_comment(maintenance_request, *, author, body):
     )
 
 
+MAX_MATCH_PREVIEW_JOBS = 50
+MAX_MATCH_PREVIEW_TECHNICIANS = 50
+
+
 def preview_matches(*, organization, jobs):
+    if not isinstance(jobs, list) or len(jobs) > MAX_MATCH_PREVIEW_JOBS:
+        raise ValidationError({
+            'jobs': f'Provide no more than {MAX_MATCH_PREVIEW_JOBS} jobs per preview.',
+        })
     memberships = OrganizationMembership.objects.filter(
         organization=organization,
         role=OrganizationMembership.Role.TECHNICIAN,
         is_active=True,
         organization__is_active=True,
-    ).select_related('user', 'user__account_profile', 'user__technician_profile')
+    ).select_related('user', 'user__account_profile', 'user__technician_profile')[:MAX_MATCH_PREVIEW_TECHNICIANS + 1]
+    memberships = list(memberships)
+    if len(memberships) > MAX_MATCH_PREVIEW_TECHNICIANS:
+        raise ValidationError({
+            'technicians': (
+                f'Matching previews support no more than '
+                f'{MAX_MATCH_PREVIEW_TECHNICIANS} active technicians.'
+            ),
+        })
     technicians = []
     for membership in memberships:
         profile = TechnicianProfile.objects.filter(user=membership.user).first()
