@@ -34,7 +34,8 @@ from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
 from application.services.billing import (
-    allocate_payment, record_manual_receipt, record_payment, rent_charge_amount,
+    allocate_payment, record_manual_receipt, record_payment,
+    record_verified_mpesa_payment, rent_charge_amount,
 )
 from engines.proration.facade import prorate_move_in
 
@@ -116,13 +117,13 @@ class LedgerApiTests(APITestCase):
             # The staff payment API must not manufacture a provider payment.
             # Build this historical settlement through the internal service so
             # the reversal test remains focused on its provider-review rule.
-            payment = record_payment(
+            receipt = f'TEST-MPESA-{uuid4().hex.upper()}'
+            payment = record_verified_mpesa_payment(
                 tenant=self.tenant,
                 amount_cents=payment_amount,
                 received_date=date(2026, 10, 6),
-                method=method,
-                reference=reference,
-                external_id=f'mpesa-{uuid4().hex}',
+                reference=receipt,
+                external_id=receipt,
                 actor=self.accountant,
             )
             payment = allocate_payment(
@@ -426,6 +427,21 @@ class LedgerApiTests(APITestCase):
                 method=Payment.Method.CASH,
                 actor=self.accountant,
             )
+        self.assertFalse(Payment.objects.exists())
+
+    def test_canonical_payment_service_rejects_unverified_mpesa(self):
+        with self.assertRaises(ValidationError) as caught:
+            record_payment(
+                tenant=self.tenant,
+                amount_cents=2_000,
+                received_date=date(2026, 10, 6),
+                method=Payment.Method.MPESA,
+                actor=self.accountant,
+                reference='TEST-UNVERIFIED-MPESA',
+                external_id='TEST-UNVERIFIED-MPESA',
+            )
+
+        self.assertIn('method', caught.exception.detail)
         self.assertFalse(Payment.objects.exists())
 
     def test_invoice_aggregate_cannot_overflow_database_money_range(self):
@@ -1405,6 +1421,82 @@ class PaymentReversalConcurrencyTests(TransactionTestCase):
         payment.refresh_from_db()
         self.assertEqual(PaymentReversal.objects.filter(payment=payment).count(), 1)
         self.assertEqual(LedgerPosting.objects.filter(payment=payment).count(), 4)
+
+    def test_concurrent_reversals_preserve_shared_invoice_balance(self):
+        actor = get_user_model().objects.create_user(username='shared-invoice-reversal', password='test')
+        organization = Organization.objects.create(name='Shared Invoice Concurrency Homes')
+        tenant = Tenant.objects.create(
+            organization=organization,
+            first_name='Concurrent',
+            last_name='Tenant',
+            phone_number='+254700000090',
+        )
+        invoice = Invoice.objects.create(
+            organization=organization,
+            tenant=tenant,
+            period_start=date(2026, 10, 1),
+            period_end=date(2026, 10, 31),
+            due_date=date(2026, 10, 5),
+            status=DocumentStatus.POSTED,
+            total_cents=6_000,
+            balance_cents=0,
+        )
+        payments = []
+        for index in range(2):
+            charge = Charge.objects.create(
+                invoice=invoice,
+                organization=organization,
+                tenant=tenant,
+                charge_type='RENT',
+                amount_cents=3_000,
+                balance_cents=0,
+                due_date=date(2026, 10, 5),
+                lifecycle=DocumentStatus.POSTED,
+            )
+            payment = Payment.objects.create(
+                organization=organization,
+                tenant=tenant,
+                amount_cents=3_000,
+                allocated_cents=3_000,
+                received_date=date(2026, 10, 6),
+                execution_timestamp=timezone.now(),
+                method=Payment.Method.CASH,
+                status=Payment.Status.ALLOCATED,
+                recorded_by=actor,
+            )
+            PaymentAllocation.objects.create(
+                payment=payment,
+                charge=charge,
+                amount_cents=3_000,
+                policy_id='CANONICAL_PRIORITY',
+                policy_version=2,
+            )
+            LedgerPosting.objects.create(payment=payment, account='2000', direction='DEBIT', amount_cents=3_000)
+            LedgerPosting.objects.create(payment=payment, account='2010', direction='CREDIT', amount_cents=3_000)
+            payments.append(payment.pk)
+
+        barrier = Barrier(2, timeout=10)
+        actor_id = actor.pk
+
+        def reverse_in_own_connection(payment_id):
+            from application.services.billing import reverse_payment
+
+            try:
+                close_old_connections()
+                user = get_user_model().objects.get(pk=actor_id)
+                target = Payment.objects.get(pk=payment_id)
+                barrier.wait(timeout=10)
+                return reverse_payment(target, reason='Concurrent shared invoice reversal', actor=user).pk
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            reversal_ids = list(pool.map(reverse_in_own_connection, payments))
+
+        self.assertEqual(len(set(reversal_ids)), 2)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.balance_cents, 6_000)
+        self.assertEqual(PaymentReversal.objects.filter(pk__in=reversal_ids).count(), 2)
 
 
 @skipUnless(connection.vendor == 'postgresql', 'Concurrent receipt test requires PostgreSQL.')

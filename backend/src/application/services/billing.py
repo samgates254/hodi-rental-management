@@ -417,7 +417,7 @@ def void_invoice(invoice, *, actor, request=None):
 
 
 @transaction.atomic
-def record_payment(
+def _record_payment(
     *,
     tenant,
     amount_cents,
@@ -469,6 +469,61 @@ def record_payment(
         request=request,
     )
     return payment
+
+
+def record_payment(
+    *,
+    tenant,
+    amount_cents,
+    received_date,
+    method,
+    actor,
+    reference='',
+    external_id='',
+    request=None,
+):
+    """Record an ordinary payment; provider payments require verified settlement."""
+    if method == Payment.Method.MPESA:
+        raise ValidationError({
+            'method': 'M-Pesa payments are recorded only after verified provider settlement.',
+        })
+    return _record_payment(
+        tenant=tenant,
+        amount_cents=amount_cents,
+        received_date=received_date,
+        method=method,
+        actor=actor,
+        reference=reference,
+        external_id=external_id,
+        request=request,
+    )
+
+
+def record_verified_mpesa_payment(
+    *,
+    tenant,
+    amount_cents,
+    received_date,
+    actor,
+    reference,
+    external_id,
+    request=None,
+):
+    """Create an M-Pesa payment from a trusted settlement workflow only."""
+    if not reference or not external_id or reference != external_id:
+        raise ValidationError({
+            'external_id': 'A verified M-Pesa receipt is required.',
+        })
+    return _record_payment(
+        tenant=tenant,
+        amount_cents=amount_cents,
+        received_date=received_date,
+        method=Payment.Method.MPESA,
+        actor=actor,
+        reference=reference,
+        external_id=external_id,
+        request=request,
+    )
 
 
 def _matches_manual_receipt(payment, *, tenant, amount_cents, received_date, method, reference):
@@ -618,17 +673,24 @@ def allocate_payment(payment, *, policy_id, policy_version, actor, request=None)
         raise ValidationError({'status': 'Only a pending payment can be allocated.'})
     if policy_id != 'CANONICAL_PRIORITY' or policy_version != 2:
         raise ValidationError({'policy_id': 'Allocation is locked to CANONICAL_PRIORITY version 2.'})
+    eligible_charges = Charge.objects.filter(
+        tenant_id=payment.tenant_id,
+        organization_id=payment.organization_id,
+        lifecycle=DocumentStatus.POSTED,
+        balance_cents__gt=0,
+        currency='KES',
+    ).exclude(charge_type__in=DEPOSIT_CHARGE_TYPES)
+    # Invoice rows serialize balance recomputations shared by charges on the
+    # same invoice. Acquire these locks in primary-key order before charge
+    # locks; reversals use the same order.
+    invoice_ids = eligible_charges.order_by().values_list('invoice_id', flat=True).distinct()
+    locked_invoices = list(
+        Invoice.objects.select_for_update(of=('self',))
+        .filter(pk__in=invoice_ids).order_by('pk')
+    )
     charges = list(
-        Charge.objects.select_for_update()
-        .filter(
-            tenant_id=payment.tenant_id,
-            organization_id=payment.organization_id,
-            lifecycle=DocumentStatus.POSTED,
-            balance_cents__gt=0,
-            currency='KES',
-        )
-        .exclude(charge_type__in=DEPOSIT_CHARGE_TYPES)
-        .select_related('invoice')
+        Charge.objects.select_for_update(of=('self',))
+        .filter(pk__in=eligible_charges.values('pk')).order_by('invoice_id', 'pk')
     )
     items = [
         AllocationCharge(
@@ -701,8 +763,9 @@ def allocate_payment(payment, *, policy_id, policy_version, actor, request=None)
         'policy_version',
         'updated_at',
     ))
-    for invoice in Invoice.objects.filter(pk__in=touched_invoices):
-        recompute_invoice_totals(invoice)
+    for invoice in locked_invoices:
+        if invoice.pk in touched_invoices:
+            recompute_invoice_totals(invoice)
     record_audit(
         action='payment.allocate',
         object_type='Payment',
@@ -759,7 +822,7 @@ def reverse_payment(payment, *, reason, actor, request=None):
         raise ValidationError({'status': 'Only a posted, allocated payment can be reversed.'})
 
     allocations = list(
-        PaymentAllocation.objects.select_for_update()
+        PaymentAllocation.objects.select_for_update(of=('self',))
         .filter(payment=payment)
         .select_related('charge')
         .order_by('charge_id', 'pk')
@@ -802,7 +865,23 @@ def reverse_payment(payment, *, reason, actor, request=None):
         )
         return reversal
 
-    if any(row.charge.lifecycle != DocumentStatus.POSTED for row in allocations):
+    touched_charge_ids = {row.charge_id for row in allocations}
+    touched_invoice_ids = set(
+        Charge.objects.filter(pk__in=touched_charge_ids).values_list('invoice_id', flat=True)
+    )
+    locked_invoices = list(
+        Invoice.objects.select_for_update(of=('self',))
+        .filter(pk__in=touched_invoice_ids).order_by('pk')
+    )
+    touched_charges = {
+        charge.pk: charge
+        for charge in Charge.objects.select_for_update(of=('self',))
+        .filter(pk__in=touched_charge_ids).order_by('invoice_id', 'pk')
+    }
+    if any(
+        touched_charges[row.charge_id].lifecycle != DocumentStatus.POSTED
+        for row in allocations
+    ):
         raise ValidationError({'status': 'A payment allocation no longer references a posted charge.'})
 
     reversal = PaymentReversal.objects.create(
@@ -812,7 +891,6 @@ def reverse_payment(payment, *, reason, actor, request=None):
         amount_cents=payment.amount_cents,
         status=PaymentReversal.Status.REVERSED,
     )
-    touched_charges = {row.charge_id: row.charge for row in allocations}
     for allocation in allocations:
         PaymentReversalAllocation.objects.create(
             reversal=reversal,
@@ -831,7 +909,6 @@ def reverse_payment(payment, *, reason, actor, request=None):
 
     payment.status = Payment.Status.REVERSED
     payment.save(update_fields=('status', 'updated_at'))
-    touched_invoice_ids = set()
     for charge in touched_charges.values():
         active_allocations = PaymentAllocation.objects.filter(
             charge=charge,
@@ -841,8 +918,7 @@ def reverse_payment(payment, *, reason, actor, request=None):
             raise ValidationError({'status': 'Active allocations exceed the charge amount; review is required.'})
         charge.balance_cents = charge.amount_cents - active_allocations
         charge.save(update_fields=('balance_cents', 'updated_at'))
-        touched_invoice_ids.add(charge.invoice_id)
-    for invoice in Invoice.objects.filter(pk__in=touched_invoice_ids).order_by('pk'):
+    for invoice in locked_invoices:
         recompute_invoice_totals(invoice)
 
     record_audit(

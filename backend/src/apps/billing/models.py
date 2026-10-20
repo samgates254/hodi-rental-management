@@ -239,6 +239,11 @@ class Payment(models.Model):
 		ordering = ('-received_date', '-created_at')
 		constraints = [
 			models.UniqueConstraint(
+				fields=('external_id',),
+				condition=~Q(external_id='') & Q(method='MPESA'),
+				name='unique_mpesa_payment_external_id',
+			),
+			models.UniqueConstraint(
 				fields=('organization', 'external_id'),
 				condition=~Q(external_id=''),
 				name='unique_ledger_payment_external_id_per_org',
