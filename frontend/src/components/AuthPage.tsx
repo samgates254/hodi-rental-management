@@ -463,7 +463,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             <Logo size={40} className="w-fit" />
             <ThemeToggle />
           </div>
-          <section className="rounded-2xl border border-border bg-surface p-6 shadow-soft sm:p-9">
+          <section className="hodi-auth-sheet">
             <p className="text-[10px] font-bold tracking-[0.16em] text-text-secondary">PROPERTY AGENT</p>
             <h1 className="mt-3 font-[family-name:var(--hodi-editorial)] text-3xl font-normal tracking-tight">Check your email</h1>
             <p className="mt-3 text-sm leading-6 text-text-secondary">
@@ -498,7 +498,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
             <Logo size={40} className="w-fit" />
             <ThemeToggle />
           </div>
-          <section className="rounded-2xl border border-border bg-surface p-7 shadow-soft sm:p-10">
+          <section className="hodi-auth-sheet">
             <p className="text-[10px] font-bold tracking-[0.16em] text-text-secondary">SIGNED IN</p>
             <h1 className="mt-3 font-[family-name:var(--hodi-editorial)] text-3xl font-normal tracking-tight">Choose a workspace</h1>
             <p className="mt-2 text-sm leading-6 text-text-secondary">
@@ -510,7 +510,7 @@ export default function AuthPage({ mode }: { mode: AuthMode }) {
                   key={workspace.path}
                   type="button"
                   onClick={() => goToWorkspace(workspace.path)}
-                  className="rounded-xl border border-border bg-surface-raised p-4 text-left transition-colors hover:border-brand"
+                  className="hodi-workspace-choice"
                 >
                   <span className="block font-semibold">{workspace.label}</span>
                   <span className="mt-1 block text-sm text-text-secondary">{workspace.description}</span>

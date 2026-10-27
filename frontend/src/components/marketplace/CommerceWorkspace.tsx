@@ -199,16 +199,8 @@ export default function CommerceWorkspace({
     }
   }
   return (
-    <section
-      className="border-l-4 border-l-sky-700 bg-sky-50/40"
-      style={{
-        margin: "28px 0",
-        padding: 22,
-        border: "1px solid #d7dce2",
-        borderRadius: 16,
-      }}
-    >
-      <p className="flex items-center gap-2">HODI LIVING · PROCUREMENT <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 text-sky-800" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m14.7 6.3 3-3a5 5 0 0 1-6.8 6.8L5 16a2.1 2.1 0 0 0 3 3l5.9-5.9a5 5 0 0 0 6.8-6.8l-3 3-3-3Z" /></svg></p>
+    <section className="hodi-commerce-panel">
+      <p className="flex items-center gap-2">HODI LIVING · PROCUREMENT <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 text-[var(--hodi-brand)]" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m14.7 6.3 3-3a5 5 0 0 1-6.8 6.8L5 16a2.1 2.1 0 0 0 3 3l5.9-5.9a5 5 0 0 0 6.8-6.8l-3 3-3-3Z" /></svg></p>
       <h2>Suppliers, listings and requests</h2>
       <p>
         Only recorded supplier and purchase information is shown. Product prices
@@ -336,11 +328,11 @@ export default function CommerceWorkspace({
       {orders.map((x) => (
         <article
           key={x.id}
-          className="border border-sky-700 border-l-4 bg-sky-50/30 p-3"
+          className="hodi-commerce-order"
         >
           {x.listing_title} · {x.status}{" "}
-          <small>Payment: <strong className={x.payment_status === "VERIFIED" ? "text-emerald-800" : "text-amber-900"}>{paymentStatusLabel(x.payment_status)}</strong></small>
-          {x.payment_status !== "VERIFIED" && <p role="status" className="mt-2 border-l-4 border-amber-500 bg-amber-50 p-2 text-sm text-amber-950">Payment is pending verification. Do not treat this request as paid.</p>}
+          <small>Payment: <strong className={x.payment_status === "VERIFIED" ? "text-[var(--hodi-success)]" : "text-[var(--hodi-warning)]"}>{paymentStatusLabel(x.payment_status)}</strong></small>
+          {x.payment_status !== "VERIFIED" && <p role="status" className="hodi-payment-pending">Payment is pending verification. Do not treat this request as paid.</p>}
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             {(
               {

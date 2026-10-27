@@ -48,7 +48,7 @@ export function AboutBuilding() {
             <p className="mt-4">
               <a
                 href="/platform"
-                className="text-sm font-medium text-[#163d32] underline decoration-[#c6a66b] underline-offset-4"
+                className="text-sm font-medium text-brand underline decoration-[var(--hodi-gold)] underline-offset-4"
               >
                 See the platform →
               </a>

@@ -214,7 +214,8 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        organization = serializer.validated_data['organization']
+        organization_id = serializer.validated_data['organization'].pk
+        organization = Organization.objects.select_for_update(of=('self',)).get(pk=organization_id)
         require_organization_owner(self.request.user, organization)
         if serializer.validated_data.get('role') == OrganizationMembership.Role.ACCOUNTANT:
             raise ValidationError({'role': 'Accountant access must be granted through an accepted invitation.'})
@@ -236,8 +237,14 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_update(self, serializer):
-        membership = serializer.instance
-        require_organization_owner(self.request.user, membership.organization)
+        membership_id = serializer.instance.pk
+        organization_id = serializer.instance.organization_id
+        organization = Organization.objects.select_for_update(of=('self',)).get(pk=organization_id)
+        membership = OrganizationMembership.objects.select_for_update(of=('self',)).select_related(
+            'user', 'organization',
+        ).get(pk=membership_id, organization=organization)
+        serializer.instance = membership
+        require_organization_owner(self.request.user, organization)
         if membership.role == OrganizationMembership.Role.ACCOUNTANT or serializer.validated_data.get('role') == OrganizationMembership.Role.ACCOUNTANT:
             raise ValidationError({'role': 'Accountant access changes must use the invitation workflow.'})
         prevent_removing_last_active_owner(
@@ -261,8 +268,13 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @transaction.atomic
     def perform_destroy(self, instance):
-        require_organization_owner(self.request.user, instance.organization)
+        organization = Organization.objects.select_for_update(of=('self',)).get(pk=instance.organization_id)
+        instance = OrganizationMembership.objects.select_for_update(of=('self',)).select_related(
+            'user', 'organization',
+        ).get(pk=instance.pk, organization=organization)
+        require_organization_owner(self.request.user, organization)
         if instance.role == OrganizationMembership.Role.ACCOUNTANT:
             raise ValidationError('Revoke accountant access through its invitation so the change remains auditable.')
         prevent_removing_last_active_owner(instance, deleting=True)

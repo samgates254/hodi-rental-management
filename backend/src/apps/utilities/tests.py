@@ -176,6 +176,41 @@ class UtilityApiTests(TestCase):
         self.assertNotIn('PRIVATE', str(response.data))
         self.assertNotIn('provider_name', response.data[0])
 
+    def test_deactivated_tenant_or_organization_cannot_read_tenant_utilities(self):
+        user = get_user_model().objects.create_user(username='inactive-utility-tenant', password='password')
+        tenant = Tenant.objects.create(
+            organization=self.organization, user=user,
+            first_name='Inactive', last_name='Tenant', phone_number='0700000099',
+        )
+        Lease.objects.create(
+            tenant=tenant, unit=self.unit, reference='UTILITY-INACTIVE',
+            start_date=date(2026, 1, 1), monthly_rent_minor=10000, status=Lease.Status.ACTIVE,
+        )
+        account = UtilityAccount.objects.create(
+            organization=self.organization, property=self.property, unit=self.unit,
+            service_type='WATER', provider_name='Water provider', responsible_party='TENANT',
+            created_by=self.owner,
+        )
+        UtilityBill.objects.create(
+            account=account, period_start=date(2026, 9, 1), period_end=date(2026, 9, 30),
+            amount_minor=10000, recorded_by=self.owner,
+        )
+        self.client.force_authenticate(user)
+
+        tenant.is_active = False
+        tenant.save(update_fields=('is_active', 'updated_at'))
+        inactive_tenant_response = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(inactive_tenant_response.status_code, 200)
+        self.assertEqual(inactive_tenant_response.data, [])
+
+        tenant.is_active = True
+        tenant.save(update_fields=('is_active', 'updated_at'))
+        self.organization.is_active = False
+        self.organization.save(update_fields=('is_active', 'updated_at'))
+        inactive_organization_response = self.client.get(reverse('utilities:tenant-utilities'))
+        self.assertEqual(inactive_organization_response.status_code, 200)
+        self.assertEqual(inactive_organization_response.data, [])
+
     def test_consecutive_tenants_do_not_share_prior_period_utility_bill(self):
         previous_user = get_user_model().objects.create_user(username='previous-utility-tenant', password='password')
         current_user = get_user_model().objects.create_user(username='current-utility-tenant', password='password')

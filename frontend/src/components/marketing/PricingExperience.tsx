@@ -72,7 +72,7 @@ export default function PricingExperience() {
 
   return (
     <>
-      <section className="relative isolate overflow-hidden bg-[#f3f5f2] dark:bg-bg">
+      <section className="relative isolate overflow-hidden bg-bg">
         <Container className="grid min-h-[480px] items-center gap-9 py-12 sm:py-16 lg:grid-cols-[0.9fr_1.1fr] lg:py-20">
           <div className="relative z-10">
             <p className="text-sm font-semibold tracking-wide text-teal">Plans for property operators</p>
@@ -143,7 +143,7 @@ export default function PricingExperience() {
         </Container>
       </section>
 
-      <section className="bg-[#f3f5f2] py-14 dark:bg-bg sm:py-20">
+      <section className="bg-bg py-14 sm:py-20">
         <Container>
           <div className="max-w-xl"><p className="text-sm font-semibold text-teal">Included tools</p><h2 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-charcoal sm:text-4xl">A shared set of operating tools.</h2><p className="mt-3 text-sm leading-6 text-text-secondary">Plan capacity varies. The current catalogue controls which supported tools are included.</p></div>
           {plans.length > 0 && <div className="mt-8 overflow-x-auto border-y border-border bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal" tabIndex={0} aria-label="Scrollable plan comparison">
@@ -166,7 +166,7 @@ export default function PricingExperience() {
         </Container>
       </section>
 
-      <section className="border-y border-border bg-[#f3f5f2] py-14 dark:bg-bg sm:py-20">
+      <section className="border-y border-border bg-bg py-14 sm:py-20">
         <Container>
           <div className="max-w-xl"><p className="text-sm font-semibold text-teal">A practical start</p><h2 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-charcoal sm:text-4xl">Set up your portfolio at your pace.</h2></div>
           <ol className="mt-8 grid gap-7 sm:grid-cols-2 lg:grid-cols-4">

@@ -78,5 +78,5 @@ test("marketplace shows a useful empty state and validation feedback", async ({ 
   await page.getByLabel("Min rent (KES)").fill("20000");
   await page.getByLabel("Max rent (KES)").fill("10000");
   await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Maximum rent must be at least the minimum rent.");
+  await expect(page.getByText("Maximum rent must be at least the minimum rent.")).toBeVisible();
 });

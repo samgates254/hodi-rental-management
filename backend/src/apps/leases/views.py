@@ -65,6 +65,7 @@ class LeaseAccess(BasePermission):
 
 
 class LeaseScopedViewSet(viewsets.ModelViewSet):
+	http_method_names = ('get', 'post', 'put', 'patch', 'head', 'options')
 	permission_classes = (IsAuthenticated, LeaseAccess)
 	organization_resource = 'leases'
 

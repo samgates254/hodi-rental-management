@@ -15,7 +15,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.billing.models import MpesaAttempt, Payment
 from application.services.audit import record_audit
-from application.services.billing import allocate_payment, record_payment
+from application.services.billing import allocate_payment, record_verified_mpesa_payment
 from application.services.mpesa import normalize_kenya_msisdn
 from common.rental_dates import RENTAL_BUSINESS_TIME_ZONE as NAIROBI, rental_business_date
 
@@ -263,11 +263,10 @@ def _create_or_load_payment(*, attempt, receipt, received_date, request):
     if existing is not None:
         return existing, False
     try:
-        payment = record_payment(
+        payment = record_verified_mpesa_payment(
             tenant=attempt.tenant,
             amount_cents=int(attempt.amount_cents),
             received_date=received_date,
-            method=Payment.Method.MPESA,
             actor=attempt.initiated_by,
             reference=receipt,
             external_id=receipt,

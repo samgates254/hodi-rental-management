@@ -58,6 +58,8 @@ class Command(BaseCommand):
             merchant_request_id__isnull=False,
             created_at__lte=now - timedelta(minutes=stale_minutes),
             reconciliation_attempts__lt=MAX_ATTEMPTS,
+        ).exclude(
+            reconciliation_state=MpesaAttempt.ReconciliationState.SUCCESS_NEEDS_RECEIPT,
         ).filter(
             models_retry_due(now),
         ).order_by('last_reconciliation_at', 'created_at')

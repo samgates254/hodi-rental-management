@@ -75,7 +75,7 @@ INSTALLED_APPS = [
     'django.contrib.admin', 'django.contrib.auth', 'django.contrib.contenttypes',
     'django.contrib.sessions', 'django.contrib.messages', 'django.contrib.staticfiles',
     'rest_framework',
-    'rest_framework.authtoken',
+    'knox',
     'corsheaders',
     'apps.accounts', 'apps.organizations', 'apps.properties', 'apps.tenants',
     'apps.leases', 'apps.billing', 'apps.maintenance', 'apps.notifications', 'apps.audit',
@@ -87,8 +87,8 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -254,7 +254,7 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'knox.auth.TokenAuthentication',
     ],
     'DEFAULT_THROTTLE_RATES': {
         # Tight defaults for non-DEBUG; relaxed below when DEBUG is on.
@@ -267,6 +267,13 @@ REST_FRAMEWORK = {
         'auth_organization_options': '60/minute',
         'marketplace_inquiry': '10/hour',
     },
+}
+
+from datetime import timedelta
+REST_KNOX = {
+    'TOKEN_TTL': timedelta(hours=24),
+    'USER_SERIALIZER': 'apps.accounts.serializers.UserSerializer',
+    'AUTO_REFRESH': True,
 }
 if DEBUG:
     # LocMem throttle state survives across requests in runserver; keep local DX usable.

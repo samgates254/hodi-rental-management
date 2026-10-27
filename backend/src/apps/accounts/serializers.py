@@ -3,7 +3,6 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import serializers
-from rest_framework.authtoken.models import Token
 
 from .models import AccountProfile
 from apps.organizations.models import Organization
@@ -174,8 +173,6 @@ class SignupSerializer(serializers.Serializer):
 				phone_number=phone_number,
 				email=user.email,
 			)
-		if account_type != AccountProfile.AccountType.PROPERTY_AGENT:
-			Token.objects.get_or_create(user=user)
 		return user
 
 

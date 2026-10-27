@@ -2,10 +2,10 @@
   margin-top: 28px;
   padding: 22px 22px 18px;
   border: 1px solid var(--hodi-border);
-  border-radius: 16px;
+  border-top: 2px solid var(--hodi-gold);
+  border-radius: 0;
   background: var(--hodi-surface);
   color: var(--hodi-text);
-  box-shadow: var(--hodi-shadow);
 }
 
 .ops-heading {
@@ -18,7 +18,9 @@
 
 .ops-heading h2 {
   margin: 4px 0 0;
-  font-size: 22px;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 1.65rem;
+  font-weight: 460;
   letter-spacing: -0.03em;
 }
 
@@ -28,6 +30,17 @@
 .ops-status {
   margin: 6px 0 0;
   color: var(--hodi-muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ops-balance-note {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--hodi-brand) 28%, var(--hodi-border));
+  border-radius: 10px;
+  background: var(--hodi-brand-soft);
+  color: var(--hodi-text);
   font-size: 14px;
   line-height: 1.45;
 }
@@ -107,8 +120,8 @@
 
 .ops-table th,
 .ops-table td {
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--hodi-border);
+  padding: var(--hodi-table-cell-y) var(--hodi-table-cell-x);
+  border-bottom: var(--hodi-border-width) solid var(--hodi-border);
   text-align: left;
   vertical-align: top;
 }
@@ -121,7 +134,7 @@
 }
 
 .ops-table tbody tr {
-  transition: background-color 140ms ease;
+  transition: background-color var(--hodi-transition-fast) ease;
 }
 
 .ops-table tbody tr:hover {
@@ -156,8 +169,12 @@
   gap: 12px;
   margin: 14px 0;
   padding: 14px;
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--hodi-canvas);
+}
+
+.ops-detail {
+  border-left: 3px solid var(--hodi-gold);
 }
 
 .ops-grid {

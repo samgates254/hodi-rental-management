@@ -17,6 +17,7 @@ from unittest.mock import patch
 from apps.audit.models import AuditLog
 from apps.billing.models import (
     Charge,
+    ChargeJournalEntry,
     DocumentStatus,
     Invoice,
     LedgerPosting,
@@ -33,7 +34,8 @@ from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
 from application.services.billing import (
-    allocate_payment, record_manual_receipt, record_payment, rent_charge_amount,
+    allocate_payment, record_manual_receipt, record_payment,
+    record_verified_mpesa_payment, rent_charge_amount,
 )
 from engines.proration.facade import prorate_move_in
 
@@ -115,13 +117,13 @@ class LedgerApiTests(APITestCase):
             # The staff payment API must not manufacture a provider payment.
             # Build this historical settlement through the internal service so
             # the reversal test remains focused on its provider-review rule.
-            payment = record_payment(
+            receipt = f'TEST-MPESA-{uuid4().hex.upper()}'
+            payment = record_verified_mpesa_payment(
                 tenant=self.tenant,
                 amount_cents=payment_amount,
                 received_date=date(2026, 10, 6),
-                method=method,
-                reference=reference,
-                external_id=f'mpesa-{uuid4().hex}',
+                reference=receipt,
+                external_id=receipt,
                 actor=self.accountant,
             )
             payment = allocate_payment(
@@ -425,6 +427,21 @@ class LedgerApiTests(APITestCase):
                 method=Payment.Method.CASH,
                 actor=self.accountant,
             )
+        self.assertFalse(Payment.objects.exists())
+
+    def test_canonical_payment_service_rejects_unverified_mpesa(self):
+        with self.assertRaises(ValidationError) as caught:
+            record_payment(
+                tenant=self.tenant,
+                amount_cents=2_000,
+                received_date=date(2026, 10, 6),
+                method=Payment.Method.MPESA,
+                actor=self.accountant,
+                reference='TEST-UNVERIFIED-MPESA',
+                external_id='TEST-UNVERIFIED-MPESA',
+            )
+
+        self.assertIn('method', caught.exception.detail)
         self.assertFalse(Payment.objects.exists())
 
     def test_invoice_aggregate_cannot_overflow_database_money_range(self):
@@ -800,6 +817,269 @@ class LedgerApiTests(APITestCase):
 
         self.assertEqual(actual, self.lease.monthly_rent_minor)
 
+    def test_posted_rent_charge_creates_balanced_journal(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+
+        entries = list(
+            ChargeJournalEntry.objects.filter(
+                charge=charge,
+                reverses__isnull=True,
+            ).order_by("direction")
+        )
+
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(
+            {(entry.account, entry.direction, entry.amount_cents) for entry in entries},
+            {
+                ("1100", "DEBIT", 10_000),
+                ("4010", "CREDIT", 10_000),
+            },
+        )
+        self.assertEqual(
+            sum(e.amount_cents for e in entries if e.direction == "DEBIT"),
+            sum(e.amount_cents for e in entries if e.direction == "CREDIT"),
+        )
+        self.assertEqual(charge.lifecycle, DocumentStatus.POSTED)
+
+    def test_posted_other_charge_uses_other_tenant_charges_account(self):
+        self.client.force_authenticate(self.accountant)
+        created = self.client.post(
+            "/api/v1/billing/invoices/",
+            self.invoice_payload(include_rent=False),
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+
+        charge_response = self.client.post("/api/v1/billing/charges/", {
+            "invoice": created.data["id"],
+            "charge_type": "WATER",
+            "amount_cents": 2_500,
+            "due_date": "2026-10-05",
+        }, format="json")
+        self.assertEqual(charge_response.status_code, status.HTTP_201_CREATED)
+
+        posted = self.client.post(
+            f"/api/v1/billing/invoices/{created.data['id']}/post/"
+        )
+        self.assertEqual(posted.status_code, status.HTTP_200_OK)
+
+        charge = Charge.objects.get(pk=charge_response.data["id"])
+        entries = list(ChargeJournalEntry.objects.filter(charge=charge))
+
+        self.assertEqual(
+            {(entry.account, entry.direction, entry.amount_cents) for entry in entries},
+            {
+                ("1100", "DEBIT", 2_500),
+                ("4020", "CREDIT", 2_500),
+            },
+        )
+
+    def test_void_posted_invoice_reverses_journal_without_deleting_originals(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+        originals = list(
+            ChargeJournalEntry.objects.filter(
+                charge=charge,
+                reverses__isnull=True,
+            )
+        )
+        self.assertEqual(len(originals), 2)
+
+        response = self.client.post(
+            f"/api/v1/billing/invoices/{invoice.pk}/void/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        all_entries = list(
+            ChargeJournalEntry.objects.filter(charge=charge).order_by("pk")
+        )
+        self.assertEqual(len(all_entries), 4)
+        self.assertEqual(
+            ChargeJournalEntry.objects.filter(
+                charge=charge,
+                reverses__isnull=True,
+            ).count(),
+            2,
+        )
+
+        reversals = [entry for entry in all_entries if entry.reverses_id]
+        self.assertEqual(len(reversals), 2)
+        for reversal in reversals:
+            original = next(
+                entry for entry in originals if entry.pk == reversal.reverses_id
+            )
+            self.assertEqual(reversal.account, original.account)
+            self.assertEqual(reversal.amount_cents, original.amount_cents)
+            self.assertNotEqual(reversal.direction, original.direction)
+
+        self.assertEqual(
+            sum(e.amount_cents for e in all_entries if e.direction == "DEBIT"),
+            sum(e.amount_cents for e in all_entries if e.direction == "CREDIT"),
+        )
+
+    def test_void_accepts_correct_existing_journal_reversals_without_duplicates(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+        originals = list(
+            ChargeJournalEntry.objects.filter(
+                charge=charge, reverses__isnull=True,
+            ).order_by("pk")
+        )
+
+        for original in originals:
+            ChargeJournalEntry.objects.create(
+                charge=charge,
+                account=original.account,
+                direction=(
+                    ChargeJournalEntry.Direction.CREDIT
+                    if original.direction == ChargeJournalEntry.Direction.DEBIT
+                    else ChargeJournalEntry.Direction.DEBIT
+                ),
+                amount_cents=original.amount_cents,
+                reverses=original,
+            )
+
+        response = self.client.post(
+            f"/api/v1/billing/invoices/{invoice.pk}/void/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            ChargeJournalEntry.objects.filter(charge=charge).count(), 4,
+        )
+        self.assertEqual(
+            ChargeJournalEntry.objects.filter(
+                charge=charge, reverses__isnull=False,
+            ).count(), 2,
+        )
+
+    def test_void_rejects_existing_reversal_with_wrong_amount(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+        original = ChargeJournalEntry.objects.get(
+            charge=charge, reverses__isnull=True, direction="DEBIT",
+        )
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=original.account,
+            direction=ChargeJournalEntry.Direction.CREDIT,
+            amount_cents=original.amount_cents + 1,
+            reverses=original,
+        )
+
+        response = self.client.post(
+            f"/api/v1/billing/invoices/{invoice.pk}/void/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        charge.refresh_from_db()
+        self.assertEqual(invoice.status, DocumentStatus.POSTED)
+        self.assertEqual(charge.lifecycle, DocumentStatus.POSTED)
+        self.assertEqual(
+            ChargeJournalEntry.objects.filter(
+                charge=charge, reverses__isnull=False,
+            ).count(), 1,
+        )
+
+    def test_void_rejects_existing_reversal_with_wrong_direction(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+        original = ChargeJournalEntry.objects.get(
+            charge=charge, reverses__isnull=True, direction="DEBIT",
+        )
+        ChargeJournalEntry.objects.create(
+            charge=charge,
+            account=original.account,
+            direction=original.direction,
+            amount_cents=original.amount_cents,
+            reverses=original,
+        )
+
+        response = self.client.post(
+            f"/api/v1/billing/invoices/{invoice.pk}/void/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, DocumentStatus.POSTED)
+
+    def test_void_rejects_incomplete_original_journal(self):
+        invoice, charge = self.create_posted_rent_charge(10_000)
+        original = ChargeJournalEntry.objects.filter(
+            charge=charge, reverses__isnull=True,
+        ).order_by("pk").first()
+
+        # QuerySet.delete() deliberately simulates damaged legacy/database
+        # data; the normal model API prevents deleting journal entries.
+        ChargeJournalEntry.objects.filter(pk=original.pk).delete()
+
+        response = self.client.post(
+            f"/api/v1/billing/invoices/{invoice.pk}/void/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        charge.refresh_from_db()
+        self.assertEqual(invoice.status, DocumentStatus.POSTED)
+        self.assertEqual(charge.lifecycle, DocumentStatus.POSTED)
+        self.assertEqual(
+            ChargeJournalEntry.objects.filter(
+                charge=charge, reverses__isnull=True,
+            ).count(), 1,
+        )
+        self.assertFalse(
+            ChargeJournalEntry.objects.filter(
+                charge=charge, reverses__isnull=False,
+            ).exists()
+        )
+
+    @patch("application.services.billing._create_charge_journal")
+    def test_posting_rolls_back_all_changes_when_journal_creation_fails(
+        self, create_journal,
+    ):
+        self.client.force_authenticate(self.accountant)
+
+        created = self.client.post(
+            "/api/v1/billing/invoices/",
+            self.invoice_payload(include_rent=False),
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+
+        charge_ids = []
+        for charge_type, amount in (("RENT", 10_000), ("WATER", 2_500)):
+            response = self.client.post("/api/v1/billing/charges/", {
+                "invoice": created.data["id"],
+                "charge_type": charge_type,
+                "amount_cents": amount,
+                "due_date": "2026-10-05",
+            }, format="json")
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+            charge_ids.append(response.data["id"])
+
+        def fail_on_second_charge(charge):
+            if str(charge.pk) == str(charge_ids[1]):
+                raise RuntimeError("Simulated journal failure")
+            return []
+
+        create_journal.side_effect = fail_on_second_charge
+
+        from application.services.billing import post_invoice
+
+        invoice = Invoice.objects.get(pk=created.data["id"])
+        with self.assertRaises(RuntimeError):
+            post_invoice(invoice, actor=self.accountant)
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, DocumentStatus.DRAFT)
+        self.assertTrue(
+            Charge.objects.filter(
+                pk__in=charge_ids,
+                lifecycle=DocumentStatus.DRAFT,
+            ).count() == 2
+        )
+        self.assertEqual(
+            ChargeJournalEntry.objects.filter(charge_id__in=charge_ids).count(),
+            0,
+        )
+
     def test_void_posted_invoice_without_allocations(self):
         self.client.force_authenticate(self.owner)
         created = self.client.post('/api/v1/billing/invoices/', self.invoice_payload(
@@ -840,6 +1120,67 @@ class LedgerApiTests(APITestCase):
         self.assertEqual(response.data['status'], 'DELINQUENT')
         self.assertEqual(response.data['delinquent_cents'], 4000)
         self.assertFalse(Payment.objects.exists())
+
+    def test_deactivated_tenant_cannot_read_own_delinquency(self):
+        self.tenant.is_active = False
+        self.tenant.save(update_fields=('is_active', 'updated_at'))
+        self.client.force_authenticate(self.tenant_user)
+        response = self.client.get('/api/v1/billing/delinquency/', {
+            'tenant': self.tenant.pk,
+            'as_of': '2026-10-10',
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_deactivated_tenant_organization_records_are_hidden_with_other_org_access(self):
+        invoice = Invoice.objects.create(
+            organization=self.organization,
+            tenant=self.tenant,
+            lease=self.lease,
+            period_start=date(2026, 10, 1),
+            period_end=date(2026, 10, 31),
+            due_date=date(2026, 10, 5),
+            status=DocumentStatus.POSTED,
+            total_cents=1000,
+            balance_cents=1000,
+        )
+        charge = Charge.objects.create(
+            invoice=invoice,
+            organization=self.organization,
+            tenant=self.tenant,
+            charge_type='RENT',
+            amount_cents=1000,
+            balance_cents=1000,
+            due_date=date(2026, 10, 5),
+            lifecycle=DocumentStatus.POSTED,
+        )
+        Payment.objects.create(
+            organization=self.organization,
+            tenant=self.tenant,
+            amount_cents=1000,
+            received_date=date(2026, 10, 5),
+            execution_timestamp=timezone.now(),
+            method=Payment.Method.CASH,
+            recorded_by=self.owner,
+        )
+        OrganizationMembership.objects.create(
+            organization=self.other,
+            user=self.tenant_user,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        self.organization.is_active = False
+        self.organization.save(update_fields=('is_active', 'updated_at'))
+        self.client.force_authenticate(self.tenant_user)
+
+        invoice_response = self.client.get('/api/v1/billing/invoices/')
+        charge_response = self.client.get('/api/v1/billing/charges/')
+        payment_response = self.client.get('/api/v1/billing/ledger-payments/')
+
+        self.assertEqual(invoice_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(charge_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(payment_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(invoice_response.data, [])
+        self.assertEqual(charge_response.data, [])
+        self.assertEqual(payment_response.data, [])
 
     def test_full_payment_reversal_restores_invoice_and_posts_auditable_offsets(self):
         invoice, charges, payment = self.create_allocated_payment([10_000], 10_000)
@@ -1049,20 +1390,113 @@ class PaymentReversalConcurrencyTests(TransactionTestCase):
         LedgerPosting.objects.create(payment=payment, account='2010', direction='CREDIT', amount_cents=3_000)
         payment_id = payment.pk
         actor_id = actor.pk
+        worker_pids = []
 
         def reverse_in_own_connection():
             from application.services.billing import reverse_payment
 
-            user = get_user_model().objects.get(pk=actor_id)
-            target = Payment.objects.get(pk=payment_id)
-            return reverse_payment(target, reason='Concurrent duplicate', actor=user).pk
+            try:
+                close_old_connections()
+                with connection.cursor() as cursor:
+                    cursor.execute('SELECT pg_backend_pid()')
+                    worker_pids.append(cursor.fetchone()[0])
+                user = get_user_model().objects.get(pk=actor_id)
+                target = Payment.objects.get(pk=payment_id)
+                return reverse_payment(target, reason='Concurrent duplicate', actor=user).pk
+            finally:
+                # CONN_MAX_AGE keeps healthy connections open; close this
+                # thread-local connection before the worker exits so Django
+                # can drop the temporary test database during teardown.
+                connection.close()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _index: reverse_in_own_connection(), range(2)))
         self.assertEqual(results[0], results[1])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT count(*) FROM pg_stat_activity WHERE pid = ANY(%s)',
+                [worker_pids],
+            )
+            self.assertEqual(cursor.fetchone()[0], 0)
         payment.refresh_from_db()
         self.assertEqual(PaymentReversal.objects.filter(payment=payment).count(), 1)
         self.assertEqual(LedgerPosting.objects.filter(payment=payment).count(), 4)
+
+    def test_concurrent_reversals_preserve_shared_invoice_balance(self):
+        actor = get_user_model().objects.create_user(username='shared-invoice-reversal', password='test')
+        organization = Organization.objects.create(name='Shared Invoice Concurrency Homes')
+        tenant = Tenant.objects.create(
+            organization=organization,
+            first_name='Concurrent',
+            last_name='Tenant',
+            phone_number='+254700000090',
+        )
+        invoice = Invoice.objects.create(
+            organization=organization,
+            tenant=tenant,
+            period_start=date(2026, 10, 1),
+            period_end=date(2026, 10, 31),
+            due_date=date(2026, 10, 5),
+            status=DocumentStatus.POSTED,
+            total_cents=6_000,
+            balance_cents=0,
+        )
+        payments = []
+        for index in range(2):
+            charge = Charge.objects.create(
+                invoice=invoice,
+                organization=organization,
+                tenant=tenant,
+                charge_type='RENT',
+                amount_cents=3_000,
+                balance_cents=0,
+                due_date=date(2026, 10, 5),
+                lifecycle=DocumentStatus.POSTED,
+            )
+            payment = Payment.objects.create(
+                organization=organization,
+                tenant=tenant,
+                amount_cents=3_000,
+                allocated_cents=3_000,
+                received_date=date(2026, 10, 6),
+                execution_timestamp=timezone.now(),
+                method=Payment.Method.CASH,
+                status=Payment.Status.ALLOCATED,
+                recorded_by=actor,
+            )
+            PaymentAllocation.objects.create(
+                payment=payment,
+                charge=charge,
+                amount_cents=3_000,
+                policy_id='CANONICAL_PRIORITY',
+                policy_version=2,
+            )
+            LedgerPosting.objects.create(payment=payment, account='2000', direction='DEBIT', amount_cents=3_000)
+            LedgerPosting.objects.create(payment=payment, account='2010', direction='CREDIT', amount_cents=3_000)
+            payments.append(payment.pk)
+
+        barrier = Barrier(2, timeout=10)
+        actor_id = actor.pk
+
+        def reverse_in_own_connection(payment_id):
+            from application.services.billing import reverse_payment
+
+            try:
+                close_old_connections()
+                user = get_user_model().objects.get(pk=actor_id)
+                target = Payment.objects.get(pk=payment_id)
+                barrier.wait(timeout=10)
+                return reverse_payment(target, reason='Concurrent shared invoice reversal', actor=user).pk
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            reversal_ids = list(pool.map(reverse_in_own_connection, payments))
+
+        self.assertEqual(len(set(reversal_ids)), 2)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.balance_cents, 6_000)
+        self.assertEqual(PaymentReversal.objects.filter(pk__in=reversal_ids).count(), 2)
 
 
 @skipUnless(connection.vendor == 'postgresql', 'Concurrent receipt test requires PostgreSQL.')
@@ -1093,10 +1527,14 @@ class ManualReceiptConcurrencyTests(TransactionTestCase):
         )
         actor_id, tenant_id = actor.pk, tenant.pk
         barrier = Barrier(2)
+        worker_pids = []
 
         def submit_in_own_connection():
-            close_old_connections()
             try:
+                close_old_connections()
+                with connection.cursor() as cursor:
+                    cursor.execute('SELECT pg_backend_pid()')
+                    worker_pids.append(cursor.fetchone()[0])
                 actor_row = user_model.objects.get(pk=actor_id)
                 tenant_row = Tenant.objects.get(pk=tenant_id)
                 barrier.wait(timeout=10)
@@ -1107,13 +1545,21 @@ class ManualReceiptConcurrencyTests(TransactionTestCase):
                 )
                 return str(payment.pk), duplicate
             finally:
-                close_old_connections()
+                # close_old_connections() intentionally preserves a healthy
+                # connection when CONN_MAX_AGE is nonzero.
+                connection.close()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _index: submit_in_own_connection(), range(2)))
 
         self.assertEqual(results[0][0], results[1][0])
         self.assertEqual(sorted(duplicate for _payment_id, duplicate in results), [False, True])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT count(*) FROM pg_stat_activity WHERE pid = ANY(%s)',
+                [worker_pids],
+            )
+            self.assertEqual(cursor.fetchone()[0], 0)
         self.assertEqual(Payment.objects.count(), 1)
         payment = Payment.objects.get()
         self.assertEqual(PaymentAllocation.objects.filter(payment=payment).count(), 1)

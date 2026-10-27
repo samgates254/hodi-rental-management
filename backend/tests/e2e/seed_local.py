@@ -8,7 +8,8 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files import File
-from rest_framework.authtoken.models import Token
+from django.utils import timezone
+from knox.models import AuthToken
 from common.rental_dates import rental_business_date
 
 if settings.DJANGO_ENV == "production":
@@ -27,7 +28,7 @@ from apps.accounts.models import AccountProfile
 from apps.billing.models import Charge, Invoice
 from apps.leases.models import Lease
 from apps.marketplace.models import CommerceListing, Listing as PropertyListing, ListingPhoto, SupplierProfile
-from apps.maintenance.models import MaintenanceRequest, RepairQuotation, RepairQuotationLine, WorkOrder
+from apps.maintenance.models import MaintenanceRequest, RepairQuotation, RepairQuotationLine, TechnicianProfile, WorkOrder
 from apps.organizations.models import Organization, OrganizationMembership
 from apps.properties.models import Building, Property, Unit
 from apps.tenants.models import Tenant
@@ -52,12 +53,22 @@ other_tenant_user = make_user("hodi_e2e_other_tenant", "other-tenant@hodi-e2e.in
 accountant = make_user("hodi_e2e_accountant", "accountant@hodi-e2e.invalid", "UNSPECIFIED")
 impostor = make_user("hodi_e2e_impostor", "impostor@hodi-e2e.invalid", "UNSPECIFIED")
 caretaker = make_user("hodi_e2e_caretaker", "caretaker@hodi-e2e.invalid", "UNSPECIFIED")
+technician = make_user("hodi_e2e_technician", "technician@hodi-e2e.invalid", "SERVICE_PROFESSIONAL")
+empty_technician = make_user("hodi_e2e_empty_technician", "empty-technician@hodi-e2e.invalid", "SERVICE_PROFESSIONAL")
 
 organization, _ = Organization.objects.get_or_create(name="HODI E2E Demo Organisation")
 other_organization, _ = Organization.objects.get_or_create(name="HODI E2E Other Organisation")
 OrganizationMembership.objects.get_or_create(organization=organization, user=owner, defaults={"role": "OWNER"})
 OrganizationMembership.objects.get_or_create(organization=organization, user=caretaker, defaults={"role": "CARETAKER"})
+OrganizationMembership.objects.get_or_create(organization=organization, user=technician, defaults={"role": "TECHNICIAN"})
+OrganizationMembership.objects.get_or_create(organization=organization, user=empty_technician, defaults={"role": "TECHNICIAN"})
 OrganizationMembership.objects.get_or_create(organization=other_organization, user=other_owner, defaults={"role": "OWNER"})
+TechnicianProfile.objects.get_or_create(user=technician, defaults={
+    "trade": "PLUMBER", "skills": ["PLUMBER"], "rating_milli": 4000, "acceptance_milli": 800,
+})
+TechnicianProfile.objects.get_or_create(user=empty_technician, defaults={
+    "trade": "PLUMBER", "skills": ["PLUMBER"], "rating_milli": 4000, "acceptance_milli": 800,
+})
 AccountProfile.objects.filter(user=tenant_user).update(organization=organization)
 AccountProfile.objects.filter(user=other_tenant_user).update(organization=other_organization)
 today = rental_business_date()
@@ -163,6 +174,9 @@ request, _ = MaintenanceRequest.objects.get_or_create(unit=unit, title="E2E sink
     "hazard": 1, "vulnerability": 1, "priority_class": 3, "score_millis": 1000,
 })
 work_order, _ = WorkOrder.objects.get_or_create(request=request)
+work_order.assignee = technician
+work_order.status = WorkOrder.Status.ASSIGNED
+work_order.save(update_fields=["assignee", "status", "updated_at"])
 quotation, _ = RepairQuotation.objects.get_or_create(work_order=work_order, explanation="E2E approved material quote", defaults={
     "submitted_by": owner, "materials_estimate_cents": 200000, "status": "APPROVED", "reviewed_by": owner,
     "decision_at": timezone.now(),
@@ -174,11 +188,12 @@ Path(manifest).write_text(json.dumps({
     "password": password,
     "users": {"owner": owner.username, "other_owner": other_owner.username, "tenant": tenant_user.username,
               "other_tenant": other_tenant_user.username, "accountant": accountant.username, "impostor": impostor.username,
-              "caretaker": caretaker.username},
-    "tokens": {key: Token.objects.get_or_create(user=user)[0].key for key, user in {
+              "caretaker": caretaker.username, "technician": technician.username,
+              "empty_technician": empty_technician.username},
+    "tokens": {key: AuthToken.objects.create(user=user)[1] for key, user in {
         "owner": owner, "other_owner": other_owner, "tenant": tenant_user,
         "other_tenant": other_tenant_user, "accountant": accountant, "impostor": impostor,
-        "caretaker": caretaker,
+              "caretaker": caretaker, "technician": technician, "empty_technician": empty_technician,
     }.items()},
     "organization_id": organization.pk,
     "other_organization_id": other_organization.pk,

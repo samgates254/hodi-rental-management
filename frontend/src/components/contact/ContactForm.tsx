@@ -697,7 +697,7 @@ function PortfolioSizeSelect({
           tabIndex={-1}
           aria-labelledby={id}
           aria-activedescendant={`${id}-opt-${activeIndex}`}
-          className="absolute z-30 mt-2 max-h-64 w-full overflow-auto rounded-2xl border border-teal/20 bg-surface p-1.5 shadow-[0_18px_40px_-18px_rgba(25,32,42,0.35)] ring-1 ring-charcoal/5"
+          className="absolute z-30 mt-2 max-h-64 w-full overflow-auto border border-border bg-surface p-1.5 shadow-[0_18px_40px_-18px_rgba(16,40,32,0.18)]"
         >
           {portfolioChoices.map((opt, index) => {
             const isSelected = opt.value === value;

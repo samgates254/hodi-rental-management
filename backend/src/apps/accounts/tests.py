@@ -9,11 +9,11 @@ from django.core import mail
 from django.core.cache import cache
 from django.core import signing
 from django.db import IntegrityError, connection, transaction
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 from rest_framework.test import APIClient
 from rest_framework.throttling import ScopedRateThrottle
 
@@ -103,6 +103,33 @@ class AuthenticationApiTests(TestCase):
         verify_token.assert_called_once()
         self.assertEqual(verify_token.call_args.args[0], 'verified-google-token')
         self.assertEqual(verify_token.call_args.kwargs['audience'], 'google-client-id')
+
+    @override_settings(GOOGLE_OAUTH_CLIENT_ID='google-client-id')
+    @patch('apps.accounts.views.verify_oauth2_token')
+    def test_google_login_does_not_bypass_unverified_agent_email(self, verify_token):
+        agent = get_user_model().objects.create_user(
+            username='google-agent',
+            email='google-agent@example.com',
+            password='password',
+        )
+        AccountProfile.objects.create(
+            user=agent,
+            account_type=AccountProfile.AccountType.PROPERTY_AGENT,
+        )
+        verify_token.return_value = {
+            'email': 'google-agent@example.com',
+            'email_verified': True,
+        }
+
+        response = self.client.post(
+            reverse('accounts:google-login'),
+            {'credential': 'verified-google-token'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data, {'detail': 'Verify your email address before signing in.'})
+        self.assertFalse(AuthToken.objects.filter(user=agent).exists())
 
     @override_settings(GOOGLE_OAUTH_CLIENT_ID='google-client-id')
     @patch('apps.accounts.views.verify_oauth2_token')
@@ -232,13 +259,13 @@ class AuthenticationApiTests(TestCase):
         )
 
     def test_logout_revokes_current_token(self):
-        token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+        _instance, token = AuthToken.objects.create(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
 
         response = self.client.post('/api/v1/accounts/logout/')
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        self.assertFalse(AuthToken.objects.filter(user=self.user).exists())
 
     @override_settings(
         EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
@@ -272,7 +299,8 @@ class AuthenticationApiTests(TestCase):
             user.organization_memberships.get().role,
             'OWNER',
         )
-        self.assertEqual(response.data['token'], Token.objects.get(user=user).key)
+        self.assertTrue(bool(response.data['token']))
+        self.assertTrue(AuthToken.objects.filter(user=user).exists())
         self.assertEqual(response.data['account_type'], 'OWNER')
         self.assertEqual(response.data['organization_id'], user.account_profile.organization_id)
         self.assertEqual(mail.outbox, [])
@@ -499,44 +527,6 @@ class AuthenticationApiTests(TestCase):
         self.assertFalse(get_user_model().objects.filter(username='race-loser').exists())
         self.assertFalse(Organization.objects.filter(name='Racing Estate').exists())
 
-    def test_email_uniqueness_migration_detects_conflicts_without_exposing_addresses(self):
-        from importlib import import_module
-
-        migration = import_module(
-            'apps.accounts.migrations.0003_user_email_ci_nonempty_unique',
-        )
-        user_model = get_user_model()
-        index_name = connection.ops.quote_name(migration.INDEX_NAME)
-        with connection.cursor() as cursor:
-            cursor.execute(f'DROP INDEX {index_name}')
-        try:
-            user_model.objects.create_user(
-                username='email-conflict-one',
-                email='Conflict@Example.com',
-                password='password-one',
-            )
-            user_model.objects.create_user(
-                username='email-conflict-two',
-                email='conflict@example.COM',
-                password='password-two',
-            )
-            with self.assertRaises(RuntimeError) as raised:
-                migration.check_existing_emails(model_apps, schema_editor=None)
-        finally:
-            user_model.objects.filter(
-                username__in=('email-conflict-one', 'email-conflict-two'),
-            ).delete()
-            table = connection.ops.quote_name(user_model._meta.db_table)
-            email_column = connection.ops.quote_name(user_model._meta.get_field('email').column)
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    f'CREATE UNIQUE INDEX {index_name} ON {table} (LOWER({email_column})) '
-                    f"WHERE {email_column} <> ''"
-                )
-
-        self.assertIn('1 groups', str(raised.exception))
-        self.assertNotIn('@', str(raised.exception))
-
     def test_signup_rejects_password_mismatch(self):
         response = self.client.post(
             reverse('accounts:signup'),
@@ -662,7 +652,7 @@ class AuthenticationApiTests(TestCase):
         self.user.email = 'manager@example.com'
         self.user.is_active = True
         self.user.save(update_fields=('email', 'is_active'))
-        old_token = Token.objects.create(user=self.user)
+        old_instance, old_token = AuthToken.objects.create(user=self.user)
         self.client.post(
             reverse('accounts:password-reset-request'),
             {'email': self.user.email},
@@ -692,8 +682,8 @@ class AuthenticationApiTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(self.user.check_password('A-new-strong-password-456!'))
-        self.assertFalse(Token.objects.filter(pk=old_token.pk).exists())
-        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        self.assertFalse(AuthToken.objects.filter(pk=old_instance.pk).exists())
+        self.assertFalse(AuthToken.objects.filter(user=self.user).exists())
         self.assertEqual(
             self.client.post(
                 reverse('accounts:login'),
@@ -805,6 +795,48 @@ class AuthenticationApiTests(TestCase):
         self.assertEqual(responses[1].status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
+class EmailUniquenessMigrationTests(TransactionTestCase):
+    """Exercise schema DDL outside TestCase's wrapping transaction."""
+
+    def test_email_uniqueness_migration_detects_conflicts_without_exposing_addresses(self):
+        from importlib import import_module
+
+        migration = import_module(
+            'apps.accounts.migrations.0003_user_email_ci_nonempty_unique',
+        )
+        user_model = get_user_model()
+        index_name = connection.ops.quote_name(migration.INDEX_NAME)
+        with connection.cursor() as cursor:
+            cursor.execute(f'DROP INDEX {index_name}')
+        try:
+            user_model.objects.create_user(
+                username='email-conflict-one',
+                email='Conflict@Example.com',
+                password='password-one',
+            )
+            user_model.objects.create_user(
+                username='email-conflict-two',
+                email='conflict@example.COM',
+                password='password-two',
+            )
+            with self.assertRaises(RuntimeError) as raised:
+                migration.check_existing_emails(model_apps, schema_editor=None)
+        finally:
+            user_model.objects.filter(
+                username__in=('email-conflict-one', 'email-conflict-two'),
+            ).delete()
+            table = connection.ops.quote_name(user_model._meta.db_table)
+            email_column = connection.ops.quote_name(user_model._meta.get_field('email').column)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f'CREATE UNIQUE INDEX {index_name} ON {table} (LOWER({email_column})) '
+                    f"WHERE {email_column} <> ''"
+                )
+
+        self.assertIn('1 groups', str(raised.exception))
+        self.assertNotIn('@', str(raised.exception))
+
+
 @override_settings(
     EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
     DEFAULT_FROM_EMAIL='accounts@example.com',
@@ -849,9 +881,9 @@ class AgentEmailVerificationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data['email_verification_required'])
         self.assertIsNone(response.data['token'])
-        self.assertFalse(Token.objects.filter(user=user).exists())
+        self.assertFalse(AuthToken.objects.filter(user=user).exists())
         self.assertEqual(login.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertFalse(Token.objects.filter(user=user).exists())
+        self.assertFalse(AuthToken.objects.filter(user=user).exists())
 
     def test_valid_token_is_single_use_and_enables_agent_login(self):
         self.signup_agent()

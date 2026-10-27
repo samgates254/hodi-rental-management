@@ -94,3 +94,20 @@ class TenantAuthorizationTests(APITestCase):
         self.tenant.refresh_from_db()
         self.assertEqual(self.tenant.organization_id, self.organization.pk)
         self.assertEqual(self.tenant.first_name, 'Amina')
+
+    def test_inactive_tenant_cannot_use_self_service_after_deactivation(self):
+        self.tenant.is_active = False
+        self.tenant.save(update_fields=('is_active', 'updated_at'))
+        self.client.force_authenticate(self.tenant_user)
+
+        listing = self.client.get('/api/v1/tenants/')
+        detail = self.client.get(f'/api/v1/tenants/{self.tenant.pk}/')
+        update = self.client.patch(
+            f'/api/v1/tenants/{self.tenant.pk}/',
+            {'phone_number': '+254711111111'},
+            format='json',
+        )
+
+        self.assertEqual(listing.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(detail.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(update.status_code, status.HTTP_403_FORBIDDEN)

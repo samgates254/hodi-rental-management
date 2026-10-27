@@ -20,7 +20,7 @@
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 5;
-  width: 248px;
+  width: var(--hodi-sidebar-width);
   display: flex;
   flex-direction: column;
   padding: 28px 18px 20px;
@@ -43,7 +43,7 @@
 
 .landlord-sidebar-label {
   margin: 52px 12px 12px;
-  color: #9ca7b5;
+  color: var(--hodi-gold);
 }
 
 .landlord-nav {
@@ -61,17 +61,18 @@
   color: #cbd2da;
   text-decoration: none;
   font-size: 14px;
-  transition: background .18s ease, color .18s ease;
+  transition: background var(--hodi-transition-fast) ease, color var(--hodi-transition-fast) ease;
 }
 
 .landlord-nav a:hover,
 .landlord-nav a.is-active {
-  background: #293542;
+  background: rgb(255 255 255 / 0.08);
   color: #fff;
 }
 
 .landlord-nav a.is-active {
-  box-shadow: inset 3px 0 var(--landlord-teal);
+  background: rgb(255 255 255 / 0.08);
+  box-shadow: inset 3px 0 var(--hodi-gold);
 }
 
 .landlord-sidebar-bottom {
@@ -92,16 +93,16 @@
 }
 
 .landlord-main {
-  width: calc(100% - 248px);
-  max-width: 1600px;
+  width: calc(100% - var(--hodi-sidebar-width));
+  max-width: var(--hodi-content-wide);
   min-width: 0;
-  margin-left: 248px;
+  margin-left: var(--hodi-sidebar-width);
   overflow-x: clip;
-  padding: 0 42px 30px;
+  padding: 0 var(--hodi-workspace-gutter) 30px;
 }
 
 .landlord-topbar {
-  min-height: 100px;
+  min-height: var(--hodi-workspace-header-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -118,7 +119,7 @@
 .landlord-topbar h1 {
   margin: 4px 0 0;
   font-family: var(--font-display, Georgia), Georgia, serif;
-  font-size: 25px;
+  font-size: var(--hodi-type-page-title);
   font-weight: 600;
   letter-spacing: -.5px;
 }
@@ -144,7 +145,7 @@
 }
 
 .landlord-preview-banner a {
-  color: inherit;
+  color: var(--hodi-brand);
   font-weight: 700;
   text-decoration: underline;
   white-space: nowrap;
@@ -161,24 +162,24 @@
 
 .landlord-org-select select {
   min-width: 170px;
-  height: 44px;
+  min-height: var(--hodi-control-height);
   padding: 0 30px 0 12px;
 }
 
 .landlord-button,
 .landlord-icon-button {
-  min-height: 44px;
+  min-height: var(--hodi-control-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--hodi-radius-control);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
   font-weight: 650;
-  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+  transition: background var(--hodi-transition-fast) ease, border-color var(--hodi-transition-fast) ease, transform var(--hodi-transition-fast) ease;
 }
 
 .landlord-button {
@@ -296,7 +297,12 @@
   border-radius: 12px;
   background: var(--landlord-paper);
   box-shadow: 0 1px 2px rgb(23 32 51 / .025);
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition: border-color var(--hodi-transition-fast) ease, box-shadow var(--hodi-transition-fast) ease, transform var(--hodi-transition-fast) ease;
+}
+
+a.landlord-metric-card {
+  color: inherit;
+  text-decoration: none;
 }
 
 .landlord-metric-card:hover,
@@ -315,9 +321,10 @@
 
 .landlord-metric-card strong {
   margin-top: 15px;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -.7px;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 2rem;
+  font-weight: 460;
+  letter-spacing: -0.04em;
 }
 
 .landlord-metric-card small {
@@ -333,6 +340,53 @@
 
 .landlord-metric-card--accent strong {
   font-size: 24px;
+}
+
+.landlord-attention {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landlord-attention a {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--hodi-warning) 38%, var(--hodi-border));
+  border-radius: 10px;
+  background: var(--hodi-warning-soft);
+  color: var(--hodi-text);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.landlord-attention a.is-quiet {
+  border-color: var(--hodi-border);
+  background: var(--hodi-surface);
+}
+
+.landlord-attention a:hover,
+.landlord-attention a:focus-visible {
+  border-color: var(--hodi-brand);
+}
+
+.landlord-portfolio-search {
+  display: grid;
+  margin-top: 16px;
+}
+
+.landlord-portfolio-search input {
+  width: min(100%, 28rem);
+  min-height: var(--hodi-control-height);
+  padding: 0 12px;
+  border: 1px solid var(--hodi-border);
+  border-radius: 8px;
+  background: var(--hodi-canvas);
+  color: var(--hodi-text);
 }
 
 .landlord-section {
@@ -458,7 +512,10 @@
 
 .landlord-property-card h3 {
   margin: 17px 0 5px;
-  font-size: 16px;
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-size: 1.45rem;
+  font-weight: 460;
+  letter-spacing: -0.03em;
 }
 
 .landlord-property-card > p {
@@ -487,8 +544,8 @@
   display: inline-flex;
   padding: 5px 8px;
   border-radius: 20px;
-  background: var(--hodi-surface-raised);
-  color: var(--hodi-muted);
+  background: var(--hodi-neutral-soft);
+  color: var(--hodi-neutral);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -507,7 +564,7 @@
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-inline: contain;
   border: 1px solid var(--landlord-line);
-  border-radius: 12px;
+  border-radius: var(--hodi-radius-panel);
   background: var(--landlord-paper);
 }
 
@@ -524,7 +581,7 @@
 }
 
 .landlord-table th {
-  padding: 14px 16px;
+  padding: var(--hodi-table-cell-y) var(--hodi-table-cell-x);
   background: var(--hodi-surface-raised);
   color: var(--hodi-muted);
   font-size: 11px;
@@ -534,8 +591,8 @@
 }
 
 .landlord-table td {
-  padding: 15px 16px;
-  border-top: 1px solid var(--hodi-border);
+  padding: var(--hodi-table-cell-y) var(--hodi-table-cell-x);
+  border-top: var(--hodi-border-width) solid var(--hodi-border);
   color: var(--hodi-muted);
   font-size: 13px;
 }
@@ -659,10 +716,10 @@
 .landlord-form-grid input,
 .landlord-form-grid select,
 .landlord-form-grid textarea {
-  height: 44px;
+  min-height: var(--hodi-control-height);
   padding: 0 11px;
   border: 1px solid var(--landlord-line);
-  border-radius: 8px;
+  border-radius: var(--hodi-radius-control);
   background: var(--hodi-surface);
   color: var(--landlord-ink);
   font: inherit;
@@ -828,8 +885,8 @@
 }
 
 .landlord-nav a:focus-visible {
-  outline: 2px solid #c6a66b;
-  outline-offset: 2px;
+  outline: var(--hodi-focus-width) solid var(--hodi-gold);
+  outline-offset: var(--hodi-focus-offset);
 }
 
 .ops-mast {
@@ -862,7 +919,7 @@
 .ops-mast h2 {
   margin: 8px 0 6px;
   font-family: Fraunces, "Iowan Old Style", Georgia, serif;
-  font-size: clamp(1.6rem, 2.5vw, 2.2rem);
+  font-size: var(--hodi-type-workspace-summary);
   font-weight: 460;
   letter-spacing: -0.03em;
   line-height: 1.15;
@@ -881,7 +938,7 @@
 
 @media (max-width: 1100px) {
   .landlord-main {
-    padding-inline: 26px;
+    padding-inline: var(--hodi-space-6);
   }
 
   .landlord-metrics {
@@ -1088,10 +1145,9 @@
   }
 
   .landlord-topbar h1 {
-    max-width: 135px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 }
 
@@ -1127,7 +1183,7 @@
 .landlord-table th {
   position: sticky;
   top: 0;
-  background: var(--hodi-ivory, #f7f5f0);
+  background: var(--hodi-surface-raised);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1136,7 +1192,7 @@
 .landlord-inline-form,
 .landlord-empty-state,
 .landlord-empty-workspace {
-  background: var(--hodi-ivory, #f7f5f0);
+  background: var(--hodi-surface);
 }
 
 .landlord-form input,
@@ -1188,4 +1244,26 @@
   border-color: color-mix(in srgb, var(--hodi-success) 30%, var(--hodi-border));
   background: var(--hodi-success-soft);
   color: var(--hodi-success);
+}
+
+.landlord-section-heading h2,
+.landlord-topbar h1 {
+  font-family: var(--hodi-editorial), Georgia, serif;
+  font-weight: 460;
+  letter-spacing: -0.035em;
+}
+
+.landlord-empty-state,
+.landlord-empty-workspace {
+  border-top: 2px solid var(--hodi-gold);
+}
+
+.landlord-attention a,
+.landlord-section-count,
+.landlord-status {
+  border-radius: 0;
+}
+
+.landlord-table tbody tr:hover {
+  background: color-mix(in srgb, var(--hodi-brand-soft) 55%, transparent);
 }

@@ -397,6 +397,86 @@ class MpesaInitiateApiTests(TestCase):
         self.assertEqual(MpesaAttempt.objects.count(), 1)
         self.assertEqual(len(fake.stk_calls), 1)
 
+    def test_fresh_idempotency_keys_cannot_bypass_prompt_limit_and_retry_stays_idempotent(self):
+        self.client.force_authenticate(self.tenant_user)
+        fake = FakeMpesaClient()
+        first_key = str(uuid.uuid4())
+        first_attempt_id = None
+        with self._patch_client(fake):
+            for index in range(5):
+                key = first_key if index == 0 else str(uuid.uuid4())
+                response = self.client.post(self.url, {
+                    'amount_cents': 10000,
+                    'idempotency_key': key,
+                    'phone_number': f'2547000001{index:02d}',
+                }, format='json')
+                self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+                if index == 0:
+                    first_attempt_id = response.data['id']
+                fake.result = _accepted_result(
+                    merchant_request_id=f'm-{index + 2}',
+                    checkout_request_id=f'c-{index + 2}',
+                )
+
+            limited = self.client.post(self.url, {
+                'amount_cents': 10000,
+                'idempotency_key': str(uuid.uuid4()),
+            }, format='json')
+            retried = self.client.post(self.url, {
+                'amount_cents': 10000,
+                'idempotency_key': first_key,
+                'phone_number': '254700000100',
+            }, format='json')
+
+        self.assertEqual(limited.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(retried.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(retried.data['id'], first_attempt_id)
+        self.assertEqual(MpesaAttempt.objects.filter(tenant=self.tenant).count(), 5)
+        self.assertEqual(len(fake.stk_calls), 5)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_destination_prompt_limit_preserves_alternate_payer_phone_and_idempotency(self):
+        self.client.force_authenticate(self.tenant_user)
+        fake = FakeMpesaClient()
+        first_key = str(uuid.uuid4())
+        first_attempt_id = None
+        with self._patch_client(fake):
+            for index in range(3):
+                key = first_key if index == 0 else str(uuid.uuid4())
+                response = self.client.post(self.url, {
+                    'amount_cents': 10000,
+                    'idempotency_key': key,
+                }, format='json')
+                self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+                if index == 0:
+                    first_attempt_id = response.data['id']
+                fake.result = _accepted_result(
+                    merchant_request_id=f'dest-m-{index + 2}',
+                    checkout_request_id=f'dest-c-{index + 2}',
+                )
+
+            blocked = self.client.post(self.url, {
+                'amount_cents': 10000,
+                'idempotency_key': str(uuid.uuid4()),
+            }, format='json')
+            alternate = self.client.post(self.url, {
+                'amount_cents': 10000,
+                'idempotency_key': str(uuid.uuid4()),
+                'phone_number': '254700000099',
+            }, format='json')
+            retried = self.client.post(self.url, {
+                'amount_cents': 10000,
+                'idempotency_key': first_key,
+            }, format='json')
+
+        self.assertEqual(blocked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(alternate.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(retried.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(retried.data['id'], first_attempt_id)
+        self.assertEqual(MpesaAttempt.objects.filter(tenant=self.tenant).count(), 4)
+        self.assertEqual(len(fake.stk_calls), 4)
+        self.assertEqual(Payment.objects.count(), 0)
+
     def test_idempotency_key_cannot_be_reused_for_different_payment(self):
         self.client.force_authenticate(self.tenant_user)
         fake = FakeMpesaClient()

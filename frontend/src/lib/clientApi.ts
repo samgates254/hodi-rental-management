@@ -145,7 +145,7 @@ function formatErrorDetail(payload: unknown, status: number, statusText: string)
   if (status >= 500) {
     // Next rewrite / Django HTML error pages are not useful to show raw.
     if (typeof payload === "string" && /<!DOCTYPE|Internal Server Error/i.test(payload)) {
-      return "Server error during signup. Confirm Django is running on http://127.0.0.1:8000 and check the Django terminal for the traceback.";
+      return "An unexpected server error occurred. Please try again later.";
     }
   }
 

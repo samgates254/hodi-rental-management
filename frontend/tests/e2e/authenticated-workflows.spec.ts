@@ -241,6 +241,86 @@ test("tenant requests persist, utilities are scoped, and seller status changes p
   await Promise.all([tenant.close(), otherTenant.close(), owner.close(), otherOwner.close()]);
 });
 
+test("technicians load only assigned work and maintenance status is not duplicated", async ({ browser, baseURL }) => {
+  const tenant = await browser.newPage();
+  await signIn(tenant, "tenant", "tenant");
+  const issueTitle = `E2E linked repair ${crypto.randomUUID()}`;
+  const submitted = await api(tenant, "/api/v1/maintenance/issues/", "POST", {
+    title: issueTitle,
+    category: "PLUMBING",
+    priority: "NORMAL",
+    description: "E2E linked issue and request.",
+  });
+  expect(submitted.status).toBe(201);
+  expect((submitted.payload as { operational_request_id?: number }).operational_request_id).toBeTruthy();
+
+  await tenant.goto(`${baseURL}/clients#maintenance`);
+  await expect(tenant.locator("#maintenance .dashboard-issue-list").getByText(issueTitle, { exact: true })).toHaveCount(1);
+  await expect(tenant.locator("#work-orders")).toHaveCount(0);
+  await expect(tenant.getByRole("heading", { name: "Request status", exact: true })).toHaveCount(0);
+
+  const caretaker = await browser.newPage();
+  await authenticateWithRealApi(caretaker, "caretaker");
+  let queueRequests = 0;
+  caretaker.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/v1/maintenance/requests/queue/") queueRequests += 1;
+  });
+  await caretaker.goto(`${baseURL}/caretakers#issues`);
+  const residentReport = caretaker.locator(".caretaker-issue").filter({ hasText: issueTitle });
+  await expect(residentReport).toContainText("This repair uses the unified work order");
+  await expect(residentReport.locator(".caretaker-status")).toHaveCount(0);
+  const queueRow = caretaker.locator("#maintenance-requests tbody tr").filter({ hasText: issueTitle });
+  await expect(queueRow).toContainText("Open");
+  await expect.poll(() => queueRequests).toBeGreaterThan(0);
+
+  const technician = await browser.newPage();
+  await authenticateWithRealApi(technician, "technician");
+  let technicianQueueRequests = 0;
+  technician.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/v1/maintenance/requests/queue/") technicianQueueRequests += 1;
+  });
+  await technician.goto(`${baseURL}/technicians`);
+  await expect(technician.locator("#maintenance-requests tbody")).toContainText("E2E sink repair");
+  await expect.poll(() => technicianQueueRequests).toBe(0);
+  await technician.setViewportSize({ width: 390, height: 844 });
+  const mobileWorkCard = technician.locator("#maintenance-requests article").filter({ hasText: "E2E sink repair" });
+  await expect(mobileWorkCard).toBeVisible();
+  await expect(mobileWorkCard).toContainText("Status");
+  await expect(mobileWorkCard).toContainText("Open");
+  const assignedWork = await api(technician, "/api/v1/maintenance/requests/");
+  expect(assignedWork.status).toBe(200);
+  expect((assignedWork.payload as Array<{ id: number }>).map(row => row.id)).toEqual([fixture.maintenance_request_id]);
+  const forbiddenQueue = await api(technician, "/api/v1/maintenance/requests/queue/");
+  expect(forbiddenQueue.status).toBe(403);
+
+  const emptyTechnician = await browser.newPage();
+  await authenticateWithRealApi(emptyTechnician, "empty_technician");
+  await emptyTechnician.goto(`${baseURL}/technicians`);
+  await expect(emptyTechnician.getByText("No assigned work", { exact: true })).toBeVisible();
+
+  const loadingTechnician = await browser.newPage();
+  await authenticateWithRealApi(loadingTechnician, "empty_technician");
+  await loadingTechnician.route("**/api/v1/maintenance/requests/", async route => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await loadingTechnician.goto(`${baseURL}/technicians`);
+  await expect(loadingTechnician.getByText("Loading maintenance requests…", { exact: true })).toBeVisible();
+  await expect(loadingTechnician.getByText("No assigned work", { exact: true })).toBeVisible();
+
+  const forbiddenPanel = await browser.newPage();
+  await authenticateWithRealApi(forbiddenPanel, "empty_technician");
+  await forbiddenPanel.route("**/api/v1/maintenance/requests/", route => route.fulfill({
+    status: 403,
+    contentType: "application/json",
+    body: JSON.stringify({ detail: "You do not have access to assigned maintenance requests." }),
+  }));
+  await forbiddenPanel.goto(`${baseURL}/technicians`);
+  await expect(forbiddenPanel.locator("p.ops-alert")).toContainText("access to assigned maintenance requests");
+
+  await Promise.all([tenant.close(), caretaker.close(), technician.close(), emptyTechnician.close(), loadingTechnician.close(), forbiddenPanel.close()]);
+});
+
 test("purchase, price history and receipt acknowledgement enforce ownership and separation of duties", async ({ browser, baseURL }) => {
   const owner = await browser.newPage();
   await signIn(owner, "owner", "landlord", false);
@@ -287,6 +367,20 @@ test("purchase, price history and receipt acknowledgement enforce ownership and 
   await owner.close();
   await caretaker.close();
   void baseURL;
+});
+
+test("owner accountant invitation form confirms submission and clears the email", async ({ browser, baseURL }) => {
+  const owner = await browser.newPage();
+  await signIn(owner, "owner", "landlord", false);
+  await owner.evaluate(() => sessionStorage.setItem("hodi_account_type", "OWNER"));
+  await owner.goto(`${baseURL}/landlords`);
+  await expect(owner.getByRole("heading", { name: "HODI E2E Demo Organisation", level: 2 })).toBeVisible();
+  const uiInviteEmail = "impostor@hodi-e2e.invalid";
+  await owner.getByLabel("Account email").fill(uiInviteEmail);
+  await owner.getByRole("button", { name: "Send invitation" }).click();
+  await expect(owner.getByText(`Accountant invitation sent to ${uiInviteEmail}`)).toBeVisible();
+  await expect(owner.getByLabel("Account email")).toHaveValue("");
+  await owner.close();
 });
 
 test("accountant invitation acceptance is identity-bound, reports real client data, and revocation removes access", async ({ browser, baseURL }) => {
